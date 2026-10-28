@@ -1,0 +1,19 @@
+{
+  "kbId": "lab0-handbook",
+  "title": "Lab0 handbook",
+  "purpose": "How the synthetic lab0 handles samples, codes its sleep diary and onboards research assistants. For lab members with a practical question.",
+  "coverageQuestions": [
+    "How long are samples kept in the freezer?",
+    "How is a skipped item coded?",
+    "Which sleep_latency values are flagged for review?",
+    "What training do new research assistants complete in the first week?",
+    "Who do I call when the freezer alarm sounds?",
+    "When do dry ice shipments leave?"
+  ],
+  "sources": [
+    { "sourceId": "sop", "kind": "file", "location": "sop-freezer.md", "cls": "D1", "licence": "internal-only" },
+    { "sourceId": "codebook", "kind": "file", "location": "codebook-sleep-diary.md", "cls": "D1", "licence": "internal-only" },
+    { "sourceId": "onboarding", "kind": "file", "location": "onboarding-ra.md", "cls": "D1", "licence": "internal-only" }
+  ],
+  "compiler": { "endpointId": "local", "modelId": "scripted-1", "params": { "temperature": 0, "maxOutputTokens": 8192 } }
+}

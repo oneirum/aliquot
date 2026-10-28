@@ -1,0 +1,39 @@
+# lab.toml: where this lab says what is where. Copy to lab.toml (gitignored).
+# Every outbound destination has a placement, and the placement alone decides
+# which data classes may go there. There is no field for a ceiling.
+
+[database]
+url_env = "DATABASE_URL"           # e.g. postgres://postgres:labh@localhost:5432/labh
+
+[store]
+placement = "lab"                  # where Postgres runs; a hosted database cannot hold D3 and refuses at startup
+key_env = "LABH_PAYLOAD_KEY"       # 64 hex characters: openssl rand -hex 32
+
+[endpoints.local]
+base_url = "http://localhost:11434/v1"   # Ollama on the host; use http://host.docker.internal:11434/v1 from inside docker
+placement = "lab"                        # lab hardware: up to D3
+
+# [endpoints.openrouter]
+# base_url = "https://openrouter.ai/api/v1"
+# placement = "zdr"                      # up to D1
+# api_key_env = "OPENROUTER_API_KEY"
+# provider = { zdr = true, data_collection = "deny", allow_fallbacks = false, only = ["anthropic"] }
+
+[surfaces.web]
+placement = "lab"
+port = 3000
+
+[hosts]
+"api.openalex.org" = "public"            # tools may only reach listed hosts; unlisted hosts are public (D0)
+
+[policy]
+review_confidential = "refuse"           # or "lab-only"
+participant_id_patterns = ["\\bP-\\d{5}\\b"]   # anything matching is D3
+
+# An agent published in the studio answers in the channels it names (surface:channel, for example web:lab).
+# Until the router arrives, the fixture agent answers in every other channel. Knowledge bases come from fixtures.
+[agents]
+fixtures = ["fixtures/agent.json"]
+
+[knowledge_bases]
+fixtures = ["fixtures/kb.json"]

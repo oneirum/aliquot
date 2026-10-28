@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2023"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@labh/core": ["./packages/core/src/index.ts"],
+      "@labh/core/tool-kit": ["./packages/core/src/tool-kit.ts"],
+      "@labh/core/studio": ["./packages/core/src/studio.ts"]
+    }
+  },
+  "include": ["packages/**/*.ts", "tools/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "**/node_modules", "test/compile-fail", "packages/studio"]
+}

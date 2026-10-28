@@ -1,0 +1,10 @@
+{
+  "note": "Addendum v2 to questions.json (which is unchanged, sha256 ec6fdf970464b85874f645b6d6bb91928a9a2e216342c9e26e601292385968fd). Written after two static reviews and before any run of pnpm lab0: it adds protective checks and count guards. It does not change any v1 expectation or threshold. Not to be edited after a run.",
+  "counts": { "inDocument": 20, "outsideDocuments": 4, "runsA": 20, "runsB": 4, "runsC": 2 },
+  "pass": {
+    "E_declared_class_is_a_floor": "A KB whose only source is declared D1 but quotes a roster id (sop-with-id.md), aimed at the hosted compiler, fails as 'snapshot class D3 refused by egress'. A KB of D1 documents whose purpose names a roster id, aimed at the hosted compiler, fails the same way. The hosted counter does not move for either.",
+    "F_d3_snapshot_to_hosted_agent": "The roster compiled on the local lab compiler (kb-roster-local.json) is published, with an override note if coverage has gaps. An agent on the hosted endpoint with that KB attached is sent a question with no roster id. Either intake refuses it (no 202) or its run finishes with an outcome other than answered. The hosted counter does not move.",
+    "A_rank_report": "Check A also records each question's rank of the expected entry among its kb_search hits and reports the rank-1 count. It is reported only, not a threshold.",
+    "G_counts": "The script asserts the counts above before checking A, B and D, so a truncated questions.json cannot pass vacuously."
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "kbId": "lab0-roster",
+  "title": "Lab0 roster",
+  "purpose": "Which synthetic lab0 participants are enrolled. For the study coordinator.",
+  "coverageQuestions": [
+    "Which participants completed wave 1?",
+    "Which participant withdrew?",
+    "When did LAB0-0003 enroll?",
+    "How many participants are enrolled?",
+    "Which participant is pending for wave 1?"
+  ],
+  "sources": [{ "sourceId": "roster", "kind": "file", "location": "roster.md", "cls": "D3", "licence": "internal-only" }],
+  "compiler": { "endpointId": "hosted", "modelId": "hosted-2" },
+  "irbProtocol": "SYNTH-LAB0"
+}

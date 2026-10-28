@@ -1,0 +1,14 @@
+{
+  "kbId": "lab0-leak-purpose",
+  "title": "Lab0 onboarding",
+  "purpose": "Onboarding help, written for the follow-up with LAB0-0001.",
+  "coverageQuestions": [
+    "When is lab meeting?",
+    "Where do I request a keycard?",
+    "When are timesheets due?",
+    "Who answers questions about the actigraphy watches?",
+    "What training do new research assistants complete in the first week?"
+  ],
+  "sources": [{ "sourceId": "onboarding", "kind": "file", "location": "onboarding-ra.md", "cls": "D1", "licence": "internal-only" }],
+  "compiler": { "endpointId": "hosted", "modelId": "hosted-2" }
+}

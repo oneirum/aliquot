@@ -1,0 +1,18 @@
+# docker compose up -d postgres: the database the harness and its checks use.
+# The worker, web door and studio run on the host for now (see README); container
+# images for them are on the roadmap. Ollama is the optional local model; drop it
+# when the lab points endpoints.local at its own vLLM box.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment: { POSTGRES_PASSWORD: labh, POSTGRES_DB: labh }
+    volumes: [pg:/var/lib/postgresql/data]
+    ports: ["${LABH_PG_PORT:-5432}:5432"]    # host-run processes and the checks reach it here; LABH_PG_PORT moves it
+
+  ollama:
+    image: ollama/ollama
+    profiles: [ollama]                       # docker compose --profile ollama up -d
+    volumes: [models:/root/.ollama]
+    ports: ["11434:11434"]
+
+volumes: { pg: {}, models: {} }

@@ -1,0 +1,15 @@
+{
+  "kbId": "visit-log",
+  "title": "Visit log",
+  "purpose": "Which participants completed or missed visits this week. For the study coordinator.",
+  "coverageQuestions": [
+    "Which participant completed visit 2?",
+    "Which participant missed visit 1?",
+    "On which day was visit 2 completed?",
+    "Was the missed visit rescheduled?",
+    "How many visits happened this week?"
+  ],
+  "sources": [{ "sourceId": "visits", "kind": "file", "location": "visit-log.md", "cls": "D3", "licence": "internal-only" }],
+  "compiler": { "endpointId": "hosted", "modelId": "hosted-2" },
+  "irbProtocol": "SYNTH-0001"
+}

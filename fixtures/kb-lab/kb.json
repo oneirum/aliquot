@@ -1,0 +1,19 @@
+{
+  "kbId": "lab-handbook",
+  "title": "Lab handbook",
+  "purpose": "How the lab handles samples, codes its surveys and onboards research assistants. For lab members with a practical question about procedure.",
+  "coverageQuestions": [
+    "How long are intake samples kept in the freezer?",
+    "How are missing mood_score responses coded?",
+    "Which sleep_hours values are treated as entry errors?",
+    "What training do new research assistants complete in their first week?",
+    "Who should get questions about equipment?",
+    "What is the parking reimbursement rate for visitors?"
+  ],
+  "sources": [
+    { "sourceId": "sop", "kind": "file", "location": "sop-sample-intake.md", "cls": "D1", "licence": "internal-only" },
+    { "sourceId": "codebook", "kind": "file", "location": "codebook-mood-survey.md", "cls": "D2", "licence": "internal-only" },
+    { "sourceId": "onboarding", "kind": "file", "location": "onboarding-note.md", "cls": "D1", "licence": "open" }
+  ],
+  "compiler": { "endpointId": "local", "modelId": "scripted-1", "params": { "temperature": 0, "maxOutputTokens": 8192 } }
+}

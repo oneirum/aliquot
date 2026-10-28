@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+lab.toml
+!lab.example.toml
+.DS_Store
+.audit/
+.slice1/
+.unit3/
+.lab0/
+.unit2/

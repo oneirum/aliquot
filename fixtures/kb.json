@@ -1,0 +1,31 @@
+{
+  "kbId": "handbook",
+  "purpose": "The lab handbook: how the lab runs day to day.",
+  "cls": "D1",
+  "entries": [
+    {
+      "path": "office-hours.md",
+      "title": "Office hours",
+      "body": "The lab is open 9 to 5 on weekdays. The PI holds office hours on Tuesday and Thursday from 2 to 4 pm in room 312. Book a slot in the shared calendar.",
+      "facts": [{ "text": "PI office hours are Tuesday and Thursday 2 to 4 pm.", "sources": [{ "sourceId": "handbook-2026", "locator": "section 1.2" }] }]
+    },
+    {
+      "path": "data-classes.md",
+      "title": "Data classes",
+      "body": "D0 is public. D1 is internal. D2 is confidential. D3 is restricted and includes participant identifiers such as P-12345 codes and any health record. R is review-confidential and never leaves the lab. Restricted data never goes to a hosted model.",
+      "facts": [{ "text": "Participant identifiers are D3.", "sources": [{ "sourceId": "handbook-2026", "locator": "section 4" }] }]
+    },
+    {
+      "path": "onboarding.md",
+      "title": "Onboarding",
+      "body": "New members complete the CITI human subjects training in their first week, get a lab drive account, and read the data classes page before touching any dataset.",
+      "facts": []
+    },
+    {
+      "path": "equipment.md",
+      "title": "Equipment",
+      "body": "The eye tracker lives in room 310 and is booked through the equipment calendar. Return cables to the labelled drawer. Report faults to the lab manager.",
+      "facts": []
+    }
+  ]
+}

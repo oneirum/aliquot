@@ -1,0 +1,25 @@
+{
+  "name": "aliquot",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/studio",
+    "test": "node --test --test-concurrency=1 'test/**/*.test.ts'",
+    "slice1": "node scripts/slice1.ts",
+    "unit3": "node scripts/unit3.ts",
+    "lab0": "node scripts/lab0.ts",
+    "unit2": "node scripts/unit2.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "@types/pg": "8.15.5",
+    "playwright": "1.64.1",
+    "typescript": "5.9.3",
+    "zod": "4.6.7"
+  },
+  "license": "Apache-2.0"
+}

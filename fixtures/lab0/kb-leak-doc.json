@@ -1,0 +1,14 @@
+{
+  "kbId": "lab0-leak-doc",
+  "title": "Lab0 freezer log",
+  "purpose": "Freezer log notes for lab members.",
+  "coverageQuestions": [
+    "Which tube was relabelled?",
+    "Why was the tube relabelled?",
+    "Where did the old label go?",
+    "What smudged on the tube?",
+    "Which binder holds the old label?"
+  ],
+  "sources": [{ "sourceId": "freezerlog", "kind": "file", "location": "sop-with-id.md", "cls": "D1", "licence": "internal-only" }],
+  "compiler": { "endpointId": "hosted", "modelId": "hosted-2" }
+}

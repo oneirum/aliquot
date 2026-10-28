@@ -1,0 +1,23 @@
+{
+  "agentId": "handbook",
+  "name": "Lab handbook",
+  "description": "Answers questions about the lab handbook: data classes, office hours, onboarding and equipment. Use when a lab member asks how something in the lab works. Not for literature search or statistics.",
+  "owner": "pi",
+  "maintainers": ["ra-1"],
+  "instructions": "You answer questions about the lab handbook. Always call kb_search first with the user's question, then kb_read the best matching paths, and answer from those entries only. If they do not cover the question, say so. Keep answers under 80 words.",
+  "instructionsClass": "D1",
+  "model": { "endpointId": "local", "modelId": "scripted-1", "params": { "temperature": 0, "maxOutputTokens": 512 } },
+  "skills": [],
+  "knowledgeBases": ["handbook"],
+  "tools": [{ "name": "kb_search", "scopes": [] }, { "name": "kb_read", "scopes": [] }],
+  "audience": { "t": "lab" },
+  "channels": [],
+  "autoRespond": false,
+  "routable": true,
+  "sandbox": { "enabled": false },
+  "kind": "interactive",
+  "ceiling": "D3",
+  "provenancePolicy": { "numbersMustTrace": false, "claimsLinkEvidence": false },
+  "evals": [],
+  "sampleQuestions": ["What are the office hours?", "Which data class is a participant id?"]
+}

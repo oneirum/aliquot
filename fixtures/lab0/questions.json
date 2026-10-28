@@ -1,0 +1,42 @@
+{
+  "note": "Pre-registered for pnpm lab0 before its first run. The expected paths, the out-of-document questions and the pass rules are not to be edited after a run; a miss is a result. The paths follow the scripted compiler fake: one entry per '## ' section at <sourceId>/<slug of heading>.md.",
+  "inDocument": [
+    { "id": "Q01", "question": "When do samples arrive at the loading dock?", "expected": "sop/receiving-samples.md" },
+    { "id": "Q02", "question": "Can I use a handwritten label on a cryovial?", "expected": "sop/labelling-tubes.md" },
+    { "id": "Q03", "question": "Which freezer rack holds the aliquots?", "expected": "sop/freezer-storage.md" },
+    { "id": "Q04", "question": "How long should I thaw an aliquot on wet ice?", "expected": "sop/thawing-samples.md" },
+    { "id": "Q05", "question": "Who do I call when the freezer alarm sounds?", "expected": "sop/freezer-alarm.md" },
+    { "id": "Q06", "question": "Which bin do expired samples go into?", "expected": "sop/sample-disposal.md" },
+    { "id": "Q07", "question": "On which day do dry ice shipments leave?", "expected": "sop/shipping-samples.md" },
+    { "id": "Q08", "question": "What clock format is bedtime recorded in?", "expected": "codebook/bedtime.md" },
+    { "id": "Q09", "question": "Which sleep_latency values are flagged for review?", "expected": "codebook/sleep-latency.md" },
+    { "id": "Q10", "question": "What range can the wakings count take?", "expected": "codebook/night-wakings.md" },
+    { "id": "Q11", "question": "How is a skipped item coded?", "expected": "codebook/missing-values.md" },
+    { "id": "Q12", "question": "What unit is caffeine_mg in?", "expected": "codebook/caffeine-intake.md" },
+    { "id": "Q13", "question": "When does a diary day count as complete?", "expected": "codebook/diary-compliance.md" },
+    { "id": "Q14", "question": "What suffix do variable names carry for the wave?", "expected": "codebook/variable-naming.md" },
+    { "id": "Q15", "question": "What training do new research assistants complete in the first week?", "expected": "onboarding/first-week-training.md" },
+    { "id": "Q16", "question": "Where do I request a keycard?", "expected": "onboarding/building-access.md" },
+    { "id": "Q17", "question": "When is lab meeting?", "expected": "onboarding/lab-meetings.md" },
+    { "id": "Q18", "question": "When are timesheets due in the payroll portal?", "expected": "onboarding/timesheets.md" },
+    { "id": "Q19", "question": "Can restricted data be opened on a laptop?", "expected": "onboarding/computer-accounts.md" },
+    { "id": "Q20", "question": "Who answers questions about the actigraphy watches?", "expected": "onboarding/equipment-questions.md" }
+  ],
+  "outsideDocuments": [
+    { "id": "O1", "question": "Parking permit renewal deadline?" },
+    { "id": "O2", "question": "Conference travel reimbursement policy?" },
+    { "id": "O3", "question": "Vacation approval process?" },
+    { "id": "O4", "question": "Printer toner replacement?" }
+  ],
+  "restricted": {
+    "pattern": "\\bLAB0-\\d{4}\\b",
+    "message": "Is LAB0-0003 still pending for wave 1?",
+    "control": "When is lab meeting?"
+  },
+  "pass": {
+    "A_citation": "Each of the 20 in-document runs finishes answered, its kb_search tool.completed.retrieved holds the expected entry's hash, and its answer text names the expected path. Threshold 20 of 20.",
+    "B_gap": "Each out-of-document question shares no bm25 token with the three documents (precondition). As a run, its kb_search retrieves no entry. As coverage questions in a second definition, all 4 are gaps, no compiler request mentions them, and publish is refused naming exactly those 4 while the published head does not move. Threshold 4 of 4 on every part.",
+    "C_restricted": "A compile of the D3 roster aimed at the hosted endpoint fails as refused by egress, and the roster-id message to an agent on the hosted endpoint finishes refused. The hosted fake's request counter does not move for either. A D1 control message to the same agent moves it by exactly 1, so the counter is live. Over the whole script the hosted fake sees exactly 1 request.",
+    "D_record": "Every run started in the script has run.started, run.finished and verifyChain(events) === null, and run.started.agent is a 64-hex hash present in agent_versions. Every run of the same agent and published snapshot carries the same hash. Threshold: every run."
+  }
+}
