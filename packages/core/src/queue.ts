@@ -33,6 +33,10 @@ import type { ThreadKey } from "./record.ts";
 
 export type JobKind = "run" | "publish-check" | "kb-compile" | "eval-batch" | "schedule-tick";
 
+/** Which worker binary executes a run job. A payload without one is a chat run. */
+export const ENGINES = ["chat", "agent-cli"] as const;
+export type Engine = (typeof ENGINES)[number];
+
 export interface JobKey {
   readonly kind: JobKind;
   readonly key: string;
@@ -69,7 +73,8 @@ export function retryBackoffMs(attempts: number): number {
 export interface Queue {
   /** Returns the existing job id when the key already exists. */
   enqueue(key: JobKey, thread: ThreadKey | null, payload: unknown): Promise<{ readonly id: string; readonly created: boolean }>;
-  claim(workerId: string, kinds: readonly JobKind[], leaseMs: number): Promise<LeasedJob | null>;
+  /** Run jobs are claimed only by a worker of their engine; other kinds by any worker that handles them. */
+  claim(workerId: string, kinds: readonly JobKind[], leaseMs: number, engine?: Engine): Promise<LeasedJob | null>;
   /** False when the lease moved: the caller must stop touching the job. */
   heartbeat(job: LeasedJob, leaseMs: number): Promise<boolean>;
   complete(job: LeasedJob, status: "done" | "failed"): Promise<boolean>;
@@ -85,6 +90,7 @@ const CLAIM = `
   with candidate as (
     select j.id from jobs j
     where j.kind = any($1::text[])
+      and (j.kind <> 'run' or coalesce(j.payload->>'engine', 'chat') = $4)
       and j.status in ('queued', 'leased')
       and j.not_before <= now()
       and (j.status = 'queued' or j.lease_until < now())
@@ -136,10 +142,10 @@ export function createQueue(db: Db): Queue {
       const existing = await db.query<{ id: string }>("select id from jobs where key = $1", [key.key]);
       return { id: existing.rows[0]!.id, created: false };
     },
-    async claim(workerId, kinds, leaseMs) {
+    async claim(workerId, kinds, leaseMs, engine = "chat") {
       let res;
       try {
-        res = await db.query<JobRow>(CLAIM, [kinds, workerId, leaseMs]);
+        res = await db.query<JobRow>(CLAIM, [kinds, workerId, leaseMs, engine]);
       } catch (err) {
         if ((err as { code?: string; constraint?: string }).code === "23505" && (err as { constraint?: string }).constraint === "one_leased_run_per_thread") return null;
         throw err;
@@ -164,6 +170,7 @@ export function createQueue(db: Db): Queue {
 }
 
 export interface WorkerOptions {
+  readonly engine?: Engine;
   readonly leaseMs: number;
   readonly pollMs: number;
   readonly signal: AbortSignal;
@@ -195,7 +202,7 @@ export async function runWorker(workerId: string, db: Db, queue: Queue, handlers
     });
   try {
     while (!opts.signal.aborted) {
-      const job = await queue.claim(workerId, kinds, opts.leaseMs);
+      const job = await queue.claim(workerId, kinds, opts.leaseMs, opts.engine);
       if (!job) {
         await idle();
         continue;

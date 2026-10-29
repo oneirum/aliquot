@@ -1,6 +1,6 @@
 /**
  * Public surface of @labh/core. Everything not exported here is unreachable
- * from tools and the studio (package.json "exports" lists ".", "./tool-kit" and "./studio").
+ * from the studio (package.json "exports" lists "." and "./studio").
  *
  * Callers:
  *   front-door adapters  -> intake

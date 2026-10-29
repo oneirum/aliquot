@@ -60,20 +60,22 @@ import { ensurePostgres, processes, waitFor, type Proc } from "./procs.ts";
 
 const { values: flags } = parseArgs({ options: { headed: { type: "boolean", default: false }, shots: { type: "string" } } });
 
-async function readmeShot(page: Page, name: string): Promise<void> {
+type Clip = { x: number; y: number; width: number; height: number };
+
+// clip is the part of the 1440 by 1080 viewport the README shows: one panel, so its text stays legible on a phone.
+// The page is captured at device scale 2, so the file has twice the pixels of the width the README shows it at.
+async function readmeShot(page: Page, name: string, clip: Clip): Promise<void> {
   if (flags.shots === undefined) return;
   mkdirSync(flags.shots, { recursive: true });
   const size = page.viewportSize();
   await page.setViewportSize({ width: 1440, height: 1080 });
   const hide = await page.addStyleTag({ content: "nextjs-portal, .payload-toast-container { display: none !important; }" });
   await page.mouse.wheel(0, -100_000);
-  for (const theme of ["light", "dark"] as const) {
-    // Payload picks its theme on the server and marks <html>; the attribute is what its styles read.
-    await page.evaluate(`document.documentElement.setAttribute("data-theme", "${theme}")`);
-    await sleep(500);
-    await page.screenshot({ path: join(flags.shots, `${name}-${theme}.png`) });
-  }
+  // Payload picks its theme on the server and marks <html>; the attribute is what its styles read. The README shows
+  // the light theme only: GitHub's app does not resolve a <picture> srcset, so a per-theme pair breaks there.
   await page.evaluate(`document.documentElement.setAttribute("data-theme", "light")`);
+  await sleep(500);
+  await page.screenshot({ path: join(flags.shots, `${name}.png`), clip });
   await hide.evaluate("(el) => el.remove()");
   if (size !== null) await page.setViewportSize(size);
 }
@@ -209,7 +211,7 @@ try {
   const b = browser;
 
   async function signIn(who: keyof typeof people): Promise<Page> {
-    const page = await (await b.newContext({ viewport: { width: 1440, height: 1000 } })).newPage();
+    const page = await (await b.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2 })).newPage();
     page.setDefaultTimeout(60000);
     await page.goto(`${studioBase}/admin/login`);
     await page.fill("#field-email", people[who].email);
@@ -409,7 +411,7 @@ try {
     assert.equal(forced.status, 409, JSON.stringify(forced.json));
     assert.match(String(forced.json.error), /Fix these \d+ errors first: .*latest/);
     assert.equal(await head(agentId), undefined, "nothing published");
-    await readmeShot(page, "studio-agent-checks");
+    await readmeShot(page, "studio-agent-checks", { x: 980, y: 262, width: 420, height: 255 });
 
     await page.fill("#field-description", goodDescription);
     await page.fill("#field-model__modelId", "scripted-1");
@@ -478,7 +480,6 @@ try {
     const diffText = await page.locator("main, .template-default").first().innerText();
     assert.ok(diffText.includes(instructions) && diffText.includes("Name the handbook section you used."), "the diff shows the old and the new instructions");
     await page.screenshot({ path: join(work, "revision-diff.png"), fullPage: true });
-    await readmeShot(page, "studio-revision-diff");
 
     await page.goto(`${studioBase}${restoreTo}`);
     await page.getByRole("button", { name: "Restore this version" }).click();
@@ -602,7 +603,7 @@ try {
     const audit = await db.query<{ actor: string; event: { override?: { note: string; gaps: string[] } } }>("select actor, event from audit_events where event->>'t' = 'kb.published' and event->>'kbId' = $1", [def.kbId]);
     assert.deepEqual(audit.rows, [{ actor: people.publisher.email, event: { ...audit.rows[0]!.event, override: { note, gaps: [outside.question] } } }]);
     await publisher.screenshot({ path: join(work, "kb-form.png"), fullPage: true });
-    await readmeShot(publisher, "studio-kb-coverage");
+    await readmeShot(publisher, "studio-kb-coverage", { x: 980, y: 262, width: 420, height: 790 });
 
     await fillAgent(publisher, {
       agentId: "lab0-helper",

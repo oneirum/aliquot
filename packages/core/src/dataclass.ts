@@ -4,9 +4,9 @@
  * decideEgress() is the only function in the codebase that answers
  * "may this labelled content go to destination D". It takes the Labelled
  * itself, never a bare class, and checks at runtime that it is genuine. It
- * has exactly five call sites, one per Destination kind
- * (test/boundaries.test.ts fails on a sixth):
- *   model  -> gateway.ts   (ModelGateway.complete / choose)
+ * is called only in the files below, one per Destination kind
+ * (scripts/boundaries.ts refuses a call anywhere else):
+ *   model  -> gateway.ts   (ModelGateway.complete / choose, and admit for agent CLI backends)
  *   http   -> tools.ts     (HttpEgress.request: ToolContext.fetch and KB URL sources)
  *   chat   -> frontdoor.ts (postReply)
  *   store  -> record.ts    (PayloadStore.put) and startup
@@ -145,7 +145,9 @@ export type EgressRefusal =
   | { readonly code: "review-confidential-needs-lab"; readonly placement: Placement }
   | { readonly code: "above-clearance"; readonly payload: DataClass; readonly clearance: DataClass }
   /** The payload was not a genuine Labelled, so its class is unknown and nothing may receive it. */
-  | { readonly code: "unlabelled" };
+  | { readonly code: "unlabelled" }
+  /** A tool's request, or a redirect hop of one, to a host its manifest does not list. */
+  | { readonly code: "host-not-declared"; readonly host: string };
 
 declare const authorized: unique symbol;
 /** A destination the egress decision allowed for one payload. Only decideEgress produces it. */
@@ -199,6 +201,8 @@ export function describeRefusal(r: EgressRefusal): string {
       return `${r.payload} exceeds the reviewer clearance ${r.clearance}`;
     case "unlabelled":
       return "the content carries no genuine class label";
+    case "host-not-declared":
+      return `host ${r.host} is not in the tool's egress list`;
     default: {
       const never: never = r;
       return never;

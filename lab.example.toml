@@ -19,12 +19,50 @@ placement = "lab"                        # lab hardware: up to D3
 # api_key_env = "OPENROUTER_API_KEY"
 # provider = { zdr = true, data_collection = "deny", allow_fallbacks = false, only = ["anthropic"] }
 
+# Native providers. protocol is "openai-chat" (the default), "anthropic-messages" or "openai-responses".
+# sampling says whether temperature and top_p are sent. openai-chat sends them unless sampling = false.
+# The native protocols send them only with sampling = true, because current Claude models (Opus 4.7 and later,
+# Sonnet 5 and later, Fable) and OpenAI reasoning models answer either with a 400. Set it only for an older model
+# that takes them, such as claude-sonnet-4-6.
+# [endpoints.anthropic]
+# base_url = "https://api.anthropic.com"
+# placement = "approved"                 # an organization contract the institution approved; a personal key is public
+# protocol = "anthropic-messages"
+# api_key_env = "ANTHROPIC_API_KEY"
+#
+# [endpoints.openai]
+# base_url = "https://api.openai.com/v1"
+# placement = "approved"
+# protocol = "openai-responses"
+# api_key_env = "OPENAI_API_KEY"
+
 [surfaces.web]
 placement = "lab"
 port = 3000
 
 [hosts]
-"api.openalex.org" = "public"            # tools may only reach listed hosts; unlisted hosts are public (D0)
+"api.openalex.org" = "public"            # a tool reaches only the hosts its manifest names; a host unlisted here is public (D0)
+"eutils.ncbi.nlm.nih.gov" = "public"     # pubmed_search
+"export.arxiv.org" = "public"            # arxiv_search
+
+# The literature tools send this env var's value as the polite-pool contact (OpenAlex mailto, eutils email).
+[research]
+contact_email_env = "LABH_CONTACT_EMAIL"
+
+# Datasets run_code may mount read-only at /data/<id>. The class is the dataset's; an agent mounts only those at or
+# below its sandbox mountCeiling, and a mount ceiling of D3 needs an IRB protocol.
+# [datasets.cohort-2024]
+# path = "/srv/lab/data/cohort-2024"      # absolute; the real path, not a symlink
+# class = "D2"
+# description = "Wave 1 survey export, one row per participant"
+
+# The run_code container. Build it once (docker build -t aliquot-sandbox sandbox) and pin the digest it reports.
+# [sandbox]
+# image = "aliquot-sandbox@sha256:<64 hex>"
+# cpus = 1
+# memory_mb = 1024
+# timeout_ms = 60000
+# socket = "/var/run/docker.sock"
 
 [policy]
 review_confidential = "refuse"           # or "lab-only"

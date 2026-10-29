@@ -12,7 +12,10 @@
     "slice1": "node scripts/slice1.ts",
     "unit3": "node scripts/unit3.ts",
     "lab0": "node scripts/lab0.ts",
-    "unit2": "node scripts/unit2.ts"
+    "unit2": "node scripts/unit2.ts",
+    "demo": "node scripts/demo.ts",
+    "aliquot": "node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts",
+    "demo:agent": "node scripts/agent-demo.ts"
   },
   "devDependencies": {
     "@types/node": "24.3.1",

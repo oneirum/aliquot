@@ -16,8 +16,8 @@
  *     import(), require and createRequire;
  *   - process.getBuiltinModule, which bypasses the loader, refuses the same
  *     names; process.binding, _linkedBinding and dlopen are stubbed.
- * The tool folders are imported after the seal, so a tool that captures
- * fetch at its own top level captures the stub.
+ * A harness plant (--plant-tool) is imported after the seal, so a tool that
+ * captures fetch at its own top level captures the stub.
  *
  * Node's permission model closes what JavaScript cannot: run under
  * `node --permission --allow-fs-read=* --allow-net` it denies child_process,
@@ -29,7 +29,7 @@
 
 import { realpathSync } from "node:fs";
 import { createRequire, registerHooks } from "node:module";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Builtins and packages that open sockets or processes. Specifiers are matched with and without the node: prefix. */
@@ -79,9 +79,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 /** Paths, not new URL("./db.ts", import.meta.url): Next's bundler, which the studio runs core inside, rewrites that form into an asset URL. */
 export const DEFAULT_ALLOWANCE: SealAllowance = {
-  files: [join(here, "surfaces", "web.ts"), join(here, "db.ts")],
+  files: [join(here, "surfaces", "web.ts"), join(here, "db.ts"), join(here, "agents", "spawn.ts"), join(here, "agents", "bridge.ts"), join(here, "agents", "proxy.ts"), join(here, "sandbox.ts")],
   packages: ["pg"],
 };
+
+/** Core's agent modules. Only core itself may import them: an npm package or a planted tool that reached spawn.ts could start an unconfined child. */
+const AGENTS_DIR = `${pathToFileURL(join(here, "agents")).href}/`;
+const CORE_ROOT = `${pathToFileURL(dirname(here)).href}/`;
+
+export class CoreInternal extends Error {
+  constructor(specifier: string, from: string | undefined) {
+    super(`${specifier} is core's agent code and may be imported only from core${from ? `, not from ${from}` : ""}`);
+    this.name = "CoreInternal";
+  }
+}
 
 function bare(specifier: string): string {
   return specifier.startsWith("node:") ? specifier.slice(5) : specifier;
@@ -116,6 +127,7 @@ export function sealNetwork(allow: SealAllowance = DEFAULT_ALLOWANCE): void {
       if (networkModule(specifier) && !allowed) throw new NetworkSealed(`module ${specifier}`, context.parentURL);
       const resolved = next(specifier, context);
       if (networkModuleAt(resolved.url) && !allowed) throw new NetworkSealed(`module ${specifier}`, context.parentURL);
+      if (resolved.url.startsWith(AGENTS_DIR) && !context.parentURL?.startsWith(CORE_ROOT)) throw new CoreInternal(specifier, context.parentURL);
       return resolved;
     },
   });
@@ -132,6 +144,28 @@ export function sealNetwork(allow: SealAllowance = DEFAULT_ALLOWANCE): void {
     return builtin(id);
   });
   for (const name of ["binding", "_linkedBinding", "dlopen"]) freeze(process, name, stub(`process.${name}`));
+}
+
+/** How the agent worker is started: the chat worker's flags, plus writes to its session workspaces and child processes for the CLIs. */
+export function agentPermissionFlags(workspaces: string): readonly string[] {
+  return ["--permission", "--allow-fs-read=*", `--allow-fs-write=${workspaces}`, "--allow-net", "--allow-child-process"];
+}
+
+/**
+ * Null when the process runs under exactly agentPermissionFlags(workspaces): child processes allowed, worker
+ * threads and addons denied, and writes allowed under the workspaces root and nowhere else.
+ */
+export function requireAgentProcessPermission(workspaces: string): string | null {
+  const permission = (process as { permission?: { has(scope: string, reference?: string): boolean } }).permission;
+  const flags = `node ${agentPermissionFlags(workspaces).join(" ")}`;
+  if (!permission) return `this binary runs only under the permission model: ${flags} <bin> ...`;
+  const wrong = [
+    ...(permission.has("child") ? [] : ["child processes must be allowed"]),
+    ...["worker", "addon"].filter((s) => permission.has(s)).map((s) => `${s} must be denied`),
+    ...(permission.has("fs.write", join(workspaces, "probe")) ? [] : [`writes under ${workspaces} must be allowed`]),
+    ...(permission.has("fs.write", "/") || permission.has("fs.write", join(dirname(workspaces), `${basename(workspaces)}-outside`)) ? ["writes outside the workspaces root must be denied"] : []),
+  ];
+  return wrong.length ? `${wrong.join("; ")} (${flags})` : null;
 }
 
 /** How the binaries are started. The filesystem stays readable and the network open; everything else the model governs is denied. */

@@ -395,8 +395,16 @@ try {
     await waitLine(blip, /job .* run retry-after-progress attempt 1 in 1000ms/, 1000);
     assert.deepEqual(finishedOutcome(blipped), ["answered"]);
     assert.equal(verifyChain(blipped), null);
-    const job = await db.query<{ attempts: number; status: string }>("select attempts, status from jobs where id = $1", [a.runId]);
-    assert.deepEqual(job.rows, [{ attempts: 1, status: "done" }]);
+    // run.finished is in the record before the worker marks the job row done
+    const job = await waitFor(
+      `job ${a.runId} to settle`,
+      async () => {
+        const row = (await db.query<{ attempts: number; status: string }>("select attempts, status from jobs where id = $1", [a.runId])).rows[0]!;
+        return row.status === "done" || row.status === "failed" ? row : null;
+      },
+      5000,
+    );
+    assert.deepEqual(job, { attempts: 1, status: "done" });
     assert.deepEqual((await replies(a.runId)).map((r) => r.kind), ["reply"]);
     assert.equal(blipped.filter((e) => e.event.t === "model.requested").length, 2, "the blipped step was requested once per attempt");
     await stop(blip);
@@ -472,8 +480,8 @@ try {
       assert.deepEqual(report.permission, { child: false, worker: false, addon: false });
       assert.equal(hosted.requests, before);
       // Neither plant was scanned before it ran. For the record, the scanner reports the direct one too.
-      const statically = scanBoundaries(root, new Map([["tools/planted/tool.ts", readFileSync(join(root, "test/plants/fetch-tool.ts"), "utf8")]]));
-      assert.ok(statically.some((v) => v.file === "tools/planted/tool.ts" && v.rule === "global fetch through globalThis"), statically.map(describe).join("\n"));
+      const statically = scanBoundaries(root, new Map([["packages/core/src/planted-tool.ts", readFileSync(join(root, "test/plants/fetch-tool.ts"), "utf8")]]));
+      assert.ok(statically.some((v) => v.file === "packages/core/src/planted-tool.ts" && v.rule === "global fetch through globalThis"), statically.map(describe).join("\n"));
       return `fetch taken at module load inside a planted kb_search: 3 tool.failed thrown ("network is sealed"), run answered, hosted requests ${before} -> ${hosted.requests}; probe tool: ${report.refused.length} routes refused, 0 leaked, permission model denies child, worker and addon`;
     } finally {
       await core.close();
@@ -493,7 +501,7 @@ try {
     }
     const plantedLines = new Set(PLANTS.map((p) => `${at.get(p.name)!.file}:${at.get(p.name)!.line}`));
     assert.deepEqual(violations.filter((v) => !plantedLines.has(`${v.file}:${v.line}`)).map(describe), [], "only planted lines are reported");
-    return `clean tree: 0 violations over packages, tools, scripts and bin; ${PLANTS.length} planted routes each reported on its line: ${caught.join("; ")}`;
+    return `clean tree: 0 violations over packages, scripts and bin; ${PLANTS.length} planted routes each reported on its line: ${caught.join("; ")}`;
   });
 
   if (flags["skip-ollama"]) {

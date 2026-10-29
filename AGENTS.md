@@ -36,7 +36,18 @@ Each check script creates its own database (`labh_slice1`, `labh_unit3`, `labh_l
 
 ## Tools
 
-Folder discovery is not built yet: `loadRegistry` in `packages/core/src/tools.ts` throws, and runs use only the built-in `kb_search` and `kb_read`. A tool written now follows the format in `tools/openalex_search/tool.ts`: a default export of `defineTool({...})` from `@labh/core/tool-kit` that declares `reads` (the class of what it returns), `effects` and the `egress` hosts it may reach. Wiring discovery is the tools unit in `docs/design/SLICE.md`.
+v0.2 runs seven built-in tools, all defined in `packages/core/src/tools.ts`: `kb_search`, `kb_read`, `dataset_list`, `run_code`, `openalex_search`, `pubmed_search` and `arxiv_search`. `builtinTools()` lists them. A lab cannot add its own tool in v0.2: every binary refuses a `lab.toml` with a `[tools]` table, and nothing loads a tool folder. Contributed tools are planned for v0.3, behind an OS-level boundary. Each tool is `defineTool({...})` and declares `reads` (the class of what it returns), `effects` and the `egress` hosts `ctx.fetch` may reach. A tool's version is the hash of its spec (`toolSpecHash`): the description, the input schema and those policy fields. A redirect is followed only to a host in `egress`, and each hop passes `decideEgress`. Each tool has a test that runs it through the tool runner, the literature tools against a fake API (`test/tool-harness.ts`) serving the recorded responses in `test/literature-fixtures/`. `--plant-tool` on the worker binaries loads a test module as a tool, and only under `LABH_FAULTS=1`, which only a test harness sets.
+
+`run_code` needs the image: `docker build -t aliquot-sandbox sandbox`, then pin `docker image inspect --format '{{.Id}}' aliquot-sandbox` as `[sandbox] image`. `test/run-code.test.ts` skips when no daemon answers or the image is not built. A dataset directory must be readable by uid 65534, the container's user.
+
+## Agent backends
+
+An agent may run on Claude Code or Codex instead of a model endpoint (`[agent_backends.<id>]` in `lab.toml`). The code is in `packages/core/src/agents/`. The CLI is one hosted model destination: its task prompt and every bridge reply pass `gateway.admit()`, so the egress call sites stay at five.
+
+- `confine.ts` builds the macOS seatbelt profile, which starts from `(deny default)`. Each allowance names the CLI that needed it. Add one only after a probe under `(deny default)` shows the CLI fails without it, and say which CLI in the comment.
+- `backends.ts` holds one `KindSpec` per CLI: argv, the line parser and the self-check. A tool call outside the bridge ends the run as `agent-not-confined`.
+- `test/agent-confinement.test.ts` runs a probe under the real profile and asserts one denial per gap. It skips off macOS.
+- `pnpm demo:agent --backend claude-code` (or `--backend codex --model <id>`) runs a real CLI on the operator's own login through `dev_shared_login`. That login is a public placement, so the agent sees D0 only. It is a developer's smoke test, not a lab deployment. See "Live smoke resolution" in `docs/design/DESIGN-v02.md`.
 
 ## Where things are
 

@@ -36,7 +36,7 @@ export interface SharedCore {
 }
 
 export interface BootOptions {
-  /** Tools that replace a built-in of the same name or add to the registry. The slice harness plants its probes here; the folder loader will too. */
+  /** Tools that replace a built-in of the same name or add to the registry. Only the test harnesses plant tools here. */
   readonly tools?: readonly RegisteredTool[];
 }
 
@@ -49,7 +49,8 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
   const planted = new Set((options.tools ?? []).map((t) => t.manifest.name));
   const registry = registryOf([...builtinTools().filter((t) => !planted.has(t.manifest.name)), ...(options.tools ?? [])]);
   const endpoints = new Map(config.endpoints.map((e) => [e.id, e]));
-  const catalogOf = (published: readonly KbSnapshot[]): Catalog => ({
+  const backends = new Map(config.agentBackends.map((b) => [b.id, b]));
+  const catalogOf = (published: readonly KbSnapshot[], cliSeen: ReadonlyMap<string, string>): Catalog => ({
     latestSkill: () => undefined,
     latestSnapshot: (kbId) => {
       const s = published.find((p) => p.kbId === kbId) ?? fixtureSnapshots.find((l) => l.snapshot.kbId === kbId)?.snapshot;
@@ -61,11 +62,19 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     },
     endpoint: (id) => {
       const e = endpoints.get(id);
-      return e ? { placement: e.placement } : undefined;
+      if (e) return { placement: e.placement };
+      const b = backends.get(id);
+      return b ? { placement: b.placement, agentCli: { kind: b.kind, cliVersion: cliSeen.get(b.id) ?? null } } : undefined;
     },
-    sandboxImage: () => undefined,
+    sandboxImage: () => config.sandbox?.digest,
+    dataset: (id) => {
+      const d = config.datasets.find((x) => x.id === id);
+      return d ? { cls: d.cls } : undefined;
+    },
   });
-  const catalog = async () => catalogOf(await publishedSnapshots(db, store.address));
+  const cliSeen = async () =>
+    new Map((await db.query<{ backend_id: string; kind: string; cli_version: string }>("select backend_id, kind, cli_version from agent_cli_seen")).rows.filter((r) => backends.get(r.backend_id)?.kind === r.kind).map((r) => [r.backend_id, r.cli_version]));
+  const catalog = async () => catalogOf(await publishedSnapshots(db, store.address), config.agentBackends.length ? await cliSeen() : new Map());
   const agents = await Promise.all(
     config.agentFixtures.map(async (f) => {
       const parsed = parseAgentDocument(JSON.parse(await readFile(f, "utf8")));
@@ -76,7 +85,7 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
   // Membership: this build trusts the user id the web page sends. University sign-on replaces this.
   const gate: GateDeps = {
     members: async (platformUserId) => ({ id: platformUserId as MemberId, audiences: [{ t: "lab" }] }),
-    channelFloor: async () => "D1",
+    channelFloor: async (c) => config.channelFloors[`${c.surface}:${c.channelId}`] ?? "D1",
     labPatterns: config.participantIdPatterns,
     policy: config.policy,
   };

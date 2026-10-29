@@ -19,7 +19,7 @@ import { decideEgress, type DataClass, type EgressPolicy, type Labelled, type Pl
 import type { Db } from "./db.ts";
 import { gate, type GateDeps, type InboundMessage } from "./gate.ts";
 import type { AgentVersionHash } from "./hash.ts";
-import type { Queue } from "./queue.ts";
+import { ENGINES, type Engine, type Queue } from "./queue.ts";
 import type { PayloadRef, PayloadStore, RunId, ThreadKey, Trigger } from "./record.ts";
 
 export type IntakeResult =
@@ -34,6 +34,8 @@ const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number() });
 /** What a run job carries. Written by intake, read by drive() to write run.started. */
 export const runJobPayloadSchema = z.object({
   agent: z.string(),
+  // A payload written before agent backends existed is a chat run.
+  engine: z.enum(ENGINES).default(ENGINES[0]),
   kind: z.enum(["interactive", "background"]),
   trigger: z.discriminatedUnion("t", [
     z.object({ t: z.literal("message"), surface: z.string(), messageId: z.string(), memberId: z.string() }),
@@ -49,6 +51,8 @@ export const runJobPayloadSchema = z.object({
 
 export interface RunJobPayload {
   readonly agent: AgentVersionHash;
+  /** The worker binary that claims this run: the chat loop, or the agent worker for an agent CLI. */
+  readonly engine: Engine;
   readonly kind: "interactive" | "background";
   readonly trigger: Trigger;
   readonly thread: ThreadKey;
@@ -111,6 +115,7 @@ async function admit(msg: InboundMessage, doc: AgentDocument, key: string, trigg
   const thread = `${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}` as ThreadKey;
   const payload: RunJobPayload = {
     agent: hash,
+    engine: resolved.agent.agentCli ? "agent-cli" : "chat",
     kind: doc.kind,
     trigger: trigger(admitted.member),
     thread,

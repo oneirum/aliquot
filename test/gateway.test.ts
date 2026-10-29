@@ -1,5 +1,8 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { DEFAULT_POLICY, Labelled, Unlabelled } from "../packages/core/src/dataclass.ts";
 import { createGateway, Prompt, type ExactModelId, type ModelEndpoint, type ModelTarget } from "../packages/core/src/gateway.ts";
 import { ERROR_BODY_MARKER, startFakeModel } from "./fake-model.ts";
@@ -165,4 +168,28 @@ test("a forged prompt is refused at the gateway with no request, and Prompt.of r
   assert.equal(hosted.requests, before);
   const forgedPart = JSON.parse(JSON.stringify(Labelled.stamp("x", "D3", "gate"))) as Labelled<string>;
   assert.throws(() => Prompt.of([{ role: "user", content: forgedPart }], []), Unlabelled);
+});
+
+// F7 from REREVIEW-ISOLATION-2.md: Node's fetch replays the body and x-api-key across a 307 to another origin.
+test("a provider request refuses a redirect, so neither the prompt nor the key reaches the other origin", async () => {
+  const reached: { method: string | undefined; url: string | undefined; key: string | string[] | undefined }[] = [];
+  const other = createServer((req, res) => (reached.push({ method: req.method, url: req.url, key: req.headers["x-api-key"] }), res.writeHead(500).end())).listen(0, "127.0.0.1");
+  await once(other, "listening");
+  const otherPort = (other.address() as AddressInfo).port;
+  const redirecting = createServer((req, res) => res.writeHead(307, { location: `http://127.0.0.1:${otherPort}${req.url}` }).end()).listen(0, "127.0.0.1");
+  await once(redirecting, "listening");
+  process.env.LABH_TEST_REDIRECT_KEY = "test-key-redirect";
+  try {
+    const g = createGateway([{ id: "redirecting", baseUrl: `http://127.0.0.1:${(redirecting.address() as AddressInfo).port}`, placement: "lab", supportsLogprobs: false, protocol: "anthropic-messages", apiKeyEnv: "LABH_TEST_REDIRECT_KEY" }], DEFAULT_POLICY, fetch);
+    const rec = memoryRecorder();
+    const prompt = Prompt.of([{ role: "user", content: Labelled.stamp("What are the office hours?", "D2", "t") }], []);
+    const out = await g.complete(target("redirecting", "claude-x"), prompt, rec, opts);
+    assert.deepEqual(out.ok === false && out.t === "failed" && [out.failure.code, out.failure.status, out.retryable, rec.body(out.failure.detail!)], ["http", 307, false, "the endpoint answered 307, and the gateway does not follow redirects"]);
+    assert.equal(await g.serves(target("redirecting", "claude-x")), false);
+    assert.deepEqual(reached, []);
+  } finally {
+    delete process.env.LABH_TEST_REDIRECT_KEY;
+    other.close();
+    redirecting.close();
+  }
 });

@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use Aliquot in research, please cite it as below."
+title: "Aliquot: an open-source agent harness for research labs"
+type: software
+authors:
+  - given-names: Abhay
+    family-names: Mettu
+repository-code: "https://github.com/oneirum/aliquot"
+license: Apache-2.0
+version: 0.2.0
+keywords:
+  - research software
+  - ai agents
+  - self-hosted
+  - research data management
+  - human subjects

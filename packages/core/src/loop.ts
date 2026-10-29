@@ -18,7 +18,7 @@
  * - limits checked between steps; on a hit, one final no-tools call so the agent answers
  */
 
-import { AgentUnavailable, instructionsOf, UnrunnableAgent, verifyRunnable, type Deployed, type ResolvedAgent } from "./agent.ts";
+import { AgentUnavailable, instructionsOf, modelFor, UnrunnableAgent, verifyRunnable, type Deployed, type ResolvedAgent } from "./agent.ts";
 import { Labelled, type EgressPolicy } from "./dataclass.ts";
 import { MalformedJob, parseRunJobPayload, postReply, SurfaceUnknown, type Surface } from "./frontdoor.ts";
 import { Prompt, type ChatPart, type ModelGateway } from "./gateway.ts";
@@ -169,6 +169,12 @@ export interface LoopDeps {
    */
   readonly callSignal: (abortsOn: (stop: StopNotice) => boolean) => { readonly signal: AbortSignal; release(): void };
   readonly log: (line: string) => void;
+  /**
+   * Runs an agent CLI version's session until it has an answer, a confirmed stop, a fault or a refused prompt,
+   * so that what is left (the stop record, the reply and the finish) is the chat loop's tail. Only the agent
+   * worker provides it; the chat worker never loads agent code and finds such a version unrunnable.
+   */
+  readonly agentSession?: (agent: ResolvedAgent, journal: RunJournal, deps: LoopDeps) => Promise<void>;
 }
 
 export type DriveResult =
@@ -216,6 +222,10 @@ export async function drive(job: LeasedJob, journal: RunJournal, deps: LoopDeps)
     const agent = await deps.loadAgent(start.agent);
     const problems = verifyRunnable(agent, await deps.deployed(agent));
     if (problems.length) throw new UnrunnableAgent(problems);
+    if (agent.agentCli) {
+      if (!deps.agentSession) throw new UnrunnableAgent([{ t: "agent-confinement-missing", platform: "chat worker" }]);
+      await deps.agentSession(agent, journal, deps);
+    }
     const policy: ToolPolicy = { isRepeatable: (t) => deps.tools.isRepeatable(t), needsConfirm: (t) => deps.tools.needsConfirm(t) };
     const withSignal = async <T>(abortsOn: (stop: StopNotice) => boolean, io: (signal: AbortSignal) => Promise<T>): Promise<T> => {
       const call = deps.callSignal(abortsOn);
@@ -240,13 +250,15 @@ export async function drive(job: LeasedJob, journal: RunJournal, deps: LoopDeps)
           await journal.append({ t: "stop", by: action.by, sinceStartMs: action.sinceStartMs });
           return null;
         case "call-model": {
+          if (agent.agentCli) throw new Error("an agent CLI run left its session without an answer");
           const prompt = await buildPrompt(state, agent, journal, deps, action.final);
-          await deps.gateway.complete(agent.model, prompt, journal, { signal, step: action.step, attempt: action.attempt, final: action.final });
+          await deps.gateway.complete(modelFor(agent, prompt.cls), prompt, journal, { signal, step: action.step, attempt: action.attempt, final: action.final });
           return null;
         }
         case "call-tool": {
+          if (agent.agentCli) throw new Error("an agent CLI run left its session with a tool call open");
           const call = state.toolCalls.find((c) => c.callId === action.callId)!;
-          await deps.tools.invoke(journal, { callId: call.callId, tool: call.tool, attempt: action.attempt, input: call.input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval }, signal);
+          await deps.tools.invoke(journal, { callId: call.callId, tool: call.tool, attempt: action.attempt, input: call.input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox }, signal);
           return null;
         }
         case "mark-unknown":
@@ -400,14 +412,13 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * instructions and each knowledge base's outline, as Sanity does, so an agent
  * with a D3 knowledge base is D3 on every call.
  */
-async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJournal, deps: LoopDeps, final: boolean): Promise<Prompt> {
+export async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJournal, deps: Pick<LoopDeps, "kb" | "tools">, final: boolean): Promise<Prompt> {
   const instructions = instructionsOf(agent);
   const outlines = await Promise.all(agent.knowledgeBases.map((kb) => deps.kb.outline(kb.snapshot)));
   const systemText = [
     instructions.value,
     ...outlines.map((o, i) => `Knowledge base "${o.value.title}" (id ${agent.knowledgeBases[i]!.kbId}): ${o.value.purpose}\nEntries:\n${o.value.paths.map((p) => `- ${p}`).join("\n")}`),
     outlines.length ? RETRIEVAL_INSTRUCTIONS : "",
-    final ? "You have reached this run's limit. Answer now with what you have, without calling tools." : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -430,12 +441,15 @@ async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJo
       }
       case "assistant": {
         const content = await text(item.content);
-        if (content.value) parts.push({ role: "assistant", content });
         const [first, ...rest] = await Promise.all(item.toolCalls.map(async (c) => ({ body: await journal.get(c.args), id: c.id, name: c.name })));
-        if (first) {
-          const calls = [first, ...rest];
-          parts.push({ role: "assistant", toolCalls: Labelled.derive(calls.map((c) => ({ id: c.id, name: c.name, args: c.body.value })), [first.body, ...rest.map((c) => c.body)], "loop:tool-calls") });
+        if (!first) {
+          if (content.value) parts.push({ role: "assistant", content });
+          break;
         }
+        const calls = [first, ...rest];
+        const toolCalls = Labelled.derive(calls.map((c) => ({ id: c.id, name: c.name, args: c.body.value })), [first.body, ...rest.map((c) => c.body)], "loop:tool-calls");
+        const provider = item.providerState ? await journal.get(item.providerState) : null;
+        parts.push({ role: "assistant", ...(content.value ? { text: content } : {}), toolCalls, ...(provider ? { providerState: provider } : {}) });
         break;
       }
       case "tool": {
@@ -447,7 +461,7 @@ async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJo
           const detail = await text(r.failure.detail);
           content = Labelled.derive(`Error: ${describeFailure(r.failure)}: ${detail.value}`, [detail], "loop:tool-result");
         } else content = Labelled.stamp(`Error: ${describeFailure(r.failure)}`, "D0", "loop:tool-result");
-        parts.push({ role: "tool", callId: item.callId, content });
+        parts.push({ role: "tool", callId: item.callId, content, ...(r.t === "error" ? { failed: true as const } : {}) });
         break;
       }
     }
@@ -456,6 +470,8 @@ async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJo
     for (const c of state.toolCalls) {
       if (c.status !== "resolved") parts.push({ role: "tool", callId: c.callId, content: Labelled.stamp("Not executed: the run reached its limit.", "D0", "loop:limit") });
     }
+    // The notice goes after the history, not into the system prompt: replayed thinking is signed over the exact system text.
+    parts.push({ role: "user", content: Labelled.stamp("You have reached this run's limit. Answer now with what you have, without calling tools.", "D0", "loop:limit") });
   }
-  return Prompt.of([system, ...parts], final ? [] : deps.tools.specs(agent.tools.map((t) => t.name)));
+  return Prompt.of([system, ...parts], deps.tools.specs(agent.tools.map((t) => t.name)), final ? "none" : "auto");
 }

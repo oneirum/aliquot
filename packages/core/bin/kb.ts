@@ -11,6 +11,7 @@ import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { boot } from "../src/boot.ts";
+import { configProblem } from "../src/config.ts";
 import type { SnapshotId } from "../src/hash.ts";
 import { createKbReader, loadManifest, renderDiff, storedSnapshots } from "../src/kb.ts";
 import { compileResult, filesIn, loadOverrides, parseKbDefinition, publishSnapshot, readSources, renderCoverage, requestCompile } from "../src/kb-compile.ts";
@@ -40,6 +41,11 @@ const { values, positionals } = parseArgs({
   },
 });
 
+const configRefused = await configProblem(values.config);
+if (configRefused) {
+  process.stderr.write(`${configRefused}\n`);
+  process.exit(2);
+}
 const need = (name: keyof typeof values): string => {
   const v = values[name];
   if (typeof v !== "string") throw new Error(`--${name} is required`);

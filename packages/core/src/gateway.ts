@@ -7,18 +7,19 @@
  *   1. prompt.cls is the join of its parts (computed by Prompt.of, never passed in)
  *   2. decideEgress(prompt.cls, {kind:"model", endpoint placement})  -> refused: record, return, no network
  *   3. recorder.record(model.requested) with the prompt stored as a payload
- *   4. one HTTP call to an OpenAI-compatible endpoint, through sendChat, which takes an AuthorizedRoute
+ *   4. one HTTP call to the endpoint, through send, which takes an AuthorizedRoute
  *   5. returned model id !== target.modelId  -> refused-model-mismatch (refuse, never swap)
  *   6. recorder.record(model.completed | model.failed)
  *
- * One wire protocol: OpenAI-compatible chat completions. OpenRouter, Ollama,
- * vLLM and most institution-hosted servers speak it. Wire types stay in this
- * file; callers see Prompt, ModelResult and Distribution only.
+ * Three wire protocols, chosen per endpoint: OpenAI-compatible chat completions
+ * (OpenRouter, Ollama, vLLM and most institution-hosted servers), Anthropic
+ * Messages and OpenAI Responses. The body mappings are pure functions in
+ * gateway-wire.ts; callers see Prompt, ModelResult and Distribution only.
  */
 
-import { z } from "zod";
-import { decideEgress, describeRefusal, join, Labelled, Unlabelled, type AuthorizedRoute, type DataClass, type EgressPolicy, type EgressRefusal, type Placement } from "./dataclass.ts";
+import { decideEgress, describeRefusal, join, Labelled, Unlabelled, type AuthorizedRoute, type DataClass, type EgressDecision, type EgressPolicy, type EgressRefusal, type ModelDestination, type Placement } from "./dataclass.ts";
 import { describeFailure, type CallFailure, type CallRecorder, type ToolCallRef } from "./record.ts";
+import { ADAPTERS, type Protocol, type WireCompletion } from "./gateway-wire.ts";
 import { platformFetch } from "./seal.ts";
 
 export type ExactModelId = string & { readonly __exactModel: true };
@@ -45,6 +46,10 @@ export interface ModelEndpoint {
   /** OpenRouter provider routing, sent verbatim as `provider`. zdr and allow_fallbacks are required when present. */
   readonly providerRouting?: { readonly zdr: true; readonly data_collection: "deny"; readonly allow_fallbacks: false; readonly only: readonly string[] };
   readonly supportsLogprobs: boolean;
+  /** Absent means openai-chat. */
+  readonly protocol?: Protocol;
+  /** Send temperature and top_p. Absent: sent on openai-chat, not sent on the native protocols, whose current models refuse them. */
+  readonly sampling?: boolean;
 }
 
 export interface ToolSpec {
@@ -55,11 +60,19 @@ export interface ToolSpec {
 
 export type ChatPart =
   | { readonly role: "system" | "user" | "assistant"; readonly content: Labelled<string> }
-  | { readonly role: "assistant"; readonly toolCalls: Labelled<readonly { readonly id: string; readonly name: string; readonly args: unknown }[]> }
-  | { readonly role: "tool"; readonly callId: string; readonly content: Labelled<string> };
+  | {
+      /** One assistant turn that called tools: the text it wrote, its calls, and the provider's own record of the turn. */
+      readonly role: "assistant";
+      readonly text?: Labelled<string>;
+      readonly toolCalls: Labelled<readonly { readonly id: string; readonly name: string; readonly args: unknown }[]>;
+      /** The provider's whole output for this turn. Only the adapter that wrote it reads it, and replays it as is. */
+      readonly providerState?: Labelled<unknown>;
+    }
+  | { readonly role: "tool"; readonly callId: string; readonly content: Labelled<string>; readonly failed?: true };
 
-function labelOf(p: ChatPart): Labelled<unknown> {
-  return "content" in p ? p.content : p.toolCalls;
+function labelsOf(p: ChatPart): Labelled<unknown>[] {
+  if ("content" in p) return [p.content];
+  return [...(p.text ? [p.text] : []), p.toolCalls, ...(p.providerState ? [p.providerState] : [])];
 }
 
 /**
@@ -74,27 +87,32 @@ export class Prompt {
   readonly cls: DataClass;
   readonly parts: readonly [ChatPart, ...ChatPart[]];
   readonly tools: readonly ToolSpec[];
-  private constructor(cls: DataClass, parts: readonly [ChatPart, ...ChatPart[]], tools: readonly ToolSpec[]) {
+  /** none on a final call: the tools stay described, because a history with tool calls needs them, but none may be called. */
+  readonly toolChoice: "auto" | "none";
+  private constructor(cls: DataClass, parts: readonly [ChatPart, ...ChatPart[]], tools: readonly ToolSpec[], toolChoice: "auto" | "none") {
     this.cls = cls;
     this.parts = parts;
     this.tools = tools;
+    this.toolChoice = toolChoice;
   }
   static is(x: unknown): x is Prompt {
     return typeof x === "object" && x !== null && #brand in x;
   }
   /** Every part's label must be genuine; the class of a forged part is unknown. */
-  static of(parts: readonly [ChatPart, ...ChatPart[]], tools: readonly ToolSpec[]): Prompt {
-    for (const p of parts) if (!Labelled.is(labelOf(p))) throw new Unlabelled("Prompt.of");
-    return new Prompt(join(...parts.map((p) => labelOf(p).cls)), parts, tools);
+  static of(parts: readonly [ChatPart, ...ChatPart[]], tools: readonly ToolSpec[], toolChoice: "auto" | "none" = "auto"): Prompt {
+    const labels = parts.flatMap(labelsOf);
+    for (const l of labels) if (!Labelled.is(l)) throw new Unlabelled("Prompt.of");
+    return new Prompt(join(...labels.map((l) => l.cls)), parts, tools, toolChoice);
   }
   /** The prompt as a plain value for the record: the same parts, bodies inline. */
   toRecord(): unknown {
     return {
-      parts: this.parts.map((p) => {
-        if ("toolCalls" in p) return { role: "assistant", toolCalls: p.toolCalls.value };
-        return p.role === "tool" ? { role: "tool", callId: p.callId, content: p.content.value } : { role: p.role, content: p.content.value };
+      parts: this.parts.flatMap((p) => {
+        if ("toolCalls" in p) return [...(p.text ? [{ role: "assistant", content: p.text.value }] : []), { role: "assistant", toolCalls: p.toolCalls.value }];
+        return [p.role === "tool" ? { role: "tool", callId: p.callId, content: p.content.value } : { role: p.role, content: p.content.value }];
       }),
       tools: this.tools.map((t) => t.name),
+      ...(this.toolChoice === "none" ? { toolChoice: "none" } : {}),
     };
   }
 }
@@ -143,39 +161,12 @@ export interface ModelGateway {
   serves(target: ModelTarget): Promise<boolean>;
   /** The placement a target would go to. Lets the router pick a lab backend for D3 without guessing. */
   placementOf(endpointId: string): Placement;
-}
-
-// Wire shapes. Parsed at this boundary; nothing outside this file sees them.
-const completionSchema = z.object({
-  model: z.string(),
-  choices: z
-    .array(
-      z.object({
-        message: z.object({
-          content: z.string().nullable().optional(),
-          tool_calls: z.array(z.object({ id: z.string(), function: z.object({ name: z.string(), arguments: z.string() }) })).optional(),
-        }),
-        finish_reason: z.string().nullable().optional(),
-      }),
-    )
-    .min(1),
-  usage: z.object({ prompt_tokens: z.number().default(0), completion_tokens: z.number().default(0) }).optional(),
-});
-type Completion = z.infer<typeof completionSchema>;
-
-const modelsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
-
-type WireMessage =
-  | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string | null; tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[] }
-  | { role: "tool"; tool_call_id: string; content: string };
-
-function toWire(p: ChatPart): WireMessage {
-  if ("toolCalls" in p) {
-    return { role: "assistant", content: null, tool_calls: p.toolCalls.value.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args) } })) };
-  }
-  if (p.role === "tool") return { role: "tool", tool_call_id: p.callId, content: p.content.value };
-  return { role: p.role, content: p.content.value };
+  /**
+   * The egress decision for content an agent CLI backend would receive: its task prompt and every bridge reply.
+   * The session needs the route it returns to spawn the CLI and to answer a call, so a missing check does not compile.
+   * Pure; the caller records a refusal, because a refused prompt and a withheld result are recorded differently.
+   */
+  admit(content: Labelled<unknown>, backendId: string): EgressDecision<ModelDestination>;
 }
 
 export class GatewayError extends Error {
@@ -194,8 +185,9 @@ export class GatewayError extends Error {
   }
 }
 
-export function createGateway(endpoints: readonly ModelEndpoint[], policy: EgressPolicy, fetchImpl: typeof fetch = platformFetch): ModelGateway {
+export function createGateway(endpoints: readonly ModelEndpoint[], policy: EgressPolicy, fetchImpl: typeof fetch = platformFetch, agentBackends: readonly { readonly id: string; readonly placement: Placement }[] = []): ModelGateway {
   const byId = new Map(endpoints.map((e) => [e.id, e]));
+  const backends = new Map(agentBackends.map((b) => [b.id, b]));
   const endpointOf = (id: string): ModelEndpoint => {
     const e = byId.get(id);
     if (!e) throw new Error(`endpoint ${id} is not configured`);
@@ -204,38 +196,38 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
   const headers = (e: ModelEndpoint): Record<string, string> => {
     const h: Record<string, string> = { "content-type": "application/json" };
     const key = e.apiKeyEnv ? process.env[e.apiKeyEnv] : undefined;
-    if (key) h.authorization = `Bearer ${key}`;
+    if (e.protocol === "anthropic-messages") {
+      h["anthropic-version"] = "2023-06-01";
+      if (key) h["x-api-key"] = key;
+    } else if (key) h.authorization = `Bearer ${key}`;
     return h;
   };
+  const urlOf = (e: ModelEndpoint, path: string) => `${e.baseUrl.replace(/\/$/, "")}${path}`;
 
   /** The provider client. The only place a request leaves for a model, and it needs the route the egress decision produced. */
-  const sendChat = async (route: AuthorizedRoute, target: ModelTarget, prompt: Prompt, signal: AbortSignal): Promise<Completion> => {
+  const send = async (route: AuthorizedRoute, target: ModelTarget, prompt: Prompt, signal: AbortSignal): Promise<WireCompletion> => {
     const e = endpointOf(route.endpointId);
-    const body: Record<string, unknown> = {
-      model: target.modelId,
-      messages: prompt.parts.map(toWire),
-      temperature: target.params.temperature,
-      max_tokens: target.params.maxOutputTokens,
-      stream: false,
-    };
-    if (target.params.seed !== undefined) body.seed = target.params.seed;
-    if (target.params.topP !== undefined) body.top_p = target.params.topP;
-    if (prompt.tools.length) body.tools = prompt.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
-    if (e.providerRouting) body.provider = e.providerRouting;
+    const adapter = ADAPTERS[e.protocol ?? "openai-chat"];
     let res: Response;
     try {
-      res = await fetchImpl(`${e.baseUrl.replace(/\/$/, "")}/chat/completions`, { method: "POST", headers: headers(e), body: JSON.stringify(body), signal });
+      // Never followed: Node's fetch replays the body and x-api-key across a 307 to another origin.
+      res = await fetchImpl(urlOf(e, adapter.completionPath), { method: "POST", headers: headers(e), body: JSON.stringify(adapter.request(target, prompt, e)), signal, redirect: "manual" });
     } catch (err) {
       const aborted = (err as { name?: string }).name === "AbortError" || signal.aborted;
       throw aborted ? new GatewayError("aborted", null, true) : new GatewayError("network", (err as Error).message, true);
     }
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel();
+      throw new GatewayError("http", `the endpoint answered ${res.status}, and the gateway does not follow redirects`, false, res.status);
+    }
     if (!res.ok) {
-      const text = (await res.text().catch(() => "")).slice(0, 300);
+      // A 401 body echoes part of the key it was sent, and the detail is stored.
+      const text = (await res.text().catch(() => "")).replace(/sk-[\w*.-]+/g, "sk-[redacted]").slice(0, 300);
       throw new GatewayError("http", text, res.status === 429 || res.status >= 500, res.status);
     }
-    const parsed = completionSchema.safeParse(await res.json().catch(() => null));
-    if (!parsed.success) throw new GatewayError("unparseable", parsed.error.issues[0]?.message ?? "no body", false);
-    return parsed.data;
+    const parsed = adapter.parse(await res.json().catch(() => null), target);
+    if (!parsed.ok) throw new GatewayError("unparseable", parsed.error, false);
+    return parsed.value;
   };
 
   return {
@@ -248,7 +240,7 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
         return { ok: false, t: "refused-egress", refusal };
       }
       // Everything derived from the prompt is at least the prompt's class, so that is the floor on each put.
-      const from = prompt.parts.map(labelOf);
+      const from = prompt.parts.flatMap(labelsOf);
       const record = Labelled.derive(prompt.toRecord(), from, "gateway:prompt", prompt.cls);
       const decision = decideEgress(record, destination, policy);
       if (!decision.allow) {
@@ -260,9 +252,9 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
       const startedAt = Date.now();
       // Free text about the call (a provider body can echo the prompt) is stored at the prompt's class, not in the event.
       const detailRef = async (text: string | null) => (text === null ? null : rec.put(Labelled.derive(text, from, "gateway:error", prompt.cls)));
-      let wire: Completion;
+      let wire: WireCompletion;
       try {
-        wire = await sendChat(decision.to, target, prompt, opts.signal);
+        wire = await send(decision.to, target, prompt, opts.signal);
       } catch (err) {
         if (!(err instanceof GatewayError)) throw err;
         const failure: CallFailure = { code: err.code, ...(err.status !== undefined ? { status: err.status } : {}), detail: await detailRef(err.detail) };
@@ -274,41 +266,44 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
         await rec.record({ t: "model.failed", step: opts.step, attempt: opts.attempt, failure, retryable: false });
         return { ok: false, t: "refused-model-mismatch", requested: target.modelId, returned: wire.model };
       }
-      const choice = wire.choices[0]!;
-      const text = choice.message.content ?? "";
       // Output is as sensitive as everything the model saw: it derives from every part of the prompt.
-      const outputRef = await rec.put(Labelled.derive(text, from, "gateway:output", prompt.cls));
+      const outputRef = await rec.put(Labelled.derive(wire.text, from, "gateway:output", prompt.cls));
       const toolCalls: ToolCallRef[] = [];
-      for (const c of choice.message.tool_calls ?? []) {
-        let args: unknown;
-        try {
-          args = JSON.parse(c.function.arguments);
-        } catch {
-          args = { _unparsed: c.function.arguments };
-        }
-        toolCalls.push({ id: c.id, name: c.function.name, args: await rec.put(Labelled.derive(args, from, "gateway:tool-args", prompt.cls)) });
-      }
-      const usage = { input: wire.usage?.prompt_tokens ?? 0, output: wire.usage?.completion_tokens ?? 0 };
-      await rec.record({ t: "model.completed", step: opts.step, attempt: opts.attempt, providerModelId: wire.model, output: outputRef, toolCalls, usage, ms: Date.now() - startedAt });
-      const finish = toolCalls.length ? "tool_calls" : choice.finish_reason === "length" ? "length" : "stop";
-      return { ok: true, value: { text, toolCalls, usage, providerModelId: wire.model, finish } };
+      for (const c of wire.toolCalls) toolCalls.push({ id: c.id, name: c.name, args: await rec.put(Labelled.derive(c.args, from, "gateway:tool-args", prompt.cls)) });
+      const providerState = wire.providerState ? { providerState: await rec.put(Labelled.derive(wire.providerState, from, "gateway:provider-state", prompt.cls)) } : {};
+      await rec.record({ t: "model.completed", step: opts.step, attempt: opts.attempt, providerModelId: wire.model, output: outputRef, toolCalls, usage: wire.usage, ms: Date.now() - startedAt, ...providerState });
+      return { ok: true, value: { text: wire.text, toolCalls, usage: wire.usage, providerModelId: wire.model, finish: wire.finish } };
     },
     async choose() {
       throw new Error("the router arrives in P2");
     },
     async serves(target) {
       const e = endpointOf(target.endpointId);
+      const adapter = ADAPTERS[e.protocol ?? "openai-chat"];
       try {
-        const res = await fetchImpl(`${e.baseUrl.replace(/\/$/, "")}/models`, { headers: headers(e) });
-        if (!res.ok) return false;
-        const parsed = modelsSchema.safeParse(await res.json());
-        return parsed.success && parsed.data.data.some((m) => m.id === target.modelId);
+        // A bounded walk of a paged list: Anthropic pages at 1000 ids, the others answer in one page.
+        let after: string | null = null;
+        for (let page = 0; page < 20; page++) {
+          const res = await fetchImpl(urlOf(e, adapter.modelsPath(after)), { headers: headers(e), redirect: "manual" });
+          if (!res.ok) return false;
+          const parsed = adapter.parseModels(await res.json());
+          if (!parsed.ok) return false;
+          if (parsed.value.ids.includes(target.modelId)) return true;
+          if (parsed.value.next === null) return false;
+          after = parsed.value.next;
+        }
+        return false;
       } catch {
         return false;
       }
     },
     placementOf(endpointId) {
-      return endpointOf(endpointId).placement;
+      return backends.get(endpointId)?.placement ?? endpointOf(endpointId).placement;
+    },
+    admit(content, backendId) {
+      const b = backends.get(backendId);
+      if (!b) throw new Error(`agent backend ${backendId} is not configured`);
+      return decideEgress(content, { kind: "model", endpointId: b.id, placement: b.placement }, policy);
     },
   };
 }

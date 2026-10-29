@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "count": 37832,
+    "db_response_time_ms": 351,
+    "page": 1,
+    "per_page": 2
+  },
+  "results": [
+    {
+      "id": "https://openalex.org/W2039959638",
+      "doi": "https://doi.org/10.1016/j.sleep.2011.11.005",
+      "title": "The discrepancy between actigraphic and sleep diary measures of sleep in adolescents",
+      "display_name": "The discrepancy between actigraphic and sleep diary measures of sleep in adolescents",
+      "relevance_score": 136.63126,
+      "publication_year": 2012,
+      "publication_date": "2012-03-20",
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W2012492148",
+      "doi": "https://doi.org/10.2147/nss.s38369",
+      "title": "Estimating adolescent sleep patterns: parent reports versus adolescent self-report surveys, sleep diaries, and actigraphy",
+      "display_name": "Estimating adolescent sleep patterns: parent reports versus adolescent self-report surveys, sleep diaries, and actigraphy",
+      "relevance_score": 123.076096,
+      "publication_year": 2013,
+      "publication_date": "2013-02-01",
+      "type": "article"
+    }
+  ]
+}

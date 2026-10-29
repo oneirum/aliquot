@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "paths": { "@labh/core": ["../../packages/core/src/index.ts"], "@labh/core/tool-kit": ["../../packages/core/src/tool-kit.ts"] } },
+  "compilerOptions": { "paths": { "@labh/core": ["../../packages/core/src/index.ts"] } },
   "include": ["./*.ts"],
   "exclude": []
 }

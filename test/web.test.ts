@@ -70,3 +70,41 @@ test("a database error is logged and answered with a generic 500 that carries no
     s2.close();
   }
 });
+
+test("the chat page and the record page are self-contained HTML that loads nothing from another origin", async () => {
+  for (const path of ["/", `/runs/${UUID}`]) {
+    const res = await fetch(`${base}${path}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.match(res.headers.get("content-security-policy") ?? "", /default-src 'self'/);
+    const html = await res.text();
+    assert.deepEqual(html.match(/(?:src|href)="https?:/g), null);
+  }
+});
+
+test("the record view of a run with no events yet is empty, running and intact", async () => {
+  assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, agent: null, outcome: "running", chain: { events: 0, firstBad: null }, rows: [] } });
+});
+
+test("a web surface bound to a channel puts every message there and refuses a body that names another", async () => {
+  const seen: string[] = [];
+  const probe = { agentFor: async (c: { channelId: string }) => (seen.push(c.channelId), undefined) } as unknown as IntakeDeps;
+  const message = (extra: Record<string, unknown>) => JSON.stringify({ thread: "t", message: "m", text: "hi", user: "alice", ...extra });
+  for (const [bound, body, want] of [
+    ["public", message({}), { status: 403, channel: "public" }],
+    ["public", message({ channel: "public" }), { status: 403, channel: "public" }],
+    ["public", message({ channel: "lab" }), { status: 400, channel: null }],
+    [null, message({ channel: "public" }), { status: 403, channel: "public" }],
+    [null, message({}), { status: 403, channel: "lab" }],
+  ] as const) {
+    seen.length = 0;
+    const { server: s, port: p } = await listenWeb(createWebHandler(db, probe, (line) => logged.push(line), bound), 0);
+    try {
+      const res = await fetch(`http://127.0.0.1:${p}/message`, { method: "POST", headers: { "content-type": "application/json" }, body });
+      assert.deepEqual({ status: res.status, channel: seen[0] ?? null }, want);
+      if (res.status === 400) assert.deepEqual(await res.json(), { error: "this web surface serves channel public only" });
+    } finally {
+      s.close();
+    }
+  }
+});

@@ -2,6 +2,7 @@
 // labh worker: node --permission --allow-fs-read=* --allow-net packages/core/bin/worker.ts --config lab.toml [--worker-id W] [--lease-ms 5000] [--poll-ms 200]
 //   harness only (LABH_FAULTS=1): [--fault kill-after:tool.requested] [--plant-tool path/to/tool.ts ...]
 import { parseArgs } from "node:util";
+import { configProblem } from "../src/config.ts";
 import { hostname } from "node:os";
 import { writeSync } from "node:fs";
 import { requireProcessPermission, sealNetwork } from "../src/seal.ts";
@@ -30,6 +31,11 @@ if ((values.fault || values["plant-tool"].length) && !faultsAllowed(process.env)
   process.exit(2);
 }
 
+const configRefused = await configProblem(values.config);
+if (configRefused) {
+  process.stderr.write(`${configRefused}\n`);
+  process.exit(2);
+}
 // Sealed before any tool is imported, so a tool that takes fetch at its top level takes the stub.
 sealNetwork();
 const tools = await Promise.all(values["plant-tool"].map(importTool));

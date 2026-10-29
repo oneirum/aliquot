@@ -58,7 +58,15 @@ export type FailureReason =
   | { readonly t: "surface-unknown"; readonly surface: string }
   | { readonly t: "agent-unavailable"; readonly agent: AgentVersionHash; readonly why: "missing" | "hash-mismatch" | "schema" }
   | { readonly t: "unrunnable"; readonly problems: readonly Unrunnable[] }
-  | { readonly t: "retries-exhausted"; readonly attempts: number; readonly error: PayloadRef | null };
+  | { readonly t: "retries-exhausted"; readonly attempts: number; readonly error: PayloadRef | null }
+  /**
+   * An agent CLI's self-check failed: it loaded tools, servers or a model the version did not pin. The CLI wrote the
+   * names in why, so why is a payload at the session's class.
+   */
+  | { readonly t: "agent-not-confined"; readonly check: ConfinementCheck; readonly why: PayloadRef };
+
+/** Which part of an agent CLI session was not the confined session its version promised. */
+export type ConfinementCheck = "writer-tool" | "own-tool" | "own-server" | "model" | "version" | "own-call" | "own-item" | "no-init";
 
 export interface ToolCallRef {
   readonly id: string;
@@ -133,6 +141,8 @@ export type RunEvent =
       readonly toolCalls: readonly ToolCallRef[];
       readonly usage: { readonly input: number; readonly output: number };
       readonly ms: number;
+      /** Opaque provider state to send back with the tool calls (reasoning, thinking), at the prompt's class. */
+      readonly providerState?: PayloadRef;
     }
   | { readonly t: "model.failed"; readonly step: number; readonly attempt: number; readonly failure: CallFailure; readonly retryable: boolean }
   | { readonly t: "tool.requested"; readonly callId: string; readonly attempt: number; readonly tool: string; readonly hash: ToolHash; readonly input: PayloadRef }
@@ -147,8 +157,31 @@ export type RunEvent =
     }
   | { readonly t: "tool.failed"; readonly callId: string; readonly attempt: number; readonly failure: CallFailure; readonly retryable: boolean }
   | { readonly t: "tool.outcome-unknown"; readonly callId: string }
+  /** A bridged tool result the agent CLI's backend may not receive. The agent saw only the refusal; the run goes on. */
+  | { readonly t: "tool.withheld"; readonly callId: string; readonly refusal: EgressRefusal; readonly cls: DataClass }
+  /**
+   * One agent CLI session, written once when the CLI exits. argvHash is the sha256 of the argv template and the
+   * environment names (not values), so a reviewer can rebuild the confinement from the version.
+   */
+  | {
+      readonly t: "agent.session";
+      readonly attempt: number;
+      readonly kind: string;
+      readonly cliVersion: string;
+      readonly argvHash: Sha256;
+      readonly workspace: string;
+      readonly exit: { readonly code: number | null; readonly signal: string | null };
+      /** Bridged tool calls the CLI made. */
+      readonly turns: number;
+      readonly hostsTunneled: readonly string[];
+      /** How many proxy requests were refused. Their targets are CLI-written, so they are a payload at the session's class. */
+      readonly hostsRefused: number;
+      readonly refusedTargets: PayloadRef | null;
+    }
   /** payload is "unverified" when the content was refused for carrying no genuine label. */
   | { readonly t: "egress.refused"; readonly destination: string; readonly payload: DataClass | "unverified"; readonly refusal: EgressRefusal }
+  /** A redirect the egress layer followed, written after the hop's host passed the egress list and decideEgress and before it was sent. */
+  | { readonly t: "egress.redirected"; readonly from: string; readonly to: string; readonly status: number }
   | { readonly t: "confirm.asked"; readonly callId: string }
   | { readonly t: "inbox.consumed"; readonly inboxId: string; readonly item: InboxItem }
   | { readonly t: "stop.asked" }
@@ -188,7 +221,7 @@ export function eventClass(e: RunEvent): DataClass {
     case "model.requested":
       return e.prompt.cls;
     case "model.completed":
-      return join(e.output.cls, ...e.toolCalls.map((c) => c.args.cls));
+      return join(e.output.cls, ...e.toolCalls.map((c) => c.args.cls), ...(e.providerState ? [e.providerState.cls] : []));
     case "tool.requested":
       return e.input.cls;
     case "tool.completed":
@@ -202,8 +235,12 @@ export function eventClass(e: RunEvent): DataClass {
     case "model.failed":
     case "tool.failed":
       return e.failure.detail?.cls ?? "D0";
+    case "agent.session":
+      return e.refusedTargets?.cls ?? "D0";
     case "tool.outcome-unknown":
+    case "tool.withheld":
     case "egress.refused":
+    case "egress.redirected":
     case "confirm.asked":
     case "stop.asked":
     case "stop":
@@ -218,6 +255,7 @@ export function eventClass(e: RunEvent): DataClass {
 }
 
 function reasonClass(r: FailureReason): DataClass {
+  if (r.t === "agent-not-confined") return r.why.cls;
   return r.t === "retries-exhausted" && r.error ? r.error.cls : "D0";
 }
 
@@ -557,7 +595,7 @@ export interface ToolCallState {
 
 export type TranscriptItem =
   | { readonly role: "user" | "steer"; readonly content: PayloadRef }
-  | { readonly role: "assistant"; readonly content: PayloadRef; readonly toolCalls: readonly ToolCallRef[] }
+  | { readonly role: "assistant"; readonly content: PayloadRef; readonly toolCalls: readonly ToolCallRef[]; readonly providerState?: PayloadRef }
   | { readonly role: "tool"; readonly callId: string; readonly name: string; readonly result: ToolResult };
 
 export type ToolResult = { readonly t: "output"; readonly content: PayloadRef } | { readonly t: "error"; readonly failure: CallFailure } | { readonly t: "unknown" };
@@ -614,7 +652,7 @@ export function fold(events: readonly StoredEvent[]): RunState {
       case "model.completed": {
         s.steps += 1;
         s.tokens += e.usage.input + e.usage.output;
-        s.transcript.push({ role: "assistant", content: e.output, toolCalls: e.toolCalls });
+        s.transcript.push({ role: "assistant", content: e.output, toolCalls: e.toolCalls, ...(e.providerState ? { providerState: e.providerState } : {}) });
         const final = s.modelCall?.final ?? false;
         s.modelCall = { step: e.step, attempts: e.attempt, final, status: "completed", lastFailure: null };
         if (e.toolCalls.length === 0 || final) {
@@ -658,6 +696,12 @@ export function fold(events: readonly StoredEvent[]): RunState {
       }
       case "egress.refused":
         s.refused = e.refusal;
+        break;
+      // A session folds as one model call: its bridged tool events name callIds no model.completed lists, and a
+      // withheld result is the run going on, not a refused run.
+      case "tool.withheld":
+      case "agent.session":
+      case "egress.redirected":
         break;
       case "confirm.asked":
         patchTool(e.callId, { confirmAsked: true });

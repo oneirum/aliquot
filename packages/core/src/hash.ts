@@ -24,7 +24,7 @@ export type SkillVersionHash = Brand<string, "SkillVersionHash">;
 export type SnapshotId = Brand<string, "SnapshotId">;
 /** Keyed address of one KB entry (path, title, body, facts), equal to its payload hash. Shared across snapshots. */
 export type EntryHash = Brand<string, "EntryHash">;
-/** Hash over a tool folder's files plus the tool-kit version. Not a git SHA: works in a tarball deploy and ignores unrelated commits. */
+/** Hash of a tool's spec (toolSpecHash in tools.ts). Not a git SHA: works in a tarball deploy and ignores unrelated commits. */
 export type ToolHash = Brand<string, "ToolHash">;
 /** Keyed address of a payload body in the payload store. */
 export type PayloadHash = Brand<string, "PayloadHash">;

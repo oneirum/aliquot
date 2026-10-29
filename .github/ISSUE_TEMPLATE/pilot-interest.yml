@@ -1,0 +1,45 @@
+name: Pilot interest
+description: Our lab wants to try Aliquot.
+title: "Pilot interest: "
+labels: ["pilot"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Please do not paste participant data, credentials or anything restricted into this form.
+  - type: input
+    id: lab
+    attributes:
+      label: Lab and field
+      description: For example, a developmental psychology lab at a public university.
+    validations:
+      required: true
+  - type: checkboxes
+    id: classes
+    attributes:
+      label: Data your lab handles
+      options:
+        - label: Public material only (D0)
+        - label: Internal documents such as SOPs and codebooks (D1)
+        - label: Confidential data such as contact details or unpublished results (D2)
+        - label: Restricted participant data (D3)
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where would the agents run?
+      options:
+        - A lab server or workstation
+        - An institution-hosted service
+        - Not sure yet
+    validations:
+      required: true
+  - type: textarea
+    id: questions
+    attributes:
+      label: The questions your lab answers every week
+      description: Two or three examples help us most.
+  - type: textarea
+    id: needs
+    attributes:
+      label: What would need to be true for your lab to use it?
+      description: For example, Slack, sign-on, PDF sources, or a review by research IT or the IRB.

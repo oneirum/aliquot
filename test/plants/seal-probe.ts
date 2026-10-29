@@ -3,7 +3,7 @@
 import { requireProcessPermission, sealNetwork } from "../../packages/core/src/seal.ts";
 
 sealNetwork();
-// Imported after the seal, like a tool folder: what the probe takes at its own load is the stub.
+// Imported after the seal, like a planted tool: what the probe takes at its own load is the stub.
 const { probeRoutes } = await import("./probe.ts");
 const report = await probeRoutes(process.argv[2]!, process.argv[4]);
 // The Postgres client is imported after the seal too, so its own loads of net, tls and dns go through the hook under the pg allowance.

@@ -1,7 +1,7 @@
 /**
  * The boundary scanner: the static half of "one egress choke point". It
  * builds a TypeScript program over every .ts, .js, .mjs and .cjs file under
- * packages, tools, scripts and bin, and reports each node that reaches the
+ * packages, scripts and bin, and reports each node that reaches the
  * network, loads code, decides egress, brands by cast or stamps a class
  * outside the file allowed to, by the file's path from the repository root.
  *
@@ -41,6 +41,13 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/gateway.ts": ["platform-fetch", "egress-decision"],
   "packages/core/src/tools.ts": ["platform-fetch", "egress-decision", "computed-specifier", "stamp"],
   "packages/core/src/surfaces/web.ts": ["module:http"],
+  // run_code's Docker Engine client, over the daemon's unix socket.
+  "packages/core/src/sandbox.ts": ["module:http"],
+  // The agent worker: the one spawn in core, the loopback MCP server, and the CONNECT proxy.
+  "packages/core/src/agents/spawn.ts": ["module:child_process"],
+  "packages/core/src/agents/bridge.ts": ["module:http"],
+  "packages/core/src/agents/proxy.ts": ["module:net"],
+  "packages/core/src/agents/session.ts": ["stamp"],
   "packages/core/src/db.ts": ["module:pg"],
   "packages/core/src/dataclass.ts": ["egress-decision", "brand-cast"],
   "packages/core/src/frontdoor.ts": ["egress-decision"],
@@ -55,6 +62,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/slice1.ts": ["network-globals", "module:child_process"],
   "scripts/procs.ts": ["network-globals", "module:child_process"],
   "scripts/unit3.ts": ["module:http"],
+  "scripts/record-demo.ts": ["module:child_process"],
+  "scripts/agent-demo.ts": ["module:child_process"],
   "scripts/unit2.ts": ["network-globals", "module:child_process", "module:net"],
   // One booted core per studio server, kept across Next's dev reloads of this module.
   "packages/studio/core.ts": ["global-object"],
@@ -81,7 +90,7 @@ const DYNAMIC_CODE: ReadonlySet<string> = new Set(["eval", "Function"]);
 const PROCESS_ESCAPES: ReadonlySet<string> = new Set(["binding", "_linkedBinding", "dlopen"]);
 const BRANDS: ReadonlySet<string> = new Set(["ResolvedAgent", "AuthorizedRoute", "Authorized", "Labelled", "Prompt"]);
 
-const SCAN_ROOTS = ["packages", "tools", "scripts", "bin"];
+const SCAN_ROOTS = ["packages", "scripts", "bin"];
 const SCANNED = /\.(ts|tsx|js|mjs|cjs)$/;
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -285,8 +294,6 @@ export const PLANTS: readonly Plant[] = [
   { name: "a plain JavaScript file", file: "packages/core/src/leak.mjs", code: 'export const leak = () => fetch("http://example.org/");', rule: "global fetch reference" },
   { name: "a CommonJS require", file: "packages/core/src/leak.cjs", code: 'module.exports = () => require("node:net");', rule: "network module node:net" },
   { name: "this in CommonJS", file: "packages/core/src/sloppy.cjs", code: "module.exports = function () { return this; };", rule: "this in a CommonJS file reaches the global object" },
-  { name: "a tool folder", file: "tools/leak/tool.ts", code: 'export const leak = () => fetch("http://example.org/");', rule: "global fetch reference" },
-  { name: "a tool folder loading a client", file: "tools/leak2/tool.ts", code: 'export const leak = () => import("axios");', rule: "network module axios" },
   { name: "the worker binary", file: "packages/core/bin/leak.ts", code: 'export const leak = () => import("node:child_process");', rule: "network module node:child_process" },
   { name: "a script", file: "scripts/leak.ts", code: 'export const leak = () => import("node:http");', rule: "network module node:http" },
   { name: "the studio importing core's root", file: "packages/studio/leak.ts", code: 'export { boot as leak44 } from "@labh/core";', rule: "studio import of core outside @labh/core/studio" },
@@ -301,7 +308,7 @@ export const PLANTS: readonly Plant[] = [
 
 /** Legitimate shapes that resemble a route. Each must produce no violation. */
 export const CONTROLS: readonly { readonly name: string; readonly file: string; readonly code: string }[] = [
-  { name: "a tool using ctx.fetch", file: "tools/fine/tool.ts", code: 'import { defineTool, z } from "@labh/core/tool-kit";\nexport default defineTool({ name: "fine", description: "Use when testing. Not for anything.", input: z.object({ url: z.string() }), reads: "D0", effects: "read", egress: ["example.org"], idempotent: true, async run({ url }, ctx) { const { fetch } = ctx; return (await fetch(url)).status; } });' },
+  { name: "a tool using ctx.fetch", file: "packages/core/src/fine5.ts", code: 'import { z } from "zod";\nimport { defineTool } from "./tools.ts";\nexport const fine = defineTool({ name: "fine", description: "Use when testing. Not for anything.", input: z.object({ url: z.string() }), reads: "D0", effects: "read", egress: ["example.org"], idempotent: true, async run({ url }, ctx) { const { fetch } = ctx; return (await fetch(url)).status; } });' },
   { name: "a type position", file: "packages/core/src/fine.ts", code: "export interface Deps { readonly fetchImpl?: typeof fetch; readonly socket?: WebSocket }" },
   { name: "a property named fetch on a local type", file: "packages/core/src/fine2.ts", code: 'export interface Ctx { fetch(url: string): Promise<Response> }\nexport const run = (ctx: Ctx) => ctx.fetch("http://example.org/");' },
   { name: "a harmless global", file: "packages/core/src/fine3.ts", code: "export const now = () => globalThis.performance.now();" },

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -38,4 +39,10 @@ test("nothing the studio's entry into core loads constructs a model gateway or a
     visit(sf);
   }
   assert.deepEqual(builds, []);
+});
+
+test("the wire adapters may not reach the network: a module import or a fetch in gateway-wire.ts is reported", async () => {
+  const source = `${await readFile(join(root, "packages/core/src/gateway-wire.ts"), "utf8")}\nimport { request } from "node:http";\nvoid request;\nvoid fetch("http://example.org");\n`;
+  const found = scanBoundaries(root, new Map([["packages/core/src/gateway-wire.ts", source]])).filter((v) => v.file === "packages/core/src/gateway-wire.ts");
+  assert.deepEqual(found.map((v) => v.rule).sort(), ["global fetch reference", "network module node:http"]);
 });

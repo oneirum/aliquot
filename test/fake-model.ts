@@ -9,7 +9,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 
-export type Script = "search-then-answer" | "search-read-answer" | "always-search" | "answer" | "wrong-model" | "http-500" | "compile";
+export type Script = "search-then-answer" | "search-read-answer" | "cite" | "always-search" | "answer" | "wrong-model" | "http-500" | "compile";
 
 /** What the http-500 script puts in its error body. A provider error body can echo the prompt, so the record must not hold it in the clear. */
 export const ERROR_BODY_MARKER = "provider-echo P-12345";
@@ -97,6 +97,17 @@ export async function startFakeModel(modelId: string, script: Script): Promise<F
         return respond(res, 500, { error: `upstream failed: ${ERROR_BODY_MARKER}` });
       case "compile":
         return respond(res, 200, answer(compileReply(body.messages)));
+      case "cite": {
+        // The demo's fake: search, read the top entry, quote its opening and name the path. It reads; it does not think.
+        const last = toolResults.at(-1);
+        if (last === undefined) return respond(res, 200, hasTools ? call("kb_search", { query: lastUser, k: 3 }) : answer("No knowledge base tools are attached."));
+        const parsed = JSON.parse(last) as { results?: { path: string }[]; entries?: { path: string; body: string }[] };
+        if (parsed.results) return respond(res, 200, parsed.results.length ? call("kb_read", { paths: [parsed.results[0]!.path] }) : answer("The lab's documents do not cover this question."));
+        const entry = parsed.entries?.[0];
+        if (!entry) return respond(res, 200, answer("The lab's documents do not cover this question."));
+        const opening = entry.body.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/).slice(0, 2).join(" ");
+        return respond(res, 200, answer(`${opening}\n\nSource: ${entry.path}`));
+      }
       case "search-read-answer": {
         const last = toolResults.at(-1);
         if (last === undefined) return respond(res, 200, call("kb_search", { query: lastUser, k: 3 }));

@@ -1,0 +1,178 @@
+{
+  "header": {
+    "type": "esummary",
+    "version": "0.3"
+  },
+  "result": {
+    "uids": [
+      "42924740",
+      "42900036"
+    ],
+    "42924740": {
+      "uid": "42924740",
+      "pubdate": "2026 Oct 1",
+      "source": "Clocks Sleep",
+      "authors": [
+        {
+          "name": "Monaco F",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Vignapiano A",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Landi S",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Panarello E",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Malvone R",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Marenna A",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "D'Alessandro C",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Faiella N",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Collura A",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Steardo L Jr",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Sosto G",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Corrivetti G",
+          "authtype": "Author",
+          "clusterid": ""
+        }
+      ],
+      "title": "Longitudinal Changes in Insomnia, Sleep Continuity, and Sleep Timing During Residential Treatment for Eating Disorders: A Six-Month Observational Study.",
+      "elocationid": "doi: 10.3390/clockssleep8040064",
+      "articleids": [
+        {
+          "idtype": "pubmed",
+          "idtypen": 1,
+          "value": "42924740"
+        },
+        {
+          "idtype": "pmc",
+          "idtypen": 8,
+          "value": "PMC13692534"
+        },
+        {
+          "idtype": "pmcid",
+          "idtypen": 5,
+          "value": "pmc-id: PMC13692534;"
+        },
+        {
+          "idtype": "doi",
+          "idtypen": 3,
+          "value": "10.3390/clockssleep8040064"
+        },
+        {
+          "idtype": "pii",
+          "idtypen": 4,
+          "value": "clockssleep8040064"
+        }
+      ],
+      "fulljournalname": "Clocks & sleep",
+      "sortpubdate": "2026/10/01 00:00"
+    },
+    "42900036": {
+      "uid": "42900036",
+      "pubdate": "2026 Oct 20",
+      "source": "J Adolesc Health",
+      "authors": [
+        {
+          "name": "Taylor RW",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Haszard JJ",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Wickham SR",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Galland BC",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Russell-Camp T",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Jackson RF",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Brosnan BJ",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Meredith-Jones KA",
+          "authtype": "Author",
+          "clusterid": ""
+        }
+      ],
+      "title": "Sleep, Dietary Intake, and Physical Activity: Examining Bidirectionality Using Repeated-Measures Analyses.",
+      "elocationid": "pii: S1054-139X(26)00344-7. doi: 10.1016/j.jadohealth.2026.07.030",
+      "articleids": [
+        {
+          "idtype": "pubmed",
+          "idtypen": 1,
+          "value": "42900036"
+        },
+        {
+          "idtype": "doi",
+          "idtypen": 3,
+          "value": "10.1016/j.jadohealth.2026.07.030"
+        },
+        {
+          "idtype": "pii",
+          "idtypen": 4,
+          "value": "S1054-139X(26)00344-7"
+        }
+      ],
+      "fulljournalname": "The Journal of adolescent health : official publication of the Society for Adolescent Medicine",
+      "sortpubdate": "2026/10/20 00:00"
+    }
+  }
+}

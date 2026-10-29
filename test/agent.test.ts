@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { LOOP_CONTRACT, listingOf, parseAgentDocument, parseExactModelId, resolveAgent, validateAgentDraft, verifyRunnable, versionHash, type Catalog } from "../packages/core/src/agent.ts";
-import type { SnapshotId, ToolHash } from "../packages/core/src/hash.ts";
+import type { Sha256, SnapshotId, ToolHash } from "../packages/core/src/hash.ts";
 
 const fixture = JSON.parse(await readFile(new URL("../fixtures/agent.json", import.meta.url), "utf8")) as Record<string, unknown>;
 
@@ -12,6 +12,7 @@ const catalog: Catalog = {
   tool: (name) => (name === "kb_search" || name === "kb_read" ? { hash: name.padEnd(64, "t") as ToolHash, reads: "D0", effects: "read" } : undefined),
   endpoint: (id) => (id === "local" ? { placement: "lab" } : id === "hosted" ? { placement: "zdr" } : undefined),
   sandboxImage: () => undefined,
+  dataset: () => undefined,
 };
 
 function doc(overrides: Record<string, unknown> = {}) {
@@ -115,4 +116,28 @@ test("parseAgentDocument reports shape errors with their paths", () => {
   const bad = parseAgentDocument({ ...fixture, ceiling: "D9" });
   assert.equal(bad.ok, false);
   assert.equal(!bad.ok && bad.issues[0]?.field, "ceiling");
+});
+
+test("publish refuses a sandbox mount that lab.toml does not declare or that sits above the mount ceiling", () => {
+  const withSandbox: Catalog = { ...catalog, sandboxImage: () => "d".repeat(64) as Sha256, dataset: (id) => (id === "visits" ? { cls: "D1" } : id === "cohort" ? { cls: "D2" } : undefined) };
+  const sandbox = (mounts: string[], mountCeiling = "D1") => doc({ ceiling: "D2", sandbox: { enabled: true, mountCeiling, mounts } });
+  assert.deepEqual(validateAgentDraft(sandbox(["visits"]), withSandbox), []);
+  assert.deepEqual(
+    validateAgentDraft(sandbox(["visits", "cohort", "nonesuch"]), withSandbox).map((i) => i.message),
+    ["dataset cohort is D2, above the mount ceiling D1", "dataset nonesuch is not in lab.toml"],
+  );
+  assert.deepEqual(validateAgentDraft(sandbox([], "D3"), withSandbox).map((i) => i.message), ["mount ceiling D3 is above the agent ceiling D2"]);
+  const r = resolveAgent(sandbox(["visits"]), withSandbox);
+  assert.deepEqual(r.ok && r.agent.sandbox, { imageDigest: "d".repeat(64), mountCeiling: "D1", mounts: ["visits"] });
+});
+
+test("an agent that may mount D3 data needs an IRB protocol, as one that reads a D3 knowledge base does", () => {
+  const withSandbox: Catalog = { ...catalog, sandboxImage: () => "d".repeat(64) as Sha256, dataset: (id) => (id === "ehr" ? { cls: "D3" } : id === "visits" ? { cls: "D1" } : undefined) };
+  const sandbox = (mounts: string[], mountCeiling: string, irb?: string) => doc({ ceiling: "D3", sandbox: { enabled: true, mountCeiling, mounts }, ...(irb ? { irbProtocol: irb } : {}) });
+  const irbRule = [{ field: "irbProtocol", severity: "error", message: "an agent that reads D3 data must name its IRB protocol" }];
+  assert.deepEqual(validateAgentDraft(sandbox(["ehr"], "D3"), withSandbox), irbRule);
+  // The ceiling alone counts: a mount raised to D3 in lab.toml later is mounted under the frozen D3 ceiling.
+  assert.deepEqual(validateAgentDraft(sandbox(["visits"], "D3"), withSandbox), irbRule);
+  assert.deepEqual(validateAgentDraft(sandbox(["ehr"], "D3", "IRB-2026-1"), withSandbox), []);
+  assert.deepEqual(validateAgentDraft(sandbox(["visits"], "D2"), withSandbox), []);
 });

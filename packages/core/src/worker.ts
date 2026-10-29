@@ -10,9 +10,10 @@ import { RETRIEVAL_ALGORITHM } from "./kb.ts";
 import { boot, type Core } from "./boot.ts";
 import { runCompileJob } from "./kb-compile.ts";
 import { drive, type LoopDeps } from "./loop.ts";
-import { runWorker, type JobResult, type LeasedJob } from "./queue.ts";
+import { runWorker, type Engine, type JobHandler, type JobKind, type JobResult, type LeasedJob } from "./queue.ts";
 import { openJournal, parseStopNotification, RecordCorrupt, StoreRefused, type RunEvent, type RunId, type RunJournal, type StopNotice, type StoredEvent } from "./record.ts";
 import type { AgentVersionHash } from "./hash.ts";
+import type { ModelTarget } from "./gateway.ts";
 import type { RegisteredTool } from "./tools.ts";
 
 /**
@@ -53,6 +54,11 @@ export interface WorkerOptions {
   readonly tools?: readonly RegisteredTool[];
   readonly signal: AbortSignal;
   readonly log: (line: string) => void;
+  /** The agent worker sets these: it claims agent-cli runs only, and runs them through its session driver. */
+  readonly engine?: Engine;
+  readonly agentSession?: LoopDeps["agentSession"];
+  readonly agentClis?: ReadonlyMap<string, string>;
+  readonly confinement?: Deployed["confinement"];
 }
 
 const pgBlip = () => Object.assign(new Error("Connection terminated unexpectedly"), { code: "ECONNRESET" });
@@ -121,13 +127,26 @@ export async function workOn(core: Core, opts: WorkerOptions): Promise<void> {
     if (body.schema !== 2) throw new AgentUnavailable(hash, "schema");
     return body;
   };
+  /** Endpoint id -> which of a band agent's targets (every band, and model above them) it serves now, for verifyRunnable. */
+  const servedBands = async (targets: readonly ModelTarget[]): Promise<Map<string, Set<string>>> => {
+    const served = new Map<string, Set<string>>();
+    for (const t of targets) {
+      const ids = served.get(t.endpointId) ?? new Set<string>();
+      served.set(t.endpointId, ids);
+      if (await core.gateway.serves(t)) ids.add(t.modelId);
+    }
+    return served;
+  };
   // Snapshots are published while the worker runs, so which of the agent's pins this deployment serves is asked per run.
   const deployed = async (agent: ResolvedAgent): Promise<Deployed> => ({
     tools: core.tools.registry.deployed(),
     snapshots: new Set((await Promise.all(agent.knowledgeBases.map(async (b) => ((await core.kb.has(b.snapshot)) ? [b.snapshot] : [])))).flat()),
-    sandboxImages: new Set(),
+    sandboxImages: agent.sandbox && core.config.sandbox?.digest === agent.sandbox.imageDigest && (await core.sandbox?.hasImage()) ? new Set([agent.sandbox.imageDigest]) : new Set(),
     loopContract: LOOP_CONTRACT,
     retrieval: new Set([RETRIEVAL_ALGORITHM]),
+    ...(opts.agentClis ? { agentClis: opts.agentClis } : {}),
+    ...(agent.modelsByClass ? { served: await servedBands([...agent.modelsByClass.map((b) => b.target), agent.model]) } : {}),
+    ...(opts.confinement ? { confinement: opts.confinement } : {}),
   });
 
   const run = async (job: LeasedJob, lease: { lost: AbortSignal }): Promise<JobResult> => {
@@ -170,6 +189,7 @@ export async function workOn(core: Core, opts: WorkerOptions): Promise<void> {
           return { signal: AbortSignal.any([ctl.signal, lease.lost]), release: () => listeners.delete(onStop) };
         },
         log: opts.log,
+        ...(opts.agentSession ? { agentSession: opts.agentSession } : {}),
       };
       const result = await drive(job, journal, deps);
       opts.log(`run ${runId}: ${result.t}${result.t === "finished" ? ` ${result.outcome}` : ""}${"error" in result ? ` (${result.error})` : ""}`);
@@ -200,7 +220,8 @@ export async function workOn(core: Core, opts: WorkerOptions): Promise<void> {
   };
 
   try {
-    await runWorker(opts.workerId, core.db, core.queue, { run, "kb-compile": compile }, { leaseMs: opts.leaseMs, pollMs: opts.pollMs, signal: opts.signal, log: opts.log });
+    const handlers: Partial<Record<JobKind, JobHandler>> = opts.engine === "agent-cli" ? { run } : { run, "kb-compile": compile };
+    await runWorker(opts.workerId, core.db, core.queue, handlers, { engine: opts.engine ?? "chat", leaseMs: opts.leaseMs, pollMs: opts.pollMs, signal: opts.signal, log: opts.log });
   } finally {
     listener.release();
   }

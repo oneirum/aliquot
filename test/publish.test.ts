@@ -24,6 +24,7 @@ const catalog: Catalog = {
   tool: (name) => (name === "kb_search" || name === "kb_read" ? { hash: (name === "kb_search" ? "t" : "r").repeat(64) as ToolHash, reads: "D0", effects: "read" } : undefined),
   endpoint: (id) => (id === "local" ? { placement: "lab" } : undefined),
   sandboxImage: () => undefined,
+  dataset: () => undefined,
 };
 const deps = { db, catalog: async () => catalog };
 const member: Actor = { id: "mia" as MemberId, role: "member" };

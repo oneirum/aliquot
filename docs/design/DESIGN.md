@@ -12,7 +12,7 @@ Constraints from the spec and task that shape everything below:
 - D3 and R never reach a hosted model or hosted workflow history, enforced at one choke point.
 - A frozen version is a content hash over the fully resolved agent. Freeze, run records, cards and replay all derive from that one type.
 - Every model call, retrieval and tool call is in the run record as it happens. A crashed run has a complete record up to the crash.
-- A lab contributor who is not a full-time engineer can add a tool or read the run loop.
+- A lab contributor who is not a full-time engineer can add a tool (v0.3; see DESIGN-v02) or read the run loop.
 - Sanity's runtime defaults: 3 attempts, stream fallback, stop means stop, limits between steps (40 steps, 1M tokens, 10 min; background 200 steps, 1 h), idempotent by thread.
 
 The non-obvious part: Sanity has two histories (Temporal's workflow history and whatever they log), and it encrypts Temporal's before it leaves the cluster because that history "holds whole conversations and whatever the tools return". A lab has a third requirement on top: the run record is a research artifact. Three copies of the same conversation, each with its own retention, redaction and egress story, is the shape to avoid.
@@ -52,6 +52,8 @@ review_confidential = "refuse"        # or "lab-only"
 ```
 
 ### Contributor: adding a tool
+
+v0.2 changes this section: it loads no tool folder, and every binary refuses a `lab.toml` with a `[tools]` table. Its seven tools are built into `packages/core/src/tools.ts`, and each tool's version is the hash of its spec. Contributed tools are planned for v0.3, behind an OS-level boundary. See "Research tools" in `DESIGN-v02.md`. The sketch below is the original plan, kept for the shape of `defineTool`.
 
 One folder, one file, one test. No registry to edit. The folder's content hash becomes part of every agent version that uses it.
 
@@ -118,7 +120,7 @@ const outcome = await intake(inboundFromChatSdk(event));   // gate -> study pin 
 ### Module map
 
 ```
-packages/core            the harness. Public surface: src/index.ts and ./tool-kit only (package.json "exports").
+packages/core            the harness. Public surface: src/index.ts and ./studio only (package.json "exports").
   hash.ts                canonical JSON, sha256, branded hash types
   dataclass.ts           DataClass lattice, Placement, Destination, decideEgress()  <- the one egress decision
   record.ts              RunEvent, fenced append, payload store, fold(), PROV export, redaction
@@ -128,7 +130,7 @@ packages/core            the harness. Public surface: src/index.ts and ./tool-ki
   agent.ts               AgentDocument, ResolvedAgent, resolve(), versionHash(), validateAgentDraft(), card
   kb.ts                  KbSnapshot, outline/read/search, bm25-v1, compile
   skills.ts              SkillVersion, catalog, skill_read
-  tools.ts               defineTool, ToolContext (egress-checked fetch), registry discovery, folder hashing, built-ins
+  tools.ts               defineTool, ToolContext (egress-checked fetch), the registry and the seven built-ins
   gate.ts                identity, audience, message classification (local detector, fails closed)
   router.ts              route(), shouldReply(), overlapReport(); backends behind gateway.choose()
   frontdoor.ts           Surface port, intake(), reply posting through decideEgress
@@ -138,14 +140,13 @@ packages/core            the harness. Public surface: src/index.ts and ./tool-ki
   seal.ts                the runtime half of the choke point: the platform fetch, sealNetwork(), the permission-model check
   migrations/            ordered schema migrations; db.ts applies each once, in order, recorded in schema_migrations
 packages/studio          Payload CMS config (collections, custom Publish and Test panels). Imports @labh/core.
-tools/<name>/tool.ts     contributed tools, discovered at startup
 ```
 
-Studio depends on core. Core never imports studio. The package `exports` field makes core internals unimportable from tools and studio, per the importable-internals red flag.
+Studio depends on core. Core never imports studio. The package `exports` field makes core internals unimportable from the studio, per the importable-internals red flag.
 
 ### Data structures first
 
-**Content-addressed everything.** Agent versions, skill versions, KB snapshots, KB entries, tool folders and run payloads are all addressed by sha256 of canonical JSON or bytes. This one decision buys several features at once:
+**Content-addressed everything.** Agent versions, skill versions, KB snapshots, KB entries, tool specs and run payloads are all addressed by sha256 of canonical JSON or bytes. This one decision buys several features at once:
 
 - Freeze is a row binding a study to a hash. Edits make new hashes. A study cannot see an edit because it never looks anything up by name.
 - KB snapshot diff is a diff of two `{path -> entryHash}` maps. Unchanged entries dedupe for free.
@@ -188,7 +189,7 @@ The gateway is also the only module holding provider base URLs and keys. Refuse-
 
 Every gateway call takes a `CallRecorder`. Inside a run it is the run journal; outside a run (KB compile, publish checks, router calls before a run exists) it is the audit stream. There is no way to call a model without writing a record, and refusals are recorded in exactly one place.
 
-An in-process tool that reaches for `node:http` or the global `fetch` would bypass `ctx.fetch`, so the tool path is closed by three layers, each proven by a planted route. Statically, `scripts/boundaries.ts` builds a TypeScript program over `packages`, `tools`, `scripts` and `bin` and reads bound symbols, not text: a network global by any spelling, a computed or aliased use of the global object, `eval` and `Function`, and every static, dynamic, re-exported or required load of a network builtin or socket-opening package are reported against an allowance keyed by path from the repository root. At runtime, `seal.ts` takes the platform `fetch` when it loads (the gateway and the tool runner import it, nothing else may) and `sealNetwork()`, called by each binary before it boots and before any tool is imported, replaces the network globals with non-configurable throwing stubs, refuses the network modules in the loader for every importer but the web server and `pg`, and wraps `process.getBuiltinModule`. At the process level, the binaries refuse to start unless Node's permission model is on with child processes, worker threads and addons denied. What stays open is the network itself, because `--allow-net` is all or nothing and the worker needs Postgres and the model endpoints; the sandbox runs with no network for the code it executes.
+An in-process tool that reaches for `node:http` or the global `fetch` would bypass `ctx.fetch`, so the tool path is closed by three layers, each proven by a planted route. Statically, `scripts/boundaries.ts` builds a TypeScript program over `packages`, `scripts` and `bin` and reads bound symbols, not text: a network global by any spelling, a computed or aliased use of the global object, `eval` and `Function`, and every static, dynamic, re-exported or required load of a network builtin or socket-opening package are reported against an allowance keyed by path from the repository root. At runtime, `seal.ts` takes the platform `fetch` when it loads (the gateway and the tool runner import it, nothing else may) and `sealNetwork()`, called by each binary before it boots and before any tool is imported, replaces the network globals with non-configurable throwing stubs, refuses the network modules in the loader for every importer but the web server and `pg`, and wraps `process.getBuiltinModule`. At the process level, the binaries refuse to start unless Node's permission model is on with child processes, worker threads and addons denied. What stays open is the network itself, because `--allow-net` is all or nothing and the worker needs Postgres and the model endpoints; the sandbox runs with no network for the code it executes.
 
 ### The run loop
 
@@ -292,7 +293,7 @@ Four candidate designs were written independently from the same task and scored 
 
 ## Open questions and risks
 
-- Frozen studies pin tool folder hashes. When someone edits a tool a frozen study uses, should CI block the merge until the study owner acknowledges, or should the deployment keep old tool versions runnable? This design refuses the run and proposes the CI check (`frozenDependents(tool)`).
+- Frozen studies pin tool hashes. When someone edits a tool a frozen study uses, should CI block the merge until the study owner acknowledges, or should the deployment keep old tool versions runnable? This design refuses the run and proposes the CI check (`frozenDependents(tool)`).
 - Can a local model be pinned by weights digest? Ollama tags move. Does the lab accept "tag plus recorded digest, refuse on digest change" as the frozen contract? Digest exposure by Ollama and vLLM is unverified.
 - Is Slack placement `approved` (D2) right as the default for a university lab, or should the default be `public` until the lab's IT says otherwise?
 - Does the sandbox's Docker socket access pass a department IT review? Rootless Docker or Podman would help; neither is checked.

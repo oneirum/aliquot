@@ -55,6 +55,8 @@ export interface KbDefinition {
   readonly compiler: ModelTarget;
   readonly irbProtocol: string | null;
   readonly consentScope: string | null;
+  /** Absent means DEFINITION_CLASS; kept absent rather than defaulted so existing compile keys do not move. */
+  readonly definitionClass?: DataClass;
 }
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
@@ -106,6 +108,10 @@ export const kbDefinitionSchema = z.object({
     .meta(says("Compiler")),
   irbProtocol: z.string().optional().meta(says("IRB protocol", "Optional. The protocol that covers these sources.")),
   consentScope: z.string().optional().meta(says("Consent scope", "Optional. What participants consented to.")),
+  definitionClass: z
+    .enum(DATA_CLASSES)
+    .optional()
+    .meta(says("Definition data class", "Optional. The class of the title, purpose and questions themselves. D1 when empty; D0 only for a knowledge base built from public material.")),
 });
 
 /** Boundary: a definition file's JSON in, a typed definition out. */
@@ -291,6 +297,7 @@ const compileJobSchema = z.object({
     compiler: z.object({ endpointId: z.string(), modelId: z.string(), params: z.object({ temperature: z.number(), maxOutputTokens: z.number(), seed: z.number().optional() }) }),
     irbProtocol: z.string().nullable(),
     consentScope: z.string().nullable(),
+    definitionClass: z.enum(DATA_CLASSES).optional(),
   }),
   sources: z.array(z.object({ sourceId: z.string(), kind: z.enum(SOURCE_KINDS), location: z.string(), cls: z.enum(DATA_CLASSES), licence: z.enum(LICENCES), contentHash: z.string(), text: refSchema })),
   requestedAt: z.string(),
@@ -329,7 +336,7 @@ export interface CompileDeps {
 
 /** The class of a definition's own text (title, purpose, coverage questions): DEFINITION_CLASS, raised by anything the gate's detectors or the lab's patterns find in it. */
 export function definitionClass(def: KbDefinition, labPatterns: readonly RegExp[]): DataClass {
-  return classifyText([def.title, def.purpose, ...def.coverageQuestions].join("\n"), DEFINITION_CLASS, labPatterns).cls;
+  return classifyText([def.title, def.purpose, ...def.coverageQuestions].join("\n"), def.definitionClass ?? DEFINITION_CLASS, labPatterns).cls;
 }
 
 /** Runs one compile job to a snapshot, reusing every cached source result and coverage verdict. */

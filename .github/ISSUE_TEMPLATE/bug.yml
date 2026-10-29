@@ -1,0 +1,23 @@
+name: Bug
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a data leak or a way around the seal, use private vulnerability reporting instead (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps or a failing check
+      description: The command you ran and its output. Remove secrets.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit

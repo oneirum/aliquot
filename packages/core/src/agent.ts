@@ -19,6 +19,7 @@ import { atMost, ceilingOf, DATA_CLASSES, Labelled, rank, type DataClass, type P
 import { contentHash, type AgentVersionHash, type SkillVersionHash, type SnapshotId, type ToolHash, type Sha256 } from "./hash.ts";
 import { DEFAULT_READ_CAP_TOKENS, RETRIEVAL_ALGORITHM } from "./kb.ts";
 import type { ModelTarget, ExactModelId } from "./gateway.ts";
+import type { AgentCliKind } from "./agents/backends.ts";
 
 export type AgentId = string & { readonly __agent: true };
 export type MemberId = string & { readonly __member: true };
@@ -46,6 +47,12 @@ export interface EvalCase {
   readonly expect: { readonly t: "contains"; readonly text: string } | { readonly t: "rubric"; readonly rubric: string };
 }
 
+export interface DocumentModel {
+  readonly endpointId: string;
+  readonly modelId: string;
+  readonly params: ModelTarget["params"];
+}
+
 /**
  * The document a lab member edits. Parsed from Payload JSON (or MCP input) at
  * the studio boundary; core never sees Payload's shape.
@@ -61,7 +68,9 @@ export interface AgentDocument {
   readonly instructions: string;
   /** Class of the instructions text itself. D1 unless the author raises it. No detector reads instructions, so an author who writes restricted text into them must raise this. */
   readonly instructionsClass: DataClass;
-  readonly model: { readonly endpointId: string; readonly modelId: string; readonly params: ModelTarget["params"] };
+  readonly model: DocumentModel;
+  /** Optional per-class bands, lowest first: a call goes to the first band whose upTo admits its class. */
+  readonly modelsByClass?: readonly { readonly upTo: DataClass; readonly model: DocumentModel }[];
   readonly skills: readonly string[];
   readonly knowledgeBases: readonly string[];
   /** kb_read's cap per call, in estimated tokens. Defaults to DEFAULT_READ_CAP_TOKENS. */
@@ -116,6 +125,27 @@ export interface ResolvedAgent {
   /** The algorithm is checked against the deployed reader at run start; the cap is what kb_search and kb_read read up to. */
   readonly retrieval: { readonly algorithm: "bm25-v1"; readonly readCapTokens: number };
   readonly limits: Limits;
+  /**
+   * Present iff model.endpointId names an agent backend, and absent otherwise, so every version
+   * hashed before agent backends existed keeps its hash (canonicalJson omits absent keys).
+   */
+  readonly agentCli?: { readonly kind: AgentCliKind; readonly cliVersion: string };
+  /**
+   * Per-class bands for the chat loop, lowest upTo first, each below the ceiling. model serves every class above
+   * the last band. Absent: model serves every class, and every version hashed before bands existed keeps its hash.
+   * Never present together with agentCli.
+   */
+  readonly modelsByClass?: readonly ModelBand[];
+}
+
+export interface ModelBand {
+  readonly upTo: DataClass;
+  readonly target: ModelTarget;
+}
+
+/** The target a prompt of this class goes to: the first band that admits it, otherwise model. */
+export function modelFor(agent: ResolvedAgent, cls: DataClass): ModelTarget {
+  return agent.modelsByClass?.find((b) => atMost(cls, b.upTo))?.target ?? agent.model;
 }
 
 /** What the router, gate, studio and card read. Mutable on publish, not hashed. */
@@ -140,8 +170,10 @@ export interface Catalog {
   latestSkill(skillId: string): { version: SkillVersionHash; name: string; summary: string; cls: DataClass } | undefined;
   latestSnapshot(kbId: string): { id: SnapshotId; cls: DataClass; consentScope?: string; irbProtocol?: string } | undefined;
   tool(name: string): { hash: ToolHash; reads: DataClass; effects: "read" | "lab-write" | "external-send" } | undefined;
-  endpoint(id: string): { placement: Placement } | undefined;
+  /** An endpoint, or an agent backend with the CLI version an agent worker last reported for it (null when none has). */
+  endpoint(id: string): { placement: Placement; agentCli?: { kind: AgentCliKind; cliVersion: string | null } } | undefined;
   sandboxImage(): Sha256 | undefined;
+  dataset(id: string): { cls: DataClass } | undefined;
 }
 
 export interface Issue {
@@ -154,6 +186,20 @@ const dataClass = z.enum(DATA_CLASSES);
 const member = z.string().min(1);
 /** Label and help text. The studio's form shows exactly these, so they are written for lab members, not developers. */
 const says = (title: string, description?: string) => (description ? { title, description } : { title });
+
+const modelSchema = z
+  .object({
+    endpointId: z.string().min(1).meta(says("Endpoint", "The model server from lab.toml that runs this agent, for example local.")),
+    modelId: z.string().min(1).meta(says("Model id", "The exact model version, for example qwen3:8b. Aliases such as latest are refused, because they change under a study.")),
+    params: z
+      .object({
+        temperature: z.number().min(0).max(2).default(0).meta(says("Temperature", "0 gives the most repeatable answers.")),
+        maxOutputTokens: z.number().int().positive().default(1024).meta(says("Max output tokens", "The longest answer the model may write in one call.")),
+        seed: z.number().int().optional().meta(says("Seed", "Optional. Some models repeat an answer exactly with the same seed.")),
+        topP: z.number().min(0).max(1).optional().meta(says("Top p", "Optional sampling cutoff between 0 and 1.")),
+      })
+      .meta(says("Parameters")),
+  });
 
 /**
  * The one definition of the document's shape. The studio generates its form
@@ -174,20 +220,16 @@ export const agentDocumentSchema = z.object({
   maintainers: z.array(member).default([]).meta(says("Maintainers", "Other lab members who look after it.")),
   instructions: z.string().min(1).meta(says("Instructions", "What the agent is told at the start of every conversation.")),
   instructionsClass: dataClass.default("D1").meta(says("Instructions data class", "The data class of the instructions text itself. D1 unless the text contains restricted data.")),
-  model: z
-    .object({
-      endpointId: z.string().min(1).meta(says("Endpoint", "The model server from lab.toml that runs this agent, for example local.")),
-      modelId: z.string().min(1).meta(says("Model id", "The exact model version, for example qwen3:8b. Aliases such as latest are refused, because they change under a study.")),
-      params: z
-        .object({
-          temperature: z.number().min(0).max(2).default(0).meta(says("Temperature", "0 gives the most repeatable answers.")),
-          maxOutputTokens: z.number().int().positive().default(1024).meta(says("Max output tokens", "The longest answer the model may write in one call.")),
-          seed: z.number().int().optional().meta(says("Seed", "Optional. Some models repeat an answer exactly with the same seed.")),
-          topP: z.number().min(0).max(1).optional().meta(says("Top p", "Optional sampling cutoff between 0 and 1.")),
-        })
-        .meta(says("Parameters")),
-    })
-    .meta(says("Model")),
+  model: modelSchema.meta(says("Model")),
+  modelsByClass: z
+    .array(
+      z.object({
+        upTo: dataClass.meta(says("Up to data class", "This model answers questions up to this data class, which must be below the data ceiling. List the bands from the least restricted class to the most.")),
+        model: modelSchema.meta(says("Model", "The model for this band. Its endpoint must be allowed to receive the band's data class.")),
+      }),
+    )
+    .optional()
+    .meta(says("Models by data class", "Optional. Send less restricted questions to other models, for example a hosted model for public data. Each band stops below the data ceiling, and the model above answers everything more restricted than the last band. Leave empty to use the model above for everything.")),
   skills: z.array(z.string()).default([]).meta(says("Skills", "Skill ids this agent may read.")),
   knowledgeBases: z.array(z.string()).default([]).meta(says("Knowledge bases", "Knowledge base ids. The agent searches the latest published snapshot of each.")),
   readCapTokens: z
@@ -290,7 +332,7 @@ export function parseAgentDocument(json: unknown): { readonly ok: true; readonly
  * - model id parses as ExactModelId
  * - ceiling >= every KB class, skill class and tool reads class
  * - ceiling >= D3 implies model endpoint placement allows D3
- * - agent touching D3 KB requires irbProtocol; KB consent scope needs a stated consentPurpose
+ * - agent touching a D3 KB, or with a D3 sandbox mount ceiling, requires irbProtocol; KB consent scope needs a stated consentPurpose
  * - frozen-only rule (fallback refuse) is structural: ResolvedAgent has no other fallback
  */
 export function validateAgentDraft(doc: AgentDocument, catalog: Catalog): Issue[] {
@@ -329,8 +371,57 @@ export function validateAgentDraft(doc: AgentDocument, catalog: Catalog): Issue[
     if (!tool) error("tools", `tool ${t.name} is not deployed`);
     else if (!atMost(tool.reads, doc.ceiling)) error("tools", `tool ${t.name} reads ${tool.reads}, above the agent ceiling ${doc.ceiling}`);
   }
+  if (endpoint?.agentCli) {
+    if (endpoint.agentCli.cliVersion === null) error("model.endpointId", `no agent worker has reported the ${endpoint.agentCli.kind} version for ${doc.model.endpointId}; start one before publishing`);
+    // A crashed session restarts from the top and repeats its calls, which only a read-only tool makes safe.
+    for (const t of doc.tools) {
+      const tool = catalog.tool(t.name);
+      if (tool && tool.effects !== "read") error("tools", `tool ${t.name} has effects ${tool.effects}; an agent CLI may hold only read tools`);
+    }
+  }
+  issues.push(...bandIssues(doc, catalog));
+  // mountable() admits any dataset at most the frozen mount ceiling, so a D3 ceiling reaches D3 data even if no mount is D3 today.
+  if (doc.sandbox.enabled && rank(doc.sandbox.mountCeiling) >= rank("D3") && atMost(doc.sandbox.mountCeiling, doc.ceiling)) touchesD3 = true;
   if (touchesD3 && !doc.irbProtocol) error("irbProtocol", "an agent that reads D3 data must name its IRB protocol");
   if (doc.sandbox.enabled && !catalog.sandboxImage()) error("sandbox", "no sandbox image is deployed");
+  if (doc.sandbox.enabled) {
+    if (!atMost(doc.sandbox.mountCeiling, doc.ceiling)) error("sandbox", `mount ceiling ${doc.sandbox.mountCeiling} is above the agent ceiling ${doc.ceiling}`);
+    for (const id of doc.sandbox.mounts) {
+      const d = catalog.dataset(id);
+      if (!d) error("sandbox", `dataset ${id} is not in lab.toml`);
+      else if (!atMost(d.cls, doc.sandbox.mountCeiling)) error("sandbox", `dataset ${id} is ${d.cls}, above the mount ceiling ${doc.sandbox.mountCeiling}`);
+    }
+  }
+  if (doc.tools.some((t) => t.name === "run_code") && !doc.sandbox.enabled) error("tools", "run_code needs the code sandbox enabled");
+  return issues;
+}
+
+/**
+ * The modelsByClass rules: bands climb strictly by upTo and stay below the ceiling, so model always serves the
+ * ceiling and is never dead config; each band's endpoint may receive its upTo; and an agent whose model is an
+ * agent CLI has no bands, because the CLI session never reads them.
+ */
+function bandIssues(doc: AgentDocument, catalog: Catalog): Issue[] {
+  const bands = doc.modelsByClass ?? [];
+  const issues: Issue[] = [];
+  const error = (message: string) => issues.push({ field: "modelsByClass", severity: "error", message });
+  if (bands.length && catalog.endpoint(doc.model.endpointId)?.agentCli) {
+    error(`${doc.model.endpointId} is an agent CLI, which runs every class itself; remove the bands or pick a model endpoint`);
+    return issues;
+  }
+  bands.forEach((b, i) => {
+    const n = `band ${i + 1}`;
+    const prev = bands[i - 1];
+    if (prev && rank(b.upTo) <= rank(prev.upTo)) error(`${n} is up to ${b.upTo}, which does not climb above band ${i} (${prev.upTo}); list bands from the least restricted class up`);
+    if (rank(b.upTo) >= rank(doc.ceiling)) error(`${n} is up to ${b.upTo}, which reaches the ceiling ${doc.ceiling}; the model above answers every class past the last band, so a band stops below the ceiling`);
+    const id = parseExactModelId(b.model.modelId);
+    if (typeof id !== "string") error(`${n}: ${id.message}`);
+    const endpoint = catalog.endpoint(b.model.endpointId);
+    if (!endpoint) return error(`${n}: endpoint ${b.model.endpointId} is not in lab.toml`);
+    if (endpoint.agentCli) return error(`${n}: ${b.model.endpointId} is an agent CLI; a band needs a model endpoint`);
+    const ceiling = ceilingOf("model", endpoint.placement);
+    if (ceiling === "none" || !atMost(b.upTo, ceiling)) error(`${n} is up to ${b.upTo}, but ${b.model.endpointId} is placement ${endpoint.placement} (up to ${ceiling})`);
+  });
   return issues;
 }
 
@@ -359,7 +450,12 @@ export function resolveAgent(doc: AgentDocument, catalog: Catalog): Resolution {
     retrieval: { algorithm: RETRIEVAL_ALGORITHM, readCapTokens: doc.readCapTokens ?? DEFAULT_READ_CAP_TOKENS },
     limits: withDefaults(defaults, doc.limits ?? {}),
   };
-  return { ok: true, agent };
+  const cli = catalog.endpoint(doc.model.endpointId)?.agentCli;
+  if (cli?.cliVersion) return { ok: true, agent: { ...agent, agentCli: { kind: cli.kind, cliVersion: cli.cliVersion } } };
+  const bands = doc.modelsByClass ?? [];
+  if (!bands.length) return { ok: true, agent };
+  const modelsByClass = bands.map((b) => ({ upTo: b.upTo, target: { endpointId: b.model.endpointId, modelId: parseExactModelId(b.model.modelId) as ExactModelId, params: b.model.params } }));
+  return { ok: true, agent: { ...agent, modelsByClass } };
 }
 
 function withDefaults(defaults: Limits, overrides: Partial<Limits>): Limits {
@@ -419,7 +515,9 @@ export type Unrunnable =
   | { readonly t: "model-unavailable"; readonly modelId: ExactModelId }
   | { readonly t: "sandbox-image-missing"; readonly digest: Sha256 }
   | { readonly t: "loop-contract"; readonly pinned: string; readonly current: string }
-  | { readonly t: "retrieval-missing"; readonly algorithm: string };
+  | { readonly t: "retrieval-missing"; readonly algorithm: string }
+  | { readonly t: "agent-cli-version"; readonly backend: string; readonly pinned: string; readonly installed: string | null }
+  | { readonly t: "agent-confinement-missing"; readonly platform: string };
 
 /** What this deployment serves, for verifyRunnable. The worker builds it from the registry, the KB reader and this build's constants. */
 export interface Deployed {
@@ -428,6 +526,12 @@ export interface Deployed {
   readonly sandboxImages: ReadonlySet<Sha256>;
   readonly loopContract: string;
   readonly retrieval: ReadonlySet<string>;
+  /** Agent backend id -> the installed CLI's --version. Absent in a process that runs no agent CLI. */
+  readonly agentClis?: ReadonlyMap<string, string>;
+  /** Endpoint id -> the exact model ids it served at run start, asked for a band agent's model and every band's target. Absent: not checked. */
+  readonly served?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** This process can confine an agent CLI (macOS seatbelt). Running one unconfined is never a fallback. */
+  readonly confinement?: { readonly available: boolean; readonly platform: string };
 }
 
 /** A version row that cannot be loaded as the agent it names. Terminal for the run. */
@@ -462,6 +566,14 @@ export function verifyRunnable(agent: ResolvedAgent, deployed: Deployed): Unrunn
   if (agent.sandbox && !deployed.sandboxImages.has(agent.sandbox.imageDigest)) out.push({ t: "sandbox-image-missing", digest: agent.sandbox.imageDigest });
   if (agent.loopContract !== deployed.loopContract) out.push({ t: "loop-contract", pinned: agent.loopContract, current: deployed.loopContract });
   if (!deployed.retrieval.has(agent.retrieval.algorithm)) out.push({ t: "retrieval-missing", algorithm: agent.retrieval.algorithm });
+  if (deployed.served && agent.modelsByClass) {
+    for (const t of [...agent.modelsByClass.map((b) => b.target), agent.model]) if (!deployed.served.get(t.endpointId)?.has(t.modelId)) out.push({ t: "model-unavailable", modelId: t.modelId });
+  }
+  if (agent.agentCli) {
+    const installed = deployed.agentClis?.get(agent.model.endpointId) ?? null;
+    if (installed !== agent.agentCli.cliVersion) out.push({ t: "agent-cli-version", backend: agent.model.endpointId, pinned: agent.agentCli.cliVersion, installed });
+    if (!deployed.confinement?.available) out.push({ t: "agent-confinement-missing", platform: deployed.confinement?.platform ?? "unknown" });
+  }
   return out;
 }
 

@@ -7,7 +7,6 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./tool-kit": "./src/tool-kit.ts",
     "./studio": "./src/studio.ts"
   },
   "dependencies": {

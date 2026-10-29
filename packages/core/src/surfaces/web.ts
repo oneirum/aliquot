@@ -4,10 +4,13 @@
  * replies here and the page reads them, with no second channel.
  *
  * Routes:
- *   POST /message  {channel?, thread, message, text, user}  -> intake
+ *   POST /message  {channel?, thread, message, text, user}  -> intake; a bound surface serves only its own channel
  *   POST /stop     {runId, user, confirmed?}                -> run_inbox stop (+ NOTIFY); confirmed is the second click
  *   GET  /replies?runId=                                     -> the run's reply and notices
  *   GET  /runs/:id/events                                    -> the run record (events, no bodies)
+ *   GET  /runs/:id/view                                      -> the record as the record page shows it, chain recomputed
+ *   GET  /                                                   -> the member chat page
+ *   GET  /runs/:id                                           -> the read-only record page
  *
  * Bodies are capped at MAX_BODY_BYTES, ids are validated before any query,
  * and an unexpected error is logged here and answered as "internal error".
@@ -24,7 +27,9 @@ import type { Db } from "../db.ts";
 import type { AgentDocument } from "../agent.ts";
 import { intake, intakeTest, type IntakeDeps, type IntakeResult, type Surface } from "../frontdoor.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
+import { recordView } from "../record-view.ts";
 import type { LabConfig } from "../config.ts";
+import { chatPage, recordPage } from "./web-pages.ts";
 
 export const WEB_SURFACE = "web" as SurfaceId;
 
@@ -81,7 +86,7 @@ export function testDraft(draft: AgentDocument, m: { readonly member: string; re
 /** A message is at most the router's 8,000 characters plus ids; anything near this is not a chat message. */
 export const MAX_BODY_BYTES = 64 * 1024;
 
-const messageSchema = z.object({ channel: z.string().default("lab"), thread: z.string().min(1), message: z.string().min(1), text: z.string().min(1), user: z.string().min(1) });
+const messageSchema = z.object({ channel: z.string().optional(), thread: z.string().min(1), message: z.string().min(1), text: z.string().min(1), user: z.string().min(1) });
 const stopSchema = z.object({ runId: z.string().uuid(), user: z.string().min(1), confirmed: z.boolean().default(false) });
 const uuid = z.string().uuid();
 
@@ -110,19 +115,26 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+function sendHtml(res: ServerResponse, html: string): void {
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'", "x-content-type-options": "nosniff" });
+  res.end(html);
+}
+
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
 
-export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) => void = (line) => console.error(line)): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+/** bound is lab.toml's [surfaces.web] channel: when set, every message is in that channel and the body may not name another. */
+export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) => void = (line) => console.error(line), bound: string | null = null): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       if (req.method === "POST" && url.pathname === "/message") {
         const m = messageSchema.parse(await readJson(req));
+        if (bound !== null && m.channel !== undefined && m.channel !== bound) throw new HttpError(400, `this web surface serves channel ${bound} only`);
         const result = await intake(
-          { channel: { surface: WEB_SURFACE, channelId: m.channel }, threadId: m.thread, messageId: m.message, platformUserId: m.user, text: m.text, attachments: [], addressed: true, at: new Date().toISOString() },
+          { channel: { surface: WEB_SURFACE, channelId: bound ?? m.channel ?? "lab" }, threadId: m.thread, messageId: m.message, platformUserId: m.user, text: m.text, attachments: [], addressed: true, at: new Date().toISOString() },
           deps,
         );
         return send(res, result.t === "refused" ? 403 : 202, result);
@@ -139,11 +151,14 @@ export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) =
         if (!runId.success) throw new HttpError(400, "runId must be a uuid");
         return send(res, 200, await readReplies(db, runId.data as RunId));
       }
-      const events = /^\/runs\/([^/]+)\/events$/.exec(url.pathname);
-      if (req.method === "GET" && events) {
-        const runId = uuid.safeParse(events[1]);
+      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(res, chatPage());
+      const runPath = /^\/runs\/([^/]+)(?:\/(events|view))?$/.exec(url.pathname);
+      if (req.method === "GET" && runPath) {
+        const runId = uuid.safeParse(runPath[1]);
         if (!runId.success) throw new HttpError(404, "not found");
-        return send(res, 200, await loadEvents(db, runId.data as RunId));
+        if (!runPath[2]) return sendHtml(res, recordPage(runId.data));
+        const events = await loadEvents(db, runId.data as RunId);
+        return send(res, 200, runPath[2] === "events" ? events : recordView(runId.data, events));
       }
       send(res, 404, { error: "not found" });
     } catch (err) {
