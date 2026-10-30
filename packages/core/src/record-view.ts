@@ -10,6 +10,7 @@ import { describeFailure, verifyChain, type RunEvent, type StoredEvent } from ".
 
 export interface RecordView {
   readonly runId: string;
+  readonly startedAt: string | null;
   readonly agent: string | null;
   readonly outcome: string;
   readonly chain: { readonly events: number; readonly firstBad: number | null };
@@ -66,6 +67,7 @@ export function recordView(runId: string, events: readonly StoredEvent[]): Recor
   const t0 = events.length ? Date.parse(events[0]!.at) : 0;
   return {
     runId,
+    startedAt: events[0]?.at ?? null,
     agent: started?.t === "run.started" ? started.agent : null,
     outcome: finished?.t === "run.finished" ? finished.outcome : "running",
     chain: { events: events.length, firstBad: verifyChain(events) },
@@ -84,5 +86,18 @@ export function formatRecordView(v: RecordView): string {
     `chain    ${chain}`,
     "",
     ...v.rows.map((r) => `${String(r.seq).padStart(3)}  +${String(r.ms).padStart(6)} ms  ${r.t.padEnd(width)}  ${r.cls.padEnd(2)}  ${r.detail}`),
+  ].join("\n");
+}
+
+/** One line per run for `aliquot runs`: when it started, which agent version, how it ended, and whether its chain holds. */
+export function formatRunList(views: readonly RecordView[]): string {
+  if (!views.length) return "no runs in this database";
+  const width = Math.max(...views.map((v) => v.outcome.length), 7);
+  const when = (at: string | null) => (at ? `${at.slice(0, 19).replace("T", " ")}Z` : "-".padEnd(20));
+  return [
+    `${"started (UTC)".padEnd(20)}  ${"run".padEnd(36)}  ${"agent".padEnd(12)}  ${"outcome".padEnd(width)}  events  chain`,
+    ...views.map((v) =>
+      [when(v.startedAt), v.runId, (v.agent?.slice(0, 12) ?? "-").padEnd(12), v.outcome.padEnd(width), String(v.chain.events).padStart(6), v.chain.firstBad === null ? "intact" : `BROKEN at event ${v.chain.firstBad}`].join("  "),
+    ),
   ].join("\n");
 }

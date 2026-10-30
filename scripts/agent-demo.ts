@@ -186,6 +186,7 @@ The agent is ${kind} (${model}), confined: no tools of its own, no file or netwo
 and a proxy to its vendor's API. Each answer's Record shows the session, every bridged tool call and every refusal.
 The last question carries a participant id (D3); this agent's placement is public (D0), so nothing is sent.
 
+  DATABASE_URL=${dbUrl} pnpm aliquot --config ${cfg} runs
   DATABASE_URL=${dbUrl} pnpm aliquot --config ${cfg} record <run-id>
 
 Logs are in ${work}. Press Ctrl-C to stop.

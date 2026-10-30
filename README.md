@@ -41,7 +41,7 @@ You need Node 26 or later, pnpm 10 and Docker. The demo and the checks use scrip
 1. **"Which freezer rack holds the aliquots?"** The agent searches the handbook, quotes the entry and names its path.
 2. **"Is LAB0-0003 still pending for wave 1?"** `LAB0-0003` matches the lab's participant id format, so the message is restricted (D3). The demo agent's model stands in for a hosted vendor that may receive at most D1, so nothing is sent, and the page says why.
 
-Under each answer, **Record** opens the run's record: every model call, tool call and refusal, and a check that the hash chain is intact. `pnpm aliquot record <run-id>` prints the same record in a terminal. The demo prints the full command, with its database.
+Under each answer, **Record** opens the run's record: every model call, tool call and refusal, and a check that the hash chain is intact. `pnpm aliquot record <run-id>` prints the same record in a terminal, and `pnpm aliquot runs` lists the newest runs with their outcomes and chain checks, so you can find a run id without the browser. Both take `--json`. The demo prints the full commands, with its database.
 
 The demo's model is a scripted fake that searches, reads the top entry and quotes it. It shows the harness, not answer quality. Add `--studio` to start the authoring studio as well.
 
@@ -267,7 +267,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - Data classes, the single egress decision, the static boundary scanner and the runtime network seal.
 - Knowledge bases: compile through the gateway, the coverage gate, `kb_search` and `kb_read`, snapshot diff, URL sources from listed lab hosts.
 - The studio: agent and knowledge base forms, revisions with diff and restore, a test thread, publish checks, a list of the deployed tools and five roles.
-- A chat page for members, a record page for each run, and `pnpm aliquot record` in a terminal.
+- A chat page for members, a record page for each run, and `pnpm aliquot record` and `pnpm aliquot runs` in a terminal, with `--json` for scripts.
 - Claude Code and Codex as confined agent engines, on macOS.
 - Research tools, built into core: OpenAlex, PubMed, arXiv and Europe PMC search, open-access full text, DOI lookup with open copies, citation walks, datasets by class, and `run_code` for R and Python in a container.
 - Native Anthropic Messages and OpenAI Responses clients, and per-class model routing.

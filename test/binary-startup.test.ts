@@ -35,5 +35,8 @@ test("the studio refuses the same lab.toml with the same message", async () => {
 
 test("aliquot --help prints its usage and exits 0", () => {
   const r = spawnSync(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", "--help"], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1" }, timeout: 30_000 });
-  assert.deepEqual({ status: r.status, stdout: r.stdout, stderr: r.stderr }, { status: 0, stdout: "usage: aliquot [--config lab.toml] record <run-id>\n", stderr: "" });
+  assert.deepEqual({ status: r.status, stderr: r.stderr }, { status: 0, stderr: "" });
+  assert.match(r.stdout, /^usage: aliquot \[--config lab\.toml\] \[--json\] <command>$/m);
+  assert.match(r.stdout, /^ {2}record <run-id> /m);
+  assert.match(r.stdout, /^ {2}runs \[--limit n\] /m);
 });

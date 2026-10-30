@@ -29,14 +29,14 @@ export function started(input: PayloadRef = ref("q")): RunEvent {
 }
 
 /** Chains the events as the journal would, with `at` spaced one second apart from a fixed start. */
-export function chain(events: readonly RunEvent[], startMs = Date.parse("2026-01-01T00:00:00.000Z")): StoredEvent[] {
+export function chain(events: readonly RunEvent[], startMs = Date.parse("2026-01-01T00:00:00.000Z"), runId: RunId = RUN): StoredEvent[] {
   const out: StoredEvent[] = [];
   let prev: Sha256 | null = null;
   events.forEach((event, seq) => {
     const at = new Date(startMs + seq * 1000).toISOString();
     const cls = eventClass(event);
-    const hash = eventHash(RUN, seq, at, cls, prev, event);
-    out.push({ runId: RUN, seq, at, cls, prevHash: prev, hash, event });
+    const hash = eventHash(runId, seq, at, cls, prev, event);
+    out.push({ runId, seq, at, cls, prevHash: prev, hash, event });
     prev = hash;
   });
   return out;

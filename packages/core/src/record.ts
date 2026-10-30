@@ -429,6 +429,12 @@ export async function loadEvents(db: Db, runId: RunId): Promise<StoredEvent[]> {
   return res.rows.map(fromRow);
 }
 
+/** The newest runs first, by the time of each run's first event. */
+export async function recentRunIds(db: Db, limit: number): Promise<RunId[]> {
+  const res = await db.query<{ run_id: string }>("select run_id from run_events where seq = 0 order by at desc, run_id limit $1", [limit]);
+  return res.rows.map((r) => r.run_id as RunId);
+}
+
 /**
  * The job row is locked first, so the fence is evaluated after any claim
  * that is in flight commits (a plain existence check read its own snapshot

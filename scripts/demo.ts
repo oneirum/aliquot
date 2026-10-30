@@ -132,7 +132,8 @@ Then try:
      LAB0-0003 matches this lab's participant id format, so the message is D3.
      The agent's model is hosted (ceiling D1), so nothing is sent and the page says why.
   3. Click "Record" under either answer to read the run's hash-chained record.
-     In a terminal, the same record:
+     In a terminal, list the runs and print one record:
+     DATABASE_URL=${dbUrl} pnpm aliquot --config .demo/lab.toml runs
      DATABASE_URL=${dbUrl} pnpm aliquot --config .demo/lab.toml record <run-id>
 
 Logs are in ${work}. Press Ctrl-C to stop.

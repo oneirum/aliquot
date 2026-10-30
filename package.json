@@ -14,7 +14,7 @@
     "lab0": "node scripts/lab0.ts",
     "unit2": "node scripts/unit2.ts",
     "demo": "node scripts/demo.ts",
-    "aliquot": "node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts",
+    "aliquot": "node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts",
     "demo:agent": "node scripts/agent-demo.ts"
   },
   "devDependencies": {
