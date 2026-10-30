@@ -65,6 +65,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/record-demo.ts": ["module:child_process"],
   "scripts/agent-demo.ts": ["module:child_process"],
   "scripts/unit2.ts": ["network-globals", "module:child_process", "module:net"],
+  // The preflight runs docker and the package managers for their versions and probes local ports. It is not deployed.
+  "scripts/doctor.ts": ["module:child_process", "module:net"],
   // One booted core per studio server, kept across Next's dev reloads of this module.
   "packages/studio/core.ts": ["global-object"],
   // Browser code: these run in the author's browser and call the studio's own API.

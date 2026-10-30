@@ -34,6 +34,7 @@ You need Node 26 or later, pnpm 10 and Docker. The demo and the checks use scrip
 	git clone https://github.com/oneirum/aliquot.git
 	cd aliquot
 	pnpm install
+	pnpm doctor     # optional: checks Node, Docker, ports and the sandbox image, and says the fix for each
 	pnpm demo
 
 `pnpm demo` starts Postgres in Docker if it is not running, seeds the synthetic lab0 lab, compiles and publishes its handbook from three documents, and starts the worker and the web door. It prints a link to the chat page with two questions to try:

@@ -6,7 +6,7 @@ are the most useful contribution.
 ## Before you change code
 
 1. Follow the setup in [`AGENTS.md`](AGENTS.md). It applies to people as well as coding agents.
-2. Run `pnpm typecheck`, `pnpm test` and `pnpm lab0`. Each must pass before you start.
+2. Run `pnpm doctor`, then `pnpm typecheck`, `pnpm test` and `pnpm lab0`. Each must pass before you start.
 3. Read the section of [`docs/design/DESIGN.md`](docs/design/DESIGN.md) for the module you are changing.
 
 ## Rules the checks enforce
