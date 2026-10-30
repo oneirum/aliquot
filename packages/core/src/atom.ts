@@ -12,14 +12,15 @@ export interface AtomEntry {
 
 const ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 
-function decode(s: string): string {
+/** XML character references and the five predefined entities. */
+export function decodeXml(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
     if (e[0] === "#") return String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10));
     return ENTITIES[e] ?? m;
   });
 }
 
-const text = (s: string) => decode(s).replace(/\s+/g, " ").trim();
+const text = (s: string) => decodeXml(s).replace(/\s+/g, " ").trim();
 
 function field(xml: string, tag: string): string {
   const m = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`).exec(xml);

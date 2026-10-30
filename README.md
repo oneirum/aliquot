@@ -73,7 +73,7 @@ This uses your own CLI login (`dev_shared_login`), so it is for a developer's ma
 A lab answers the same questions every week. Where the freezer log is, how a variable is coded, what the SOP says about a sample that came in late, what the literature says about a measure. The answers live in documents, datasets and papers nobody has time to search. Aliquot turns them into agents the lab owns.
 
 - **Answers from your own documents.** A steward compiles SOPs, codebooks and onboarding notes into a knowledge base. Agents search it and cite the entry they used.
-- **Research tools.** Agents can search OpenAlex, PubMed and arXiv, list the lab's datasets, and run R or Python over them in a container with no network.
+- **Research tools.** Agents can search OpenAlex, PubMed, arXiv and Europe PMC, read open-access papers in full, look up a DOI and where a legal open copy is, and walk citations. They can also list the lab's datasets and run R or Python over them in a container with no network.
 - **Claude Code or Codex as the agent.** An agent can run on one of these CLIs instead of a model endpoint. The CLI is confined: it has no tools of its own, and it reaches only Aliquot and its vendor's API.
 - **Restricted data does not leave.** Every piece of content carries a data class. Participant identifiers are restricted, and restricted content never reaches a hosted model or a hosted agent CLI: the harness refuses the call and records the refusal. One agent can send public questions to a hosted model (Anthropic, OpenAI) and restricted ones to a lab model (Ollama or any OpenAI-compatible server).
 - **Built by the people who know the work.** Agents and knowledge bases are forms in a web studio, with revisions, diff, restore, a test thread and a publish button. No git, no deploy.
@@ -82,7 +82,7 @@ A lab answers the same questions every week. Where the freezer log is, how a var
 
 ## The studio
 
-The studio is where lab members write agents and knowledge bases, with no repository access. It is Payload CMS in `packages/studio`, on the same Postgres in its own schema.
+The studio is where lab members write agents and knowledge bases, with no repository access. It is Payload CMS in `packages/studio`, on the same Postgres in its own schema. Beside an agent's form, the Tools panel lists every built-in tool with what it does, the hosts it reaches, and which ones the agent already uses.
 
 <p align="center"><img alt="The coverage panel of a knowledge base in the studio. Six of seven questions have a supporting entry, the parking permit question is named as a gap, and the knowledge base is published over it with a written note" src="docs/images/studio-kb-coverage.png" width="420"></p>
 <p align="center"><sub>A knowledge base names the question its documents do not answer. Publishing over the gap takes a written note.</sub></p>
@@ -102,7 +102,7 @@ The studio is where lab members write agents and knowledge bases, with no reposi
 
 Open `http://localhost:3001/admin` and create the first account before anyone else can reach the port: the first account is the PI. The PI adds the others and gives each a role. Keep `LABH_PAYLOAD_KEY`, because the payload store is encrypted with it. The worker answers the test thread and compiles knowledge bases. Point `[endpoints.local]` in `lab.toml` at Ollama or another OpenAI-compatible server for real answers.
 
-The studio process runs outside Node's permission model, because Next.js starts child processes. It holds no model gateway and no tool runner: every model call happens in the sealed worker. It does hold the payload key, so do not give it provider API keys. [`DESIGN.md`](docs/design/DESIGN.md#unit-2-studio-and-publish) has the details.
+The studio process runs outside Node's permission model, because Next.js starts child processes. It holds no model gateway and no tool runner: every model call happens in the sealed worker. The Tools panel reads a plain-data list (name, first sentence, class, hosts), not the tools themselves. It does hold the payload key, so do not give it provider API keys. [`DESIGN.md`](docs/design/DESIGN.md#unit-2-studio-and-publish) has the details.
 
 </details>
 
@@ -147,10 +147,17 @@ A lab gives each CLI a dedicated service login: a token from `claude setup-token
 	[sandbox]
 	image = "aliquot-sandbox@sha256:<the digest docker build printed>"
 
-- **Literature.** `openalex_search`, `pubmed_search` and `arxiv_search` are built into core. Each declares the one host it may reach, and a redirect is followed only to a declared host, with each hop checked at the class of everything the call has read. With `[research] contact_email_env` set, they send that address as the polite-pool contact.
+- **Literature.** Seven literature tools are built into core:
+  - `openalex_search`, `pubmed_search` and `arxiv_search` find papers by keyword;
+  - `europepmc_search` searches PubMed, PubMed Central and bioRxiv, medRxiv and other preprints, with abstracts, and says which hits are open access;
+  - `europepmc_fulltext` reads an open-access article as headed sections, with its license, up to 24,000 characters a call;
+  - `doi_lookup` gives Crossref's record for a DOI and Unpaywall's legal open copy;
+  - `citation_walk` lists the works one paper cites, or the works that cite it, most cited first, through OpenAlex.
+
+  None needs a key or an account. Each declares the hosts it may reach, and a redirect is followed only to a declared host, with each hop checked at the class of everything the call has read. With `[research] contact_email_env` set, they send that address as the polite-pool contact. Unpaywall requires one, so without it `doi_lookup` returns the Crossref record and says the open-access check was skipped. All of these hosts are public, so a literature call is refused, and nothing is sent, when the conversation holds anything above D0.
 - **Datasets by class.** A data steward lists folders in `lab.toml`, each with a class. An agent mounts only datasets at or below its sandbox ceiling. A mount ceiling of D3 needs an IRB protocol on the agent, as a D3 knowledge base does.
 - **`run_code`.** R or Python, one container per call, through the Docker Engine API. There is no network, no `/dev/shm`, and the root filesystem is read-only, with every capability dropped and no new privileges. It runs as user 65534, with CPU, memory, process and time limits, and with datasets mounted read-only. Its output carries the class of every dataset it mounted. `test/run-code.test.ts` checks each of these against the real container.
-- **Built-in tools only.** All seven tools are defined in `packages/core/src/tools.ts`, each with the class it reads, its effects and its egress hosts. A tool's requests are checked at the class of everything it has read. A lab cannot add its own tool in v0.2: a `lab.toml` with a `[tools]` table stops every binary at startup. Lab tools are planned for v0.3, behind an OS-level boundary.
+- **Built-in tools only.** All eleven tools are defined in core (`packages/core/src/tools.ts` and `literature.ts`), each with the class it reads, its effects and its egress hosts. A tool's requests are checked at the class of everything it has read. A lab cannot add its own tool: a `lab.toml` with a `[tools]` table stops every binary at startup. Lab tools are planned for v0.3, behind an OS-level boundary.
 
 ## Model providers
 
@@ -246,6 +253,7 @@ Everything above runs on scripted fakes. These ran against the real thing, on a 
 | Claude Code 2.1.303, `claude-haiku-5-5` | The developer's own login, through `dev_shared_login`, as a `public` placement | Handbook questions answered with the entry cited. A research question ran `dataset_list`, `run_code` and `openalex_search`, and its wave means matched the CSV. The participant-id question was refused before anything was sent. Tunnels went only to `api.anthropic.com`. |
 | Codex 0.155.1, `gpt-5.6-luna` | The same, with a copy of the developer's `auth.json` | Handbook question answered through the bridge, participant-id question refused. Tunnels went only to `chatgpt.com`; its analytics host was refused. |
 | OpenAlex, PubMed, arXiv | One probe each, repeated once later | The tool fixtures are trimmed from the first responses. The repeat returned every field the fixtures hold. |
+| Europe PMC, Crossref, Unpaywall, OpenAlex citations | One call of each v0.3 literature tool through the tool runner, plus the refusals: a closed-access article, an unknown DOI, and a D3 question that sent nothing | The fixtures are those exact responses, whole. |
 
 Not yet run live: the Anthropic and OpenAI API clients. They are tested against fake servers built from the published API references, with no API key. A dedicated service login for either CLI has not been tried either.
 
@@ -258,10 +266,10 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - The durable run loop: crash and resume, lease fencing, stop with confirmation, step, token and time limits.
 - Data classes, the single egress decision, the static boundary scanner and the runtime network seal.
 - Knowledge bases: compile through the gateway, the coverage gate, `kb_search` and `kb_read`, snapshot diff, URL sources from listed lab hosts.
-- The studio: agent and knowledge base forms, revisions with diff and restore, a test thread, publish checks and five roles.
+- The studio: agent and knowledge base forms, revisions with diff and restore, a test thread, publish checks, a list of the deployed tools and five roles.
 - A chat page for members, a record page for each run, and `pnpm aliquot record` in a terminal.
 - Claude Code and Codex as confined agent engines, on macOS.
-- Research tools, built into core: OpenAlex, PubMed and arXiv search, datasets by class, and `run_code` for R and Python in a container.
+- Research tools, built into core: OpenAlex, PubMed, arXiv and Europe PMC search, open-access full text, DOI lookup with open copies, citation walks, datasets by class, and `run_code` for R and Python in a container.
 - Native Anthropic Messages and OpenAI Responses clients, and per-class model routing.
 - The web door, the encrypted payload store and the hash-chained audit stream.
 
@@ -283,7 +291,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - The version hash covers what the run loop reads, but not yet the system prompt text the core builds around it.
 - Detection of restricted text is pattern-based. A lab must give its own patterns in `lab.toml`, and text no pattern matches keeps its declared class.
 - The studio runs unsealed, as described above.
-- A lab cannot add its own tools. v0.2 runs only its seven built-in tools. Contributed tools are planned for v0.3, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
+- A lab cannot add its own tools. Aliquot runs only its eleven built-in tools. Contributed tools are planned for v0.3, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
 - The seal stops a mistake in Aliquot's code or a dependency from reaching the network. It is not a sandbox for hostile code in the process.
 - A built-in tool's version is the hash of its spec, not its code. A change to a tool's code alone moves no agent version.
 - Under `dev_shared_login`, Claude Code reads its credential from the developer's keychain. That is why the mode is for a developer's machine only.

@@ -78,6 +78,7 @@ export const Agents: CollectionConfig = {
     ...fields,
     { name: "publishPanel", type: "ui", admin: { position: "sidebar", components: { Field: "/components/PublishPanel.tsx#PublishPanel" } } },
     { name: "testThread", type: "ui", admin: { position: "sidebar", components: { Field: "/components/TestThread.tsx#TestThread" } } },
+    { name: "toolsPanel", type: "ui", admin: { position: "sidebar", components: { Field: "/components/ToolsPanel.tsx#ToolsPanel" } } },
   ],
   endpoints: [
     {
@@ -129,6 +130,14 @@ export const Agents: CollectionConfig = {
         const c = await core();
         const thread = `studio-${String(req.routeParams?.id)}-${String(body.thread ?? "default").replace(/[^a-zA-Z0-9-]/g, "")}`;
         return json(await testDraft(draft.doc, { member: actor.id, thread, message: randomUUID(), text }, c.intake));
+      },
+    },
+    {
+      path: "/catalog/tools",
+      method: "get",
+      handler: async (req) => {
+        if (!actorOf(req.user)) return json({ error: "Sign in first." }, 401);
+        return json({ tools: (await core()).tools });
       },
     },
     {

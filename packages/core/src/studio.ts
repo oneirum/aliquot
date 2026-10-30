@@ -12,12 +12,28 @@
  */
 
 import { bootShared, type SharedCore } from "./boot-shared.ts";
+import type { DataClass } from "./dataclass.ts";
+import type { Effect, RegisteredTool } from "./tools.ts";
 
-export type StudioCore = Pick<SharedCore, "config" | "db" | "store" | "queue" | "http" | "catalog" | "intake" | "close">;
+/** What the studio shows about a deployed tool: plain data from its manifest, never the manifest or its code. */
+export interface ToolInfo {
+  readonly name: string;
+  /** The first sentence of the description the model reads. */
+  readonly summary: string;
+  readonly reads: DataClass;
+  readonly effects: Effect;
+  readonly egress: readonly string[];
+}
+
+export type StudioCore = Pick<SharedCore, "config" | "db" | "store" | "queue" | "http" | "catalog" | "intake" | "close"> & { readonly tools: readonly ToolInfo[] };
 
 export async function bootStudio(configPath: string, env: NodeJS.ProcessEnv = process.env): Promise<StudioCore> {
-  const { config, db, store, queue, http, catalog, intake, close } = await bootShared(configPath, env);
-  return { config, db, store, queue, http, catalog, intake, close };
+  const { config, db, store, queue, http, catalog, intake, close, registry } = await bootShared(configPath, env);
+  return { config, db, store, queue, http, catalog, intake, close, tools: toolInfos(registry.list()) };
+}
+
+export function toolInfos(tools: readonly RegisteredTool[]): ToolInfo[] {
+  return tools.map(({ manifest: m }) => ({ name: m.name, summary: /^.*?\.(?=\s|$)/.exec(m.description)?.[0] ?? m.description, reads: m.reads, effects: m.effects, egress: [...m.egress] }));
 }
 
 export { agentDocumentSchema, parseAgentDocument } from "./agent.ts";

@@ -46,7 +46,7 @@ test("lab.example.toml names the literature hosts and the contact env var, and i
   const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
   const text = readFileSync(path, "utf8");
   const asIs = parseConfig(text, path);
-  assert.deepEqual({ hosts: asIs.hosts, contactEmailEnv: asIs.contactEmailEnv, datasets: asIs.datasets, sandbox: asIs.sandbox }, { hosts: { "api.openalex.org": "public", "eutils.ncbi.nlm.nih.gov": "public", "export.arxiv.org": "public" }, contactEmailEnv: "LABH_CONTACT_EMAIL", datasets: [], sandbox: null });
+  assert.deepEqual({ hosts: asIs.hosts, contactEmailEnv: asIs.contactEmailEnv, datasets: asIs.datasets, sandbox: asIs.sandbox }, { hosts: { "api.openalex.org": "public", "eutils.ncbi.nlm.nih.gov": "public", "export.arxiv.org": "public", "www.ebi.ac.uk": "public", "api.crossref.org": "public", "api.unpaywall.org": "public" }, contactEmailEnv: "LABH_CONTACT_EMAIL", datasets: [], sandbox: null });
   const block = text.slice(text.indexOf("# [datasets."));
   const uncommented = block.replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1").replace("<64 hex>", digest);
   const c = parseConfig(`${text.slice(0, text.indexOf("# [datasets."))}${uncommented}`, path);

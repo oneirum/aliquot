@@ -81,11 +81,12 @@ A lab may run Claude Code or Codex as a research agent. Aliquot treats the whole
   reads its credential from the developer's keychain. It is not a deployment path. A lab uses a dedicated service
   login.
 
-### Tools (v0.2)
+### Tools
 
-v0.2 runs seven built-in tools, all part of Aliquot's own code: knowledge base search and read, three literature
-searches (OpenAlex, PubMed and arXiv), a list of the lab's datasets, and `run_code`. A lab cannot add its own tool in
-v0.2. Every Aliquot binary refuses to start when `lab.toml` has a `[tools]` table, and the studio fails every request
+Aliquot runs eleven built-in tools, all part of its own code: knowledge base search and read, seven literature tools
+(search in OpenAlex, PubMed, arXiv and Europe PMC; open-access full text from Europe PMC; DOI lookup through Crossref
+and Unpaywall; citation walks through OpenAlex), a list of the lab's datasets, and `run_code`. A lab cannot add its
+own tool. Every Aliquot binary refuses to start when `lab.toml` has a `[tools]` table, and the studio fails every request
 that needs core with the same message. A built-in tool's version is the hash of its spec, not its code, so a change
 to a tool's code alone moves no agent version.
 

@@ -44,8 +44,12 @@ port = 3000
 "api.openalex.org" = "public"            # a tool reaches only the hosts its manifest names; a host unlisted here is public (D0)
 "eutils.ncbi.nlm.nih.gov" = "public"     # pubmed_search
 "export.arxiv.org" = "public"            # arxiv_search
+"www.ebi.ac.uk" = "public"               # europepmc_search, europepmc_fulltext
+"api.crossref.org" = "public"            # doi_lookup
+"api.unpaywall.org" = "public"           # doi_lookup (asked only when a contact email is set)
 
-# The literature tools send this env var's value as the polite-pool contact (OpenAlex mailto, eutils email).
+# The literature tools send this env var's value as the polite-pool contact (OpenAlex and Crossref mailto, eutils
+# email). Unpaywall requires it; without it doi_lookup skips the open-access check.
 [research]
 contact_email_env = "LABH_CONTACT_EMAIL"
 

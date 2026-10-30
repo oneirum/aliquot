@@ -1,9 +1,9 @@
 /**
  * Tools: the manifest a tool declares, the context it runs in, the registry,
- * and the seven built-ins. Every tool v0.2 runs is defined here, in core:
- * kb_search, kb_read, dataset_list, run_code, openalex_search, pubmed_search
- * and arxiv_search. A lab cannot add its own; lab.toml refuses a [tools]
- * table (config.ts).
+ * and the built-ins. Every tool Aliquot runs is in core: kb_search, kb_read,
+ * dataset_list, run_code, openalex_search, pubmed_search and arxiv_search
+ * here, and the v0.3 literature tools in literature.ts. A lab cannot add its
+ * own; lab.toml refuses a [tools] table (config.ts).
  *
  * A built-in's hash is the hash of its spec (toolSpecHash): what the model
  * sees plus the manifest's policy fields. It does not cover the tool's code,
@@ -23,6 +23,7 @@ import type { KbReader } from "./kb.ts";
 import type { CallFailure, PayloadRef, RunEvent, RunJournal } from "./record.ts";
 import { parseAtom } from "./atom.ts";
 import { platformFetch } from "./seal.ts";
+import { citationWalk, doiLookup, europepmcFulltext, europepmcSearch } from "./literature.ts";
 
 export type Effect = "read" | "lab-write" | "external-send";
 
@@ -567,7 +568,7 @@ export const arxivSearch = defineTool({
 });
 
 export function builtinTools(): RegisteredTool[] {
-  return [kbSearch, kbRead, datasetList, runCode, openalexSearch, pubmedSearch, arxivSearch].map((t) => {
+  return [kbSearch, kbRead, datasetList, runCode, openalexSearch, pubmedSearch, arxivSearch, europepmcSearch, europepmcFulltext, doiLookup, citationWalk].map((t) => {
     const manifest = t as ToolManifest<unknown, unknown>;
     return { manifest, hash: toolSpecHash(manifest), owner: "core" };
   });

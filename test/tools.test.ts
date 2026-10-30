@@ -63,7 +63,7 @@ const env = { knowledgeBases: [{ kbId: "handbook", snapshot: loaded.snapshot.id,
 const RUN = "00000000-0000-4000-8000-000000000002" as RunId;
 const signal = new AbortController().signal;
 
-test("core holds the seven built-in tools, each with the hosts it may reach", () => {
+test("core holds the eleven built-in tools, each with the hosts it may reach", () => {
   assert.deepEqual(
     builtinTools().map((t) => [t.manifest.name, t.owner, t.manifest.egress]),
     [
@@ -74,6 +74,10 @@ test("core holds the seven built-in tools, each with the hosts it may reach", ()
       ["openalex_search", "core", ["api.openalex.org"]],
       ["pubmed_search", "core", ["eutils.ncbi.nlm.nih.gov"]],
       ["arxiv_search", "core", ["export.arxiv.org"]],
+      ["europepmc_search", "core", ["www.ebi.ac.uk"]],
+      ["europepmc_fulltext", "core", ["www.ebi.ac.uk"]],
+      ["doi_lookup", "core", ["api.crossref.org", "api.unpaywall.org"]],
+      ["citation_walk", "core", ["api.openalex.org"]],
     ],
   );
 });

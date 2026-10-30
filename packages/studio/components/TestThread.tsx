@@ -2,7 +2,13 @@
 
 import { Button, useDocumentInfo, useFormModified } from "@payloadcms/ui";
 import { useRef, useState } from "react";
-import { box, hashStyle, heading, muted, short } from "./styles.ts";
+import { PanelStyle, short } from "./styles.ts";
+import { Status } from "./Status.tsx";
+
+/** Marks an answer taller than its cap, so the panel shows an edge where the scrollable text continues. */
+const markOverflow = (el: HTMLElement | null) => {
+  el?.toggleAttribute("data-overflow", el.scrollHeight > el.clientHeight);
+};
 
 interface Turn {
   question: string;
@@ -24,7 +30,14 @@ export function TestThread() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [text, setText] = useState("");
 
-  if (!id) return <section style={box}><h4 style={heading}>Test thread</h4><p style={muted}>Save the agent to test it.</p></section>;
+  if (!id)
+    return (
+      <section className="aq-panel">
+        <PanelStyle />
+        <h4>Test thread</h4>
+        <p className="aq-help">Save the agent first. The test runs the saved revision.</p>
+      </section>
+    );
 
   const update = (n: number, patch: Partial<Turn>) => setTurns((ts) => ts.map((t, i) => (i === n ? { ...t, ...patch } : t)));
 
@@ -34,6 +47,14 @@ export function TestThread() {
     setText("");
     const n = turns.length;
     setTurns((ts) => [...ts, { question, runId: null, agent: null, answer: null, error: null }]);
+    try {
+      await ask(n, question);
+    } catch {
+      update(n, { error: "The studio could not reach the server, or it answered with something unexpected. Reload and try again." });
+    }
+  }
+
+  async function ask(n: number, question: string) {
     const res = await fetch(`/api/agents/${id}/test`, {
       method: "POST",
       credentials: "include",
@@ -48,7 +69,9 @@ export function TestThread() {
     update(n, { runId: body.runId, agent: body.agent ?? null });
     for (let i = 0; i < 240; i++) {
       await new Promise((r) => setTimeout(r, 500));
-      const run = (await (await fetch(`/api/agents/test-runs/${body.runId}`, { credentials: "include" })).json()) as { replies: { kind: string; text: string }[]; outcome: string | null };
+      const poll = await fetch(`/api/agents/test-runs/${body.runId}`, { credentials: "include" });
+      if (!poll.ok) return update(n, { error: `The studio answered ${poll.status} while waiting for the reply.` });
+      const run = (await poll.json()) as { replies: { kind: string; text: string }[]; outcome: string | null };
       const reply = run.replies.find((r) => r.kind === "reply");
       if (reply) return update(n, { answer: reply.text });
       if (run.outcome) return update(n, { error: `The run ended ${run.outcome} without a reply.` });
@@ -57,45 +80,57 @@ export function TestThread() {
   }
 
   return (
-    <section style={box} data-testid="test-thread">
-      <h4 style={heading}>Test thread</h4>
-      <p style={muted}>{modified ? "Unsaved changes are not tested. Save first." : "Runs the saved draft. Nothing is published."}</p>
-      <ol style={{ listStyle: "none", padding: 0, margin: "0 0 12px" }}>
-        {turns.map((t, n) => (
-          <li key={n} data-testid="test-turn" style={{ marginBottom: 12 }}>
-            <p style={{ margin: 0 }}>
-              <strong>You:</strong> {t.question}
-            </p>
-            {t.answer ? (
-              <p style={{ margin: "4px 0 0" }} data-testid="test-answer">
-                <strong>Agent:</strong> {t.answer}
-              </p>
-            ) : t.error ? (
-              <p role="alert" style={{ margin: "4px 0 0", color: "var(--theme-error-500)" }}>
-                {t.error}
-              </p>
-            ) : (
-              <p style={muted}>Running...</p>
-            )}
-            {t.agent ? (
-              <p style={{ ...muted, fontSize: "0.85em" }} data-testid="test-version" data-version={t.agent}>
-                version <code style={hashStyle}>{short(t.agent)}</code>
-              </p>
-            ) : null}
-          </li>
-        ))}
-      </ol>
+    <section className="aq-panel" data-testid="test-thread">
+      <PanelStyle />
+      <h4>Test thread</h4>
+      <p className="aq-help">{modified ? "Unsaved changes are not tested. Save first." : "Runs the saved draft through the real worker. Nothing is published."}</p>
+      {turns.length ? (
+        <ol className="aq-turns">
+          {turns.map((t, n) => (
+            <li key={n} className="aq-turn" data-testid="test-turn">
+              <div className="aq-q">
+                <span className="aq-sr">You: </span>
+                {t.question}
+              </div>
+              {t.answer ? (
+                <p className="aq-a" data-testid="test-answer" ref={markOverflow}>
+                  <span className="aq-sr">Agent: </span>
+                  {t.answer}
+                </p>
+              ) : t.error ? (
+                <Status kind="error">{t.error}</Status>
+              ) : (
+                <Status kind="busy">{t.runId ? "The worker is running the draft…" : "Sending…"}</Status>
+              )}
+              {t.agent ? (
+                <p className="aq-ver" data-testid="test-version" data-version={t.agent}>
+                  Answered by version <code className="aq-hash">{short(t.agent)}</code>
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
       <textarea
         aria-label="Test message"
+        className="aq-field"
         rows={2}
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            void send();
+          }
+        }}
         placeholder="Ask what a lab member would ask"
-        style={{ width: "100%", font: "inherit", padding: 8, borderRadius: 4, border: "1px solid var(--theme-elevation-150)", background: "var(--theme-input-bg)", color: "var(--theme-text)" }}
       />
-      <Button buttonStyle="secondary" size="small" disabled={!text.trim()} onClick={send}>
-        Send
-      </Button>
+      <div className="aq-actions">
+        <Button buttonStyle="secondary" size="small" disabled={!text.trim()} onClick={send}>
+          Send
+        </Button>
+        <span className="aq-ver">⌘ Enter sends</span>
+      </div>
     </section>
   );
 }

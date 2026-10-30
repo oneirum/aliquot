@@ -17,6 +17,8 @@ import { memoryJournal } from "./recorder.ts";
 export interface Route {
   readonly file: URL;
   readonly type: string;
+  /** The status the fake API answers with. Default 200. */
+  readonly status?: number;
 }
 
 export interface FakeApi {
@@ -26,12 +28,12 @@ export interface FakeApi {
   close(): Promise<void>;
 }
 
-/** Serves each route's fixture file by request path. */
+/** Serves each route's fixture file by request path, and 404 for any other path. */
 export async function fakeApi(routes: Readonly<Record<string, Route>>): Promise<FakeApi> {
   const server = createServer(async (req, res) => {
     const route = routes[new URL(req.url ?? "/", "http://x").pathname];
     if (!route) return res.writeHead(404).end();
-    res.writeHead(200, { "content-type": route.type }).end(await readFile(route.file));
+    res.writeHead(route.status ?? 200, { "content-type": route.type }).end(await readFile(route.file));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

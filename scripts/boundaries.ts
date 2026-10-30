@@ -71,6 +71,7 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/studio/components/PublishPanel.tsx": ["network-globals"],
   "packages/studio/components/TestThread.tsx": ["network-globals"],
   "packages/studio/components/KbPanel.tsx": ["network-globals"],
+  "packages/studio/components/ToolsPanel.tsx": ["network-globals"],
 };
 
 /**

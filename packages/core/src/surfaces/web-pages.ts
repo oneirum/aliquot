@@ -68,6 +68,7 @@ header .where { font-size: 13px; color: var(--muted); }
 .banner { border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px; max-width: 92%; }
 .banner strong { display: block; font-weight: 650; margin-bottom: 2px; }
 .banner p { margin: 0; font-size: 14.5px; }
+.banner .pill { box-shadow: inset 0 0 0 1px var(--warn-line); }
 .err { color: var(--bad); font-size: 14px; }
 form { position: sticky; bottom: 0; padding: 12px 0 20px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
 .box { display: flex; gap: 8px; align-items: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 14px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.04); }
@@ -232,12 +233,37 @@ dd { margin: 0; font-family: var(--mono); font-size: 13px; word-break: break-all
 .chain.ok { color: var(--ok); } .chain.bad { color: var(--bad); }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 0 10px 8px 0; border-bottom: 1px solid var(--line); }
-td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
 td.seq, td.t { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; }
 td.ev { font: 600 13px var(--mono); white-space: nowrap; }
 tr.refused td.ev { color: var(--warn-ink); }
-tr.refused { background: var(--warn-bg); }
+tr.refused { background: var(--warn-bg); box-shadow: inset 3px 0 var(--warn-ink); }
+th:first-child, td:first-child { padding-left: 12px; }
+.outcome { font-family: system-ui, sans-serif; font-size: 14px; }
+.outcome.refused, .outcome.failed { color: var(--warn-ink); font-weight: 600; }
+.outcome.none { color: var(--muted); }
+.chain.none { color: var(--muted); font-weight: 400; }
 .note { color: var(--muted); font-size: 13px; margin-top: 16px; }
+.state { color: var(--muted); font-size: 14.5px; padding: 18px 0; }
+.state.err { color: var(--bad); }
+.state[hidden], table[hidden] { display: none; }
+@media (max-width: 640px) {
+  h1 { font-size: 23px; margin-top: 28px; }
+  dl { grid-template-columns: 1fr; gap: 0; }
+  dt { font-size: 12.5px; }
+  dd { margin-bottom: 10px; }
+  thead { display: none; }
+  table, tbody { display: block; }
+  tr { display: grid; grid-template-columns: 5ch 10ch 1fr; grid-template-areas: "ev ev cls" "detail detail detail" "seq t ."; gap: 3px 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  tr.refused { margin: 0 -20px; padding: 11px 20px; }
+  td, td:first-child { display: block; padding: 0; border: 0; }
+  td.ev { grid-area: ev; white-space: normal; overflow-wrap: anywhere; }
+  td.cls { grid-area: cls; justify-self: end; }
+  td.detail { grid-area: detail; overflow-wrap: anywhere; }
+  td.seq { grid-area: seq; font-size: 12px; }
+  td.seq::before { content: "#"; }
+  td.t { grid-area: t; font-size: 12px; }
+}
 </style>
 </head>
 <body>
@@ -246,24 +272,44 @@ tr.refused { background: var(--warn-bg); }
   <h1>Run record</h1>
   <p class="sub">Every model call, tool call and refusal in this run, in order. Bodies are encrypted in the payload store and are not shown here. The label is the class of the event row itself; a refusal names the class of what it refused.</p>
   <dl id="facts"></dl>
-  <table><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Label</th><th>Detail</th></tr></thead><tbody id="rows"></tbody></table>
+  <p class="state" id="state" role="status">Loading the record…</p>
+  <table id="table" hidden><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Label</th><th>Detail</th></tr></thead><tbody id="rows"></tbody></table>
   <p class="note">Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
 </div>
 <script type="module">
 const runId = ${JSON.stringify(runId)};
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text !== undefined) x.textContent = text; return x; };
-const v = await fetch("/runs/" + runId + "/view").then((r) => r.json());
+let v;
+try {
+  const res = await fetch("/runs/" + runId + "/view");
+  if (!res.ok) throw new Error(res.status === 404 ? "No run has the id " + runId + "." : "The web door answered " + res.status + ".");
+  v = await res.json();
+} catch (err) {
+  $("state").className = "state err";
+  $("state").setAttribute("role", "alert");
+  $("state").textContent = err instanceof TypeError ? "The web door did not answer. Is it running?" : err.message;
+  throw err;
+}
+if (v.rows.length) {
+  $("state").hidden = true;
+  $("table").hidden = false;
+} else {
+  $("state").textContent = "No run with the id " + runId + " has recorded any events. A run sent a moment ago shows its first event within a second; otherwise check the Record link. ";
+  const back = el("a", "", "Back to the chat");
+  back.href = "/";
+  $("state").append(back);
+}
 const fact = (k, val) => { $("facts").append(el("dt", "", k)); const d = el("dd"); typeof val === "string" ? (d.textContent = val) : d.append(val); $("facts").append(d); };
 fact("Run", v.runId);
 if (v.agent) fact("Agent version", v.agent);
-fact("Outcome", v.outcome);
-fact("Chain", el("span", "chain " + (v.chain.firstBad === null ? "ok" : "bad"), v.chain.firstBad === null ? "Verified: chain intact over " + v.chain.events + " events" : "Chain broken at event " + v.chain.firstBad));
+fact("Outcome", el("span", "outcome " + (v.chain.events ? v.outcome : "none"), v.chain.events ? v.outcome : "No events"));
+fact("Chain", v.chain.events === 0 ? el("span", "chain none", "Nothing to verify yet") : el("span", "chain " + (v.chain.firstBad === null ? "ok" : "bad"), v.chain.firstBad === null ? "Verified: chain intact over " + v.chain.events + " events" : "Chain broken at event " + v.chain.firstBad));
 for (const r of v.rows) {
   const tr = el("tr", r.refused ? "refused" : "");
   tr.append(el("td", "seq", String(r.seq)), el("td", "t", "+" + r.ms + " ms"), el("td", "ev", r.t));
-  const cls = el("td"); cls.append(el("span", "pill " + String(r.cls).toLowerCase(), r.cls)); tr.append(cls);
-  tr.append(el("td", "", r.detail));
+  const cls = el("td", "cls"); cls.append(el("span", "pill " + String(r.cls).toLowerCase(), r.cls)); tr.append(cls);
+  tr.append(el("td", "detail", r.detail));
   $("rows").append(tr);
 }
 </script>

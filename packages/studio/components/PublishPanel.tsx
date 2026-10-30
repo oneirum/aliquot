@@ -2,7 +2,8 @@
 
 import { Button, useDocumentInfo, useFormModified } from "@payloadcms/ui";
 import { useState } from "react";
-import { box, hashStyle, heading, issueList, muted, short } from "./styles.ts";
+import { PanelStyle, short } from "./styles.ts";
+import { Status } from "./Status.tsx";
 
 interface Issue {
   field: string;
@@ -30,11 +31,31 @@ export function PublishPanel() {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
 
-  if (!id) return <section style={box}><h4 style={heading}>Publish</h4><p style={muted}>Save the agent to publish it.</p></section>;
+  if (!id)
+    return (
+      <section className="aq-panel">
+        <PanelStyle />
+        <h4>Publish</h4>
+        <p className="aq-help">Save the agent first. Checks and publish use a saved revision.</p>
+      </section>
+    );
+
+  /** A failed request or a body that is not JSON ends the busy state with a message, not a pulse that never stops. */
+  const guarded = (fn: () => Promise<void>) => async () => {
+    try {
+      await fn();
+    } catch {
+      setRefusal("The studio could not reach the server, or it answered with something unexpected. Reload and try again.");
+      setBusy(false);
+    }
+  };
 
   async function runChecks() {
     setBusy(true);
     setOutcome(null);
+    setCheck(null);
+    setIssues([]);
+    setRefusal(null);
     const res = await fetch(`/api/agents/${id}/check`, { method: "POST", credentials: "include" });
     const body = (await res.json()) as { check: Check | null; issues?: Issue[]; refusal?: string | null; error?: string };
     setCheck(body.check);
@@ -68,67 +89,67 @@ export function PublishPanel() {
   const canPublish = passes && !refusal && changelog.trim().length > 0 && !modified && !busy;
 
   return (
-    <section style={box} data-testid="publish-panel">
-      <h4 style={heading}>Publish</h4>
-      {modified ? <p style={muted}>Save your changes first. Checks and publish use the saved revision.</p> : null}
-      <Button buttonStyle="secondary" size="small" disabled={busy || modified} onClick={runChecks}>
-        Run checks
-      </Button>
+    <section className="aq-panel" data-testid="publish-panel">
+      <PanelStyle />
+      <h4>Publish</h4>
+      <p className="aq-help">{modified ? "Save your changes first. Checks and publish use the saved revision." : "Run the checks on the saved revision, then publish it with a note."}</p>
+      <div className="aq-actions">
+        <Button buttonStyle="secondary" size="small" disabled={busy || modified} onClick={guarded(runChecks)}>
+          Run checks
+        </Button>
+      </div>
+      {busy && !check && !issues.length ? <Status kind="busy">Checking the saved revision…</Status> : null}
+      {busy && check ? <Status kind="busy">Publishing…</Status> : null}
       {check || issues.length ? (
         <div data-testid="check-result">
           {passes ? (
-            <p>
-              All checks pass. This draft runs as version <code style={hashStyle}>{short(check!.version ?? "")}</code>
+            <Status kind="ok">
+              All checks pass. This draft runs as version <code className="aq-hash">{short(check!.version ?? "")}</code>
               {check!.head ? (
                 <>
-                  , replacing <code style={hashStyle}>{short(check!.head.version)}</code>.
+                  , replacing <code className="aq-hash">{short(check!.head.version)}</code>.
                 </>
               ) : (
                 ". Nothing is live yet."
               )}
-            </p>
+            </Status>
           ) : (
-            <>
-              <p>Fix these before publishing:</p>
-              <ul style={issueList}>
+            <Status kind="error">
+              Fix these before publishing:
+              <ul className="aq-issues">
                 {issues.map((i, n) => (
                   <li key={n}>
                     <strong>{i.field}</strong>: {i.message}
                   </li>
                 ))}
               </ul>
-            </>
+            </Status>
           )}
         </div>
       ) : null}
       {refusal ? (
-        <p role="alert" data-testid="publish-refusal" style={{ color: "var(--theme-error-500)" }}>
+        <Status kind="error" testId="publish-refusal">
           {refusal}
-        </p>
+        </Status>
       ) : null}
       {passes && !refusal ? (
         <>
-          <label htmlFor="changelog" style={{ display: "block", marginTop: 12 }}>
+          <label htmlFor="changelog" className="aq-label">
             Changelog note (required)
           </label>
-          <textarea
-            id="changelog"
-            name="changelog"
-            rows={3}
-            value={changelog}
-            onChange={(e) => setChangelog(e.target.value)}
-            placeholder="What changed and why"
-            style={{ width: "100%", font: "inherit", padding: 8, borderRadius: 4, border: "1px solid var(--theme-elevation-150)", background: "var(--theme-input-bg)", color: "var(--theme-text)" }}
-          />
-          <Button buttonStyle="primary" size="small" disabled={!canPublish} onClick={publish}>
-            Publish
-          </Button>
+          <textarea id="changelog" name="changelog" className="aq-field" rows={3} value={changelog} onChange={(e) => setChangelog(e.target.value)} placeholder="What changed and why" />
+          <div className="aq-actions">
+            <Button buttonStyle="primary" size="small" disabled={!canPublish} onClick={guarded(publish)} aria-describedby={changelog.trim() ? undefined : "publish-hint"}>
+              Publish
+            </Button>
+            {changelog.trim() ? null : <span className="aq-ver" id="publish-hint">Write a note to publish.</span>}
+          </div>
         </>
       ) : null}
       {outcome ? (
-        <p data-testid="publish-outcome" style={{ color: "var(--theme-success-500)" }}>
+        <Status kind="ok" testId="publish-outcome">
           {outcome}
-        </p>
+        </Status>
       ) : null}
     </section>
   );

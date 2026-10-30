@@ -30,13 +30,14 @@
  *      is refused there and the hosted model receives nothing, while a
  *      control message does reach it.
  *
- *   node scripts/unit2.ts [--headed] [--shots <dir>]
+ *   node scripts/unit2.ts [--headed] [--shots <dir>] [--proof <dir>]
  *
  * Postgres comes from LABH_TEST_PG (default localhost:5432). The browser is
  * Playwright's Chromium: `pnpm exec playwright install chromium` once, or
  * LABH_CHROMIUM naming a Chromium executable already on disk.
  * Screenshots and logs land in .unit2/. --shots also saves light and dark
- * viewport screenshots of three moments, the README images, into <dir>. No process outlives the script
+ * viewport screenshots of three moments, the README images, into <dir>. --proof saves the agent and knowledge base
+ * pages in both themes, whole at 1440 wide and panel by panel at 390 wide, into <dir>. No process outlives the script
  * (scripts/procs.ts); the last line counts what is left.
  */
 
@@ -58,7 +59,7 @@ import { freshDatabase } from "../test/db.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { ensurePostgres, processes, waitFor, type Proc } from "./procs.ts";
 
-const { values: flags } = parseArgs({ options: { headed: { type: "boolean", default: false }, shots: { type: "string" } } });
+const { values: flags } = parseArgs({ options: { headed: { type: "boolean", default: false }, shots: { type: "string" }, proof: { type: "string" } } });
 
 type Clip = { x: number; y: number; width: number; height: number };
 
@@ -68,7 +69,7 @@ async function readmeShot(page: Page, name: string, clip: Clip): Promise<void> {
   if (flags.shots === undefined) return;
   mkdirSync(flags.shots, { recursive: true });
   const size = page.viewportSize();
-  await page.setViewportSize({ width: 1440, height: 1080 });
+  await page.setViewportSize({ width: 1440, height: 1200 });
   const hide = await page.addStyleTag({ content: "nextjs-portal, .payload-toast-container { display: none !important; }" });
   await page.mouse.wheel(0, -100_000);
   // Payload picks its theme on the server and marks <html>; the attribute is what its styles read. The README shows
@@ -76,6 +77,35 @@ async function readmeShot(page: Page, name: string, clip: Clip): Promise<void> {
   await page.evaluate(`document.documentElement.setAttribute("data-theme", "light")`);
   await sleep(500);
   await page.screenshot({ path: join(flags.shots, `${name}.png`), clip });
+  await hide.evaluate("(el) => el.remove()");
+  if (size !== null) await page.setViewportSize(size);
+}
+
+// Both themes at a desktop and a phone width. On a phone Payload stacks the sidebar under the form, so each panel is
+// captured on its own there. Payload reads the theme from <html data-theme>, as readmeShot does.
+async function proofShots(page: Page, name: string, panels: readonly string[]): Promise<void> {
+  if (flags.proof === undefined) return;
+  mkdirSync(flags.proof, { recursive: true });
+  const size = page.viewportSize();
+  const hide = await page.addStyleTag({ content: "nextjs-portal, .payload-toast-container { display: none !important; }" });
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate(`document.documentElement.setAttribute("data-theme", ${JSON.stringify(theme)})`);
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await page.mouse.wheel(0, -100_000);
+    await sleep(400);
+    await page.screenshot({ path: join(flags.proof, `${name}-desktop-${theme}.png`), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await sleep(400);
+    // Payload's sticky document bar would cover the top of a panel scrolled into view; the panel shot is of the panel.
+    const unstick = await page.addStyleTag({ content: ".doc-controls, .app-header { position: static !important; }" });
+    for (const id of panels) {
+      const panel = page.getByTestId(id);
+      if (!(await panel.count())) continue;
+      await panel.scrollIntoViewIfNeeded();
+      await panel.screenshot({ path: join(flags.proof, `${name}-phone-${id}-${theme}.png`) });
+    }
+    await unstick.evaluate("(el) => el.remove()");
+  }
   await hide.evaluate("(el) => el.remove()");
   if (size !== null) await page.setViewportSize(size);
 }
@@ -411,7 +441,7 @@ try {
     assert.equal(forced.status, 409, JSON.stringify(forced.json));
     assert.match(String(forced.json.error), /Fix these \d+ errors first: .*latest/);
     assert.equal(await head(agentId), undefined, "nothing published");
-    await readmeShot(page, "studio-agent-checks", { x: 980, y: 262, width: 420, height: 255 });
+    await readmeShot(page, "studio-agent-checks", { x: 980, y: 262, width: 420, height: 300 });
 
     await page.fill("#field-description", goodDescription);
     await page.fill("#field-model__modelId", "scripted-1");
@@ -425,6 +455,11 @@ try {
     assert.match(answer, /Scripted answer from 1 search result/);
     const tested = await thread.getByTestId("test-version").getAttribute("data-version");
     assert.match(tested ?? "", /^[0-9a-f]{64}$/);
+    if (flags.proof !== undefined) {
+      await page.getByTestId("publish-panel").getByRole("button", { name: "Run checks" }).click();
+      await page.getByTestId("publish-panel").getByTestId("check-result").waitFor();
+      await proofShots(page, "agent", ["publish-panel", "test-thread", "tools-panel"]);
+    }
     const testJob = await db.query<{ id: string; payload: { trigger: { t: string } } }>("select id, payload from jobs where key like 'test:%'");
     assert.deepEqual(testJob.rows.map((r) => r.payload.trigger.t), ["test"]);
     publisherTestRun = testJob.rows[0]!.id;
@@ -603,7 +638,8 @@ try {
     const audit = await db.query<{ actor: string; event: { override?: { note: string; gaps: string[] } } }>("select actor, event from audit_events where event->>'t' = 'kb.published' and event->>'kbId' = $1", [def.kbId]);
     assert.deepEqual(audit.rows, [{ actor: people.publisher.email, event: { ...audit.rows[0]!.event, override: { note, gaps: [outside.question] } } }]);
     await publisher.screenshot({ path: join(work, "kb-form.png"), fullPage: true });
-    await readmeShot(publisher, "studio-kb-coverage", { x: 980, y: 262, width: 420, height: 790 });
+    await proofShots(publisher, "kb", ["kb-panel"]);
+    await readmeShot(publisher, "studio-kb-coverage", { x: 980, y: 262, width: 420, height: 880 });
 
     await fillAgent(publisher, {
       agentId: "lab0-helper",

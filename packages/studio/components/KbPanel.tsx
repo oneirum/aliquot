@@ -2,7 +2,8 @@
 
 import { Button, useDocumentInfo, useFormModified } from "@payloadcms/ui";
 import { useState } from "react";
-import { box, hashStyle, heading, issueList, muted, short } from "./styles.ts";
+import { PanelStyle, short } from "./styles.ts";
+import { Status } from "./Status.tsx";
 
 type CompileResult = { t: "compiled"; snapshot: string; gaps: string[] } | { t: "failed"; reason: string } | null;
 interface Compiled {
@@ -28,14 +29,32 @@ export function KbPanel() {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
 
-  if (!id) return <section style={box}><h4 style={heading}>Compile and publish</h4><p style={muted}>Save the definition to compile it.</p></section>;
+  if (!id)
+    return (
+      <section className="aq-panel">
+        <PanelStyle />
+        <h4>Compile and publish</h4>
+        <p className="aq-help">Save the definition first. Compile uses the saved revision.</p>
+      </section>
+    );
+
+  /** A failed request or a body that is not JSON ends the busy state with a message, not a pulse that never stops. */
+  const guarded = (fn: () => Promise<void>) => async () => {
+    try {
+      await fn();
+    } catch {
+      setStatus(null);
+      setError("The studio could not reach the server, or it answered with something unexpected. Reload and try again.");
+      setBusy(false);
+    }
+  };
 
   async function compile() {
     setBusy(true);
     setError(null);
     setOutcome(null);
     setCompiled(null);
-    setStatus("Compiling...");
+    setStatus("Compiling. The worker reads each source and checks coverage…");
     const attached = await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })));
     const res = await fetch(`/api/knowledge-bases/${id}/compile`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ files: attached }) });
     const body = (await res.json()) as { jobId?: string; error?: string };
@@ -92,65 +111,65 @@ export function KbPanel() {
   }
 
   return (
-    <section style={box} data-testid="kb-panel">
-      <h4 style={heading}>Compile and publish</h4>
-      {modified ? <p style={muted}>Save your changes first. Compile uses the saved definition.</p> : null}
-      <label htmlFor="kb-files" style={{ display: "block" }}>
+    <section className="aq-panel" data-testid="kb-panel">
+      <PanelStyle />
+      <h4>Compile and publish</h4>
+      <p className="aq-help">{modified ? "Save your changes first. Compile uses the saved definition." : "Attach the source files, compile, read the coverage report, then publish."}</p>
+      <label htmlFor="kb-files" className="aq-label">
         Source files (.md or .txt), named as in Sources
       </label>
-      <input id="kb-files" data-testid="kb-files" type="file" multiple accept=".md,.markdown,.txt" onChange={(e) => setFiles([...(e.target.files ?? [])])} style={{ margin: "4px 0 8px" }} />
-      <Button buttonStyle="secondary" size="small" disabled={busy || modified} onClick={compile}>
-        Compile
-      </Button>
-      {status ? <p style={muted}>{status}</p> : null}
+      <input id="kb-files" data-testid="kb-files" type="file" multiple accept=".md,.markdown,.txt" onChange={(e) => setFiles([...(e.target.files ?? [])])} />
+      <div className="aq-actions">
+        <Button buttonStyle="secondary" size="small" disabled={busy || modified} onClick={guarded(compile)}>
+          Compile
+        </Button>
+      </div>
+      {status ? <Status kind="busy">{status}</Status> : null}
       {compiled ? (
         <div data-testid="kb-compiled">
-          <p>
-            Snapshot <code style={hashStyle}>{short(compiled.snapshot)}</code>, class {compiled.cls}.{" "}
+          <Status kind={outcome ? "info" : compiled.gaps.length ? "warn" : "ok"}>
+            Snapshot <code className="aq-hash">{short(compiled.snapshot)}</code>, class {compiled.cls}.{" "}
             {compiled.gaps.length ? `${compiled.gaps.length} coverage question${compiled.gaps.length === 1 ? " has" : "s have"} no supporting entry:` : "Every coverage question has a supporting entry."}
-          </p>
-          {compiled.gaps.length ? (
-            <ul style={issueList} data-testid="kb-gaps">
-              {compiled.gaps.map((g) => (
-                <li key={g}>{g}</li>
-              ))}
-            </ul>
-          ) : null}
-          <details>
+            {compiled.gaps.length ? (
+              <ul className="aq-issues" data-testid="kb-gaps">
+                {compiled.gaps.map((g) => (
+                  <li key={g}>{g}</li>
+                ))}
+              </ul>
+            ) : null}
+          </Status>
+          <details style={{ marginTop: 10 }}>
             <summary>Coverage report</summary>
-            <pre data-testid="kb-coverage" style={{ whiteSpace: "pre-wrap", fontSize: "0.85em" }}>
-              {compiled.coverage}
+            <pre data-testid="kb-coverage" className="aq-pre">
+              {compiled.coverage.split("\n").map((line, n) => (
+                <span key={n}>{line}</span>
+              ))}
             </pre>
           </details>
           {compiled.gaps.length ? (
             <>
-              <label htmlFor="kb-note" style={{ display: "block", marginTop: 12 }}>
+              <label htmlFor="kb-note" className="aq-label">
                 Note to publish over the gaps
               </label>
-              <textarea
-                id="kb-note"
-                rows={3}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Why these gaps are acceptable"
-                style={{ width: "100%", font: "inherit", padding: 8, borderRadius: 4, border: "1px solid var(--theme-elevation-150)", background: "var(--theme-input-bg)", color: "var(--theme-text)" }}
-              />
+              <textarea id="kb-note" className="aq-field" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why these gaps are acceptable" />
             </>
           ) : null}
-          <Button buttonStyle="primary" size="small" disabled={busy} onClick={publish}>
-            {compiled.gaps.length && note.trim() ? "Publish over the gaps" : "Publish"}
-          </Button>
+          <div className="aq-actions">
+            <Button buttonStyle="primary" size="small" disabled={busy} onClick={guarded(publish)}>
+              {compiled.gaps.length && note.trim() ? "Publish over the gaps" : "Publish"}
+            </Button>
+          </div>
         </div>
       ) : null}
       {error ? (
-        <p role="alert" data-testid="kb-error" style={{ color: "var(--theme-error-500)" }}>
+        <Status kind="error" testId="kb-error">
           {error}
-        </p>
+        </Status>
       ) : null}
       {outcome ? (
-        <p data-testid="kb-outcome" style={{ color: "var(--theme-success-500)" }}>
+        <Status kind="ok" testId="kb-outcome">
           {outcome}
-        </p>
+        </Status>
       ) : null}
     </section>
   );
