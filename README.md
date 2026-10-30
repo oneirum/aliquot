@@ -9,6 +9,9 @@ Every answer leaves a record you can check. Open source, and it runs on a laptop
 <p align="center">
 <a href="https://github.com/oneirum/aliquot/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/oneirum/aliquot/actions/workflows/ci.yml/badge.svg"></a>
 <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+<a href="https://github.com/oneirum/aliquot/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/oneirum/aliquot"></a>
+<a href="package.json"><img alt="Node 26 or later" src="https://img.shields.io/badge/node-%E2%89%A526-339933"></a>
+<a href="CITATION.cff"><img alt="Cite this software" src="https://img.shields.io/badge/cite-CITATION.cff-8a2be2"></a>
 </p>
 
 <p align="center">
@@ -18,7 +21,8 @@ Every answer leaves a record you can check. Open source, and it runs on a laptop
 <a href="#research-tools">Research tools</a> ·
 <a href="#how-it-works">How it works</a> ·
 <a href="#what-is-checked">What is checked</a> ·
-<a href="#status-and-roadmap">Status</a>
+<a href="#status-and-roadmap">Status</a> ·
+<a href="docs/README.md">Docs</a>
 </p>
 
 <p align="center">
@@ -273,6 +277,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - Research tools, built into core: OpenAlex, PubMed, arXiv and Europe PMC search, open-access full text, DOI lookup with open copies, citation walks, datasets by class, and `run_code` for R and Python in a container.
 - Native Anthropic Messages and OpenAI Responses clients, and per-class model routing.
 - The web door, the encrypted payload store and the hash-chained audit stream.
+- `pnpm doctor`, a preflight that names what is missing on a machine and how to fix it.
 
 **Not built yet, roughly in order**
 
@@ -303,9 +308,10 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 	packages/core      the harness: gate, run loop, record, gateway, knowledge bases, tools, agent CLIs, publish
 	packages/studio    the authoring studio (Payload CMS on Next.js)
 	sandbox/           the run_code container image
-	scripts/           the check scripts and the boundary scanner
+	scripts/           the demo, pnpm doctor, the check scripts and the boundary scanner
 	fixtures/          synthetic agents, knowledge bases and the lab0 lab
-	docs/design/       the design, the first slice, and the stack decisions
+	test/              unit and integration tests (node --test), with recorded API fixtures
+	docs/              the docs index, the research IT and IRB sheet, and docs/design/: the design per release
 
 ## For research IT and the IRB
 
@@ -314,6 +320,10 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 ## Working with a coding agent
 
 [`AGENTS.md`](AGENTS.md) tells a coding agent how to set up the repo, which checks to run and which boundaries the checks enforce. Point your agent at it.
+
+## Citing Aliquot
+
+If you use Aliquot in research, cite the version you ran. [`CITATION.cff`](CITATION.cff) has the metadata, and GitHub's "Cite this repository" button turns it into APA or BibTeX. What changed in each version is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
