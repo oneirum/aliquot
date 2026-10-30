@@ -122,7 +122,7 @@ export interface LabConfig {
 }
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
-const TOOL_FOLDERS_REFUSED = "lab.toml has a [tools] table, but contributed tool folders are not supported in v0.2. They are planned for v0.3. Remove [tools]: v0.2 runs only its built-in tools.";
+const TOOL_FOLDERS_REFUSED = "lab.toml has a [tools] table, but Aliquot does not load contributed tools yet. Remove [tools]: Aliquot runs only its built-in tools.";
 
 export function parseConfig(text: string, path: string): LabConfig {
   const raw = parseToml(text);

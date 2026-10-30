@@ -29,8 +29,8 @@ test("without those tables nothing mounts and no contact is sent", () => {
   assert.deepEqual({ datasets: c.datasets, sandbox: c.sandbox, contact: contactFromEnv(c, { LABH_CONTACT_EMAIL: "x@y" }) }, { datasets: [], sandbox: null, contact: null });
 });
 
-test("a [tools] table is refused, with or without a dir, because v0.2 loads no contributed tool folder", () => {
-  const message = "lab.toml has a [tools] table, but contributed tool folders are not supported in v0.2. They are planned for v0.3. Remove [tools]: v0.2 runs only its built-in tools.";
+test("a [tools] table is refused, with or without a dir, because Aliquot loads no contributed tool folder", () => {
+  const message = "lab.toml has a [tools] table, but Aliquot does not load contributed tools yet. Remove [tools]: Aliquot runs only its built-in tools.";
   assert.throws(() => parseConfig(`${base}[tools]\ndir = "tools"\n`, "/l/lab.toml"), { message });
   assert.throws(() => parseConfig(`${base}[tools]\n`, "/l/lab.toml"), { message });
 });

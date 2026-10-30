@@ -46,7 +46,7 @@ and chat. A host not listed in `lab.toml` counts as "anything else".
 One function, `decideEgress`, makes every one of these decisions. A test fails when any file outside the allowed set
 calls it. A static scanner (`scripts/boundaries.ts`) fails on any file in Aliquot's source, outside the few allowed to, that
 loads a network module or uses the global `fetch`, and a runtime seal (`packages/core/src/seal.ts`) makes those routes fail when they
-run. The seal catches a mistake in Aliquot's code or in a dependency. It is not a sandbox for hostile code, and v0.2
+run. The seal catches a mistake in Aliquot's code or in a dependency. It is not a sandbox for hostile code, and Aliquot
 runs no tool code from outside Aliquot: every tool is built in. The one exception is for the test harnesses: under
 `LABH_FAULTS=1`, and never under `NODE_ENV=production`, the worker binaries accept `--plant-tool`, which loads a test
 tool that may stand in for a built-in under its name and version.
@@ -60,10 +60,10 @@ tool that may stand in for a built-in under its name and version.
 | Studio (authoring) | lab server | Postgres only; it never calls a model. This is not enforced: the studio runs outside the seal. |
 | Postgres | lab server (Docker in the quickstart) | local |
 | Local model (optional) | lab hardware, for example Ollama | local |
-| Agent worker (v0.2, optional) | lab server; runs Claude Code or Codex in a macOS sandbox | the vendor's API hosts only, through a host-pinned proxy |
-| Code sandbox (v0.2, optional) | a Docker container per call | none: `--network none` |
+| Agent worker (optional) | lab server; runs Claude Code or Codex in a macOS sandbox | the vendor's API hosts only, through a host-pinned proxy |
+| Code sandbox (optional) | a Docker container per call | none: `--network none` |
 
-### Hosted agent CLIs (v0.2)
+### Hosted agent CLIs
 
 A lab may run Claude Code or Codex as a research agent. Aliquot treats the whole CLI as one hosted model:
 
@@ -135,7 +135,7 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 - **No key rotation, no per-class keys, no retention sweep.**
 - **The version hash does not yet cover the system prompt text that the core builds around an agent's instructions.**
 - **The studio runs outside the network seal and holds the payload key.** It never calls a model.
-- **A lab cannot add its own tools yet.** Contributed tools are planned for v0.3, behind an operating-system boundary (a
+- **A lab cannot add its own tools yet.** Contributed tools are planned, behind an operating-system boundary (a
   separate user, a container or a VM).
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.
 - **IRB and consent checks against knowledge base sources are not built.**

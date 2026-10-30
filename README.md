@@ -157,7 +157,7 @@ A lab gives each CLI a dedicated service login: a token from `claude setup-token
   None needs a key or an account. Each declares the hosts it may reach, and a redirect is followed only to a declared host, with each hop checked at the class of everything the call has read. With `[research] contact_email_env` set, they send that address as the polite-pool contact. Unpaywall requires one, so without it `doi_lookup` returns the Crossref record and says the open-access check was skipped. All of these hosts are public, so a literature call is refused, and nothing is sent, when the conversation holds anything above D0.
 - **Datasets by class.** A data steward lists folders in `lab.toml`, each with a class. An agent mounts only datasets at or below its sandbox ceiling. A mount ceiling of D3 needs an IRB protocol on the agent, as a D3 knowledge base does.
 - **`run_code`.** R or Python, one container per call, through the Docker Engine API. There is no network, no `/dev/shm`, and the root filesystem is read-only, with every capability dropped and no new privileges. It runs as user 65534, with CPU, memory, process and time limits, and with datasets mounted read-only. Its output carries the class of every dataset it mounted. `test/run-code.test.ts` checks each of these against the real container.
-- **Built-in tools only.** All eleven tools are defined in core (`packages/core/src/tools.ts` and `literature.ts`), each with the class it reads, its effects and its egress hosts. A tool's requests are checked at the class of everything it has read. A lab cannot add its own tool: a `lab.toml` with a `[tools]` table stops every binary at startup. Lab tools are planned for v0.3, behind an OS-level boundary.
+- **Built-in tools only.** All eleven tools are defined in core (`packages/core/src/tools.ts` and `literature.ts`), each with the class it reads, its effects and its egress hosts. A tool's requests are checked at the class of everything it has read. A lab cannot add its own tool: a `lab.toml` with a `[tools]` table stops every binary at startup. Lab tools are planned, each behind an OS-level boundary.
 
 ## Model providers
 
@@ -278,7 +278,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - Slack and Teams front doors.
 - A router across several agents. Today a channel is bound to one agent.
 - Agent CLI confinement on Linux.
-- Tools a lab adds itself, planned for v0.3, each run behind an OS-level boundary.
+- Tools a lab adds itself, each run behind an OS-level boundary.
 - Skills, and scheduled runs.
 - Studies: freeze an agent version, export an agent card, reviewer replay and PROV export. The types exist; the functions are stubs.
 - Consent checks against knowledge base sources.
@@ -291,7 +291,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - The version hash covers what the run loop reads, but not yet the system prompt text the core builds around it.
 - Detection of restricted text is pattern-based. A lab must give its own patterns in `lab.toml`, and text no pattern matches keeps its declared class.
 - The studio runs unsealed, as described above.
-- A lab cannot add its own tools. Aliquot runs only its eleven built-in tools. Contributed tools are planned for v0.3, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
+- A lab cannot add its own tools. Aliquot runs only its eleven built-in tools. Contributed tools are planned, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
 - The seal stops a mistake in Aliquot's code or a dependency from reaching the network. It is not a sandbox for hostile code in the process.
 - A built-in tool's version is the hash of its spec, not its code. A change to a tool's code alone moves no agent version.
 - Under `dev_shared_login`, Claude Code reads its credential from the developer's keychain. That is why the mode is for a developer's machine only.

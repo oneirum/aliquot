@@ -21,9 +21,9 @@ A change that needs one of these rules relaxed needs a design note first. Open a
 
 ## Adding a tool
 
-v0.2 has no contributed tools. A new tool is a change to core: a `defineTool` in `packages/core/src/tools.ts`, added
+Aliquot has no contributed tools yet. A new tool is a change to core: a `defineTool` in `packages/core/src/tools.ts` or `literature.ts`, added
 to `builtinTools()`, with a test. It declares the class of what it reads, its effects, and every host it may reach.
-It reaches the network only through `ctx.fetch`. Tools a lab adds without changing core are planned for v0.3.
+It reaches the network only through `ctx.fetch`. Tools a lab adds without changing core are planned.
 
 ## Pull requests
 
