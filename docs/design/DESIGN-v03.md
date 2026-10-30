@@ -1,6 +1,6 @@
 # Aliquot v0.3 design: more literature tools
 
-Status: built on the `v0.3-research` branch. Read `DESIGN-v02.md` first ("Research tools"). This file only describes
+Status: released in v0.3.0 (2026-10-30). Read `DESIGN-v02.md` first ("Research tools"). This file only describes
 the four tools v0.3 adds and why these four.
 
 ## What a lab gets
