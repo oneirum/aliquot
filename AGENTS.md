@@ -5,7 +5,7 @@ Instructions for a coding agent working in this repository.
 ## Set up
 
 1. Check the tools: `node -v` must print v26 or later, `pnpm -v` must print 10, and `docker info` must succeed.
-2. Install dependencies: `pnpm install --frozen-lockfile`.
+2. Install dependencies: `pnpm install --frozen-lockfile`. Then `pnpm doctor` repeats step 1 and checks the ports and the sandbox image; it prints `FAIL` lines with a fix and exits 1 if one is missing.
 3. Start Postgres: `docker compose up -d postgres`. If port 5432 is taken, export `LABH_PG_PORT=55433` (any free port) before this command and before every `pnpm` command below.
 4. Verify: `pnpm typecheck`, then `pnpm test`, then `pnpm lab0`. Each must pass before you change anything.
 
