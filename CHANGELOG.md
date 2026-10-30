@@ -1,8 +1,8 @@
 # Changelog
 
-Each release is one commit on `main`, tagged. Dates are in US Central time.
+Each release is tagged on `main`. Dates are in US Central time.
 
-## Unreleased
+## 0.3.1 (2026-10-30)
 
 - `pnpm doctor`: a read-only preflight. It checks Node, pnpm, the installed dependencies, Docker, the Postgres port, ports 3000 and 3001, the `aliquot-sandbox` image, the agent CLIs and `lab.toml`, and prints the fix for each problem. It exits 1 when something `pnpm demo` needs is missing.
 - `pnpm aliquot runs [--limit n]` lists the newest runs with their start time, agent version, outcome, event count and chain check, so a run id no longer has to come from the browser.
