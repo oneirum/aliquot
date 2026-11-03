@@ -2,6 +2,15 @@
 
 Each release is tagged on `main`. Dates are in US Central time.
 
+## 0.4.0 (2026-11-03)
+
+- Word (.docx) sources for knowledge bases, from the `kb` command and the studio. Core reads them to Markdown with no new dependency: headings by style name, list items, tables, tabs and line breaks; deleted tracked changes, images, comments, headers and footers are dropped. The lab's participant id patterns see the Word text. A `.pdf` or `.doc` source gets a message saying to save it as `.docx`.
+- Every record opens with a summary: outcome, time, model calls, tokens, tool calls by name, knowledge base entries retrieved, and refusals. It is in the record page, in `aliquot record` (a `summary` line) and in `--json`.
+- The record page downloads the record as JSON, and marks each event's kind by shape (run, model call, tool call, refused) with a legend, so meaning never rests on colour.
+- Chat answers render paragraphs, lists, headings and code blocks, still without parsing model text as HTML, and say what each run read and how long it took.
+- The docs say `pnpm run doctor`. pnpm 10 has a built-in `doctor` command, so the `pnpm doctor` that 0.3.1 documented ran pnpm's check and printed nothing of Aliquot's. A test keeps the docs from saying it again.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): the next releases, who each serves and how it is checked.
+
 ## 0.3.1 (2026-10-30)
 
 - `pnpm doctor`: a read-only preflight. It checks Node, pnpm, the installed dependencies, Docker, the Postgres port, ports 3000 and 3001, the `aliquot-sandbox` image, the agent CLIs and `lab.toml`, and prints the fix for each problem. It exits 1 when something `pnpm demo` needs is missing.

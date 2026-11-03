@@ -17,6 +17,7 @@ Every answer leaves a record you can check. Open source, and it runs on a laptop
 <p align="center">
 <a href="#quickstart">Quickstart</a> ·
 <a href="#what-it-does-for-a-lab">What it does</a> ·
+<a href="#the-chat-page-and-the-record">Chat and record</a> ·
 <a href="#agents-on-claude-code-or-codex">Agent CLIs</a> ·
 <a href="#research-tools">Research tools</a> ·
 <a href="#how-it-works">How it works</a> ·
@@ -77,13 +78,34 @@ This uses your own CLI login (`dev_shared_login`), so it is for a developer's ma
 
 A lab answers the same questions every week. Where the freezer log is, how a variable is coded, what the SOP says about a sample that came in late, what the literature says about a measure. The answers live in documents, datasets and papers nobody has time to search. Aliquot turns them into agents the lab owns.
 
-- **Answers from your own documents.** A steward compiles SOPs, codebooks and onboarding notes into a knowledge base. Agents search it and cite the entry they used.
+- **Answers from your own documents.** A steward compiles SOPs, codebooks and onboarding notes into a knowledge base, from Markdown, text or the Word files the lab already keeps. Agents search it and cite the entry they used.
 - **Research tools.** Agents can search OpenAlex, PubMed, arXiv and Europe PMC, read open-access papers in full, look up a DOI and where a legal open copy is, and walk citations. They can also list the lab's datasets and run R or Python over them in a container with no network.
 - **Claude Code or Codex as the agent.** An agent can run on one of these CLIs instead of a model endpoint. The CLI is confined: it has no tools of its own, and it reaches only Aliquot and its vendor's API.
 - **Restricted data does not leave.** Every piece of content carries a data class. Participant identifiers are restricted, and restricted content never reaches a hosted model or a hosted agent CLI: the harness refuses the call and records the refusal. One agent can send public questions to a hosted model (Anthropic, OpenAI) and restricted ones to a lab model (Ollama or any OpenAI-compatible server).
 - **Built by the people who know the work.** Agents and knowledge bases are forms in a web studio, with revisions, diff, restore, a test thread and a publish button. No git, no deploy.
 - **Coverage before publish.** A knowledge base lists the questions it must answer. If the documents do not support one, publish is refused and names the gap, unless a publisher overrides it with a written note.
-- **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later. Each run names the hash of the agent version that answered.
+- **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later: it opens with a summary of what the run read, called and refused, and downloads as JSON. Each run names the hash of the agent version that answered.
+
+## The chat page and the record
+
+Members ask on the chat page. An answer names the entry it came from and says what the run read and how long it took. Answers keep their lists, headings and code blocks, and no model text is ever parsed as HTML. A message with a participant id is refused before anything is sent, and the page says why.
+
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-dark.png">
+<img alt="The chat page. A question about the freezer rack is answered from the lab handbook, with its source entry, a line saying how many entries and tool calls the run used and how long it took, and a Record link. A question naming participant LAB0-0003 is refused: the message is D3 and the agent's model may receive at most D1, so nothing was sent" src="docs/images/chat-light.png" width="860">
+</picture>
+</p>
+
+**Record** under an answer opens the run's record. It starts with a summary: the outcome, the time, model calls, tokens, tool calls by name, knowledge base entries retrieved and refusals. Below it, every event in order, each marked by shape as well as name (run, model call, tool call, refused), with its data class and whether the hash chain holds. **Download JSON** saves the record, so a PI or an IRB reader can keep it without running anything. `pnpm aliquot record <run-id>` prints the same record and summary in a terminal.
+
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/images/record-dark.png">
+<img alt="The record page of an answered run. A summary band shows the outcome (answered), the time, 3 model calls, the tokens in and out, 2 tool calls (kb_search, kb_read), the entries retrieved and 0 refused. Below are the run id, the agent version hash, a verified chain over 13 events, a legend of event shapes and the first events of the table" src="docs/images/record-light.png" width="860">
+</picture>
+</p>
+<p align="center"><sub>Captures of <code>pnpm demo</code> with its scripted fake model. Your system's light or dark setting picks the image.</sub></p>
 
 ## The studio
 
@@ -278,19 +300,16 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - Native Anthropic Messages and OpenAI Responses clients, and per-class model routing.
 - The web door, the encrypted payload store and the hash-chained audit stream.
 - `pnpm run doctor`, a preflight that names what is missing on a machine and how to fix it.
+- Word (.docx) sources for knowledge bases, read to Markdown in core with no new dependency.
+- A summary at the top of every record, in the page, the terminal and `--json`, and a JSON download from the record page.
 
-**Not built yet, roughly in order**
+**Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
-- Slack and Teams front doors.
-- A router across several agents. Today a channel is bound to one agent.
-- Agent CLI confinement on Linux.
-- Tools a lab adds itself, each run behind an OS-level boundary.
-- Skills, and scheduled runs.
-- Studies: freeze an agent version, export an agent card, reviewer replay and PROV export. The types exist; the functions are stubs.
-- Consent checks against knowledge base sources.
-- Key rotation, per-class keys and a retention sweep.
-- University sign-on, a production studio build with committed migrations, and container images.
-- PDF sources. Today a source is Markdown, text or a page on a listed host.
+- **0.5, install it on a lab machine:** one Docker Compose stack on Linux with a production studio build and committed migrations; PDF sources, parsed inside the no-network sandbox container; `aliquot init` to write `lab.toml`; backup and restore.
+- **0.6, ask where the lab already talks:** a Slack door (Teams after a lab asks), and a router across several agents. Today a channel is bound to one agent.
+- **0.7, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
+- **0.8, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
+- Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.
 
 **Known limits**
 

@@ -9,6 +9,7 @@ Start with the [README](../README.md): what Aliquot does, the quickstart and the
 | Research IT, a data steward or an IRB | [For research IT and the IRB](for-research-it-and-irb.md): where each data class may go, what runs where, what is stored and under which key, and what is not covered yet |
 | Changing the code | [`AGENTS.md`](../AGENTS.md) (setup and checks, for people and coding agents) and [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Reviewing the design | [`design/DESIGN.md`](design/DESIGN.md), then what each release added: [`DESIGN-v02.md`](design/DESIGN-v02.md) and [`DESIGN-v03.md`](design/DESIGN-v03.md). [`SLICE.md`](design/SLICE.md) is the first vertical slice and [`STACK.md`](design/STACK.md) the stack decisions |
+| Planning or contributing | [`ROADMAP.md`](ROADMAP.md): the next releases, who each serves and how it is checked |
 | Recording the demo | [`demo-recording.md`](demo-recording.md) |
 
 What changed in each release is in [`CHANGELOG.md`](../CHANGELOG.md).
