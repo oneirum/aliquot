@@ -19,7 +19,7 @@ const BASE_CSS = `
   :root {
     --bg: #151514; --surface: #1d1d1b; --ink: #ecebe7; --muted: #9c9991; --line: #2e2d2a;
     --accent: #8cc5b0; --accent-ink: #10201b; --quiet: #242422;
-    --warn-bg: #2b2215; --warn-line: #5a4522; --warn-ink: #f0d7a6;
+    --warn-bg: #352812; --warn-line: #6a5226; --warn-ink: #f0d7a6;
     --ok: #8fd1a5; --bad: #f0a3a3;
   }
 }
@@ -310,12 +310,12 @@ th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); p
 td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
 td.seq, td.t { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 td.ev { font: 600 13px var(--mono); white-space: nowrap; }
-td.ev .kind { display: inline-block; width: 7px; height: 7px; margin: 0 9px 1px 0; background: var(--muted); vertical-align: middle; }
+td.ev .kind { display: inline-block; width: 8px; height: 8px; margin: 0 9px 1px 0; background: var(--muted); vertical-align: middle; }
 tr.model td.ev .kind { border-radius: 50%; }
 tr.tool td.ev .kind { border-radius: 1px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 tr.run td.ev .kind { transform: rotate(45deg) scale(0.85); }
 tr.other td.ev .kind { height: 2px; margin-bottom: 3px; }
-tr.refused td.ev .kind { width: 0; height: 0; background: none; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--warn-ink); }
+tr.refused td.ev .kind { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--warn-ink); }
 tr.refused td.ev { color: var(--warn-ink); }
 tr.refused { background: var(--warn-bg); box-shadow: inset 3px 0 var(--warn-ink); }
 th:first-child, td:first-child { padding-left: 12px; }
@@ -329,7 +329,7 @@ th:first-child, td:first-child { padding-left: 12px; }
 .legend .model .kind { border-radius: 50%; }
 .legend .tool .kind { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); border-radius: 1px; }
 .legend .run .kind { transform: rotate(45deg) scale(0.85); }
-.legend .refused .kind { width: 0; height: 0; background: none; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--warn-ink); }
+.legend .refused .kind { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--warn-ink); }
 .legend[hidden] { display: none; }
 .note { color: var(--muted); font-size: 13px; margin-top: 16px; max-width: 70ch; }
 .state { color: var(--muted); font-size: 14.5px; padding: 18px 0; }
@@ -368,7 +368,7 @@ th:first-child, td:first-child { padding-left: 12px; }
   <section class="summary" id="summary" aria-label="Summary" hidden></section>
   <dl id="facts"></dl>
   <p class="state" id="state" role="status">Loading the record…</p>
-  <p class="legend" id="legend" hidden><span class="run"><i class="kind"></i>Run</span><span class="model"><i class="kind"></i>Model call</span><span class="tool"><i class="kind"></i>Tool call</span><span class="refused"><i class="kind"></i>Refused or withheld</span></p>
+  <p class="legend" id="legend" hidden><span class="run"><i class="kind"></i>Run</span><span class="model"><i class="kind"></i>Model call</span><span class="tool"><i class="kind"></i>Tool call</span><span class="refused"><i class="kind"></i>Refused or withheld</span><span>Labels: D0 public, D1 internal, D2 confidential, D3 restricted</span></p>
   <table id="table" hidden><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Label</th><th>Detail</th></tr></thead><tbody id="rows"></tbody></table>
   <p class="note">Bodies are encrypted in the payload store and never shown here. The label is the data class of the event row; a refusal names the class of what it refused. Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
 </div>
@@ -432,12 +432,13 @@ if (v.agent) fact("Agent version", v.agent);
 const cm = (ok) => { const m = el("span", "", ok ? "\u2713" : "\u2717"); m.setAttribute("aria-hidden", "true"); return m; };
 if (v.chain.events === 0) fact("Chain", el("span", "chain none", "Nothing to verify yet"));
 else { const c = el("span", "chain " + (v.chain.firstBad === null ? "ok" : "bad")); c.append(cm(v.chain.firstBad === null), v.chain.firstBad === null ? "Verified: chain intact over " + v.chain.events + " events" : "Chain broken at event " + v.chain.firstBad); fact("Chain", c); }
+const CLASS_NAMES = { D0: "D0, public", D1: "D1, internal", D2: "D2, confidential", D3: "D3, restricted", R: "R, review-confidential" };
 const kindOf = (t, refused) => refused ? "refused" : t.startsWith("model.") ? "model" : t.startsWith("tool.") ? "tool" : t.startsWith("run.") ? "run" : "other";
 for (const r of v.rows) {
   const tr = el("tr", kindOf(r.t, r.refused));
   const ev = el("td", "ev"); const k = el("i", "kind"); k.setAttribute("aria-hidden", "true"); ev.append(k, r.t);
   tr.append(el("td", "seq", String(r.seq)), el("td", "t", "+" + r.ms + " ms"), ev);
-  const cls = el("td", "cls"); cls.append(el("span", "pill " + String(r.cls).toLowerCase(), r.cls)); tr.append(cls);
+  const cls = el("td", "cls"); const pill = el("span", "pill " + String(r.cls).toLowerCase(), r.cls); pill.title = CLASS_NAMES[r.cls] || r.cls; cls.append(pill); tr.append(cls);
   tr.append(el("td", "detail", r.detail));
   $("rows").append(tr);
 }
