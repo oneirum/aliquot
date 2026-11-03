@@ -38,7 +38,7 @@ You need Node 26 or later, pnpm 10 and Docker. The demo and the checks use scrip
 	git clone https://github.com/oneirum/aliquot.git
 	cd aliquot
 	pnpm install
-	pnpm doctor     # optional: checks Node, Docker, ports and the sandbox image, and says the fix for each
+	pnpm run doctor # optional: checks Node, Docker, ports and the sandbox image, and says the fix for each
 	pnpm demo
 
 `pnpm demo` starts Postgres in Docker if it is not running, seeds the synthetic lab0 lab, compiles and publishes its handbook from three documents, and starts the worker and the web door. It prints a link to the chat page with two questions to try:
@@ -277,7 +277,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - Research tools, built into core: OpenAlex, PubMed, arXiv and Europe PMC search, open-access full text, DOI lookup with open copies, citation walks, datasets by class, and `run_code` for R and Python in a container.
 - Native Anthropic Messages and OpenAI Responses clients, and per-class model routing.
 - The web door, the encrypted payload store and the hash-chained audit stream.
-- `pnpm doctor`, a preflight that names what is missing on a machine and how to fix it.
+- `pnpm run doctor`, a preflight that names what is missing on a machine and how to fix it.
 
 **Not built yet, roughly in order**
 
@@ -308,7 +308,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 	packages/core      the harness: gate, run loop, record, gateway, knowledge bases, tools, agent CLIs, publish
 	packages/studio    the authoring studio (Payload CMS on Next.js)
 	sandbox/           the run_code container image
-	scripts/           the demo, pnpm doctor, the check scripts and the boundary scanner
+	scripts/           the demo, pnpm run doctor, the check scripts and the boundary scanner
 	fixtures/          synthetic agents, knowledge bases and the lab0 lab
 	test/              unit and integration tests (node --test), with recorded API fixtures
 	docs/              the docs index, the research IT and IRB sheet, and docs/design/: the design per release

@@ -26,6 +26,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { docxToMarkdown } from "./docx.ts";
 import { extname, join as joinPath } from "node:path";
 import { z } from "zod";
 import { parseExactModelId } from "./agent.ts";
@@ -78,7 +79,7 @@ export const kbDefinitionSchema = z.object({
     .array(
       z.object({
         sourceId: slug.meta(says("Source id", "Short id for this document, for example sop-freezer.")),
-        kind: z.enum(SOURCE_KINDS).meta(says("Kind", "file: a .md or .txt file you attach when you compile. url: a page on a host lab.toml allows.")),
+        kind: z.enum(SOURCE_KINDS).meta(says("Kind", "file: a .md, .txt or Word .docx file you attach when you compile. url: a page on a host lab.toml allows.")),
         location: z.string().min(1).meta(says("Location", "The file name you will attach, with no folder, or the URL.")),
         cls: z.enum(DATA_CLASSES).meta(says("Data class", "The class you declare. A participant id in the text raises it to D3.")),
         licence: z.enum(LICENCES).meta(says("Licence")),
@@ -129,29 +130,31 @@ export interface LoadedSource {
 }
 
 const TEXT_FILES = new Set([".md", ".markdown", ".txt"]);
+/** Every extension a file source may have: text as is, and Word documents read to Markdown. */
+export const SOURCE_FILE_TYPES: readonly string[] = [...TEXT_FILES, ".docx"];
 
 /** A file source names one file beside the definition, never a path: no folder, no parent, nothing absolute. */
 export function isBareFileName(name: string): boolean {
   return name !== "." && name !== ".." && !/[/\\:\0]/.test(name);
 }
 
-/** Where file sources' text comes from, by file name. */
-export type SourceFiles = (name: string) => Promise<string>;
+/** Where file sources' bytes come from, by file name. */
+export type SourceFiles = (name: string) => Promise<Uint8Array>;
 
 /** The kb command's sources: files in the definition's directory. */
 export function filesIn(dir: string): SourceFiles {
   return (name) => {
     if (!isBareFileName(name)) return Promise.reject(new Error(`${name}: a file source's location is a file name with no folder`));
-    return readFile(joinPath(dir, name), "utf8");
+    return readFile(joinPath(dir, name));
   };
 }
 
-/** The studio's sources: files the author attached, held in memory. Nothing is read from or written to disk. */
-export function attachedFiles(files: readonly { readonly name: string; readonly text: string }[]): SourceFiles {
-  const byName = new Map<string, string>();
+/** The studio's sources: files the author attached, held in memory, as text or (a Word file) base64. Nothing is read from or written to disk. */
+export function attachedFiles(files: readonly ({ readonly name: string; readonly text: string } | { readonly name: string; readonly base64: string })[]): SourceFiles {
+  const byName = new Map<string, Uint8Array>();
   for (const f of files) {
     if (byName.has(f.name)) throw new Error(`${f.name} is attached twice`);
-    byName.set(f.name, f.text);
+    byName.set(f.name, "text" in f ? new TextEncoder().encode(f.text) : Buffer.from(f.base64, "base64"));
   }
   return async (name) => {
     const text = byName.get(name);
@@ -189,8 +192,9 @@ export async function readSources(def: KbDefinition, files: SourceFiles, deps: S
 
 async function readFileSource(name: string, files: SourceFiles): Promise<string> {
   const ext = extname(name).toLowerCase();
-  if (!TEXT_FILES.has(ext)) throw new Error(`${name}: only ${[...TEXT_FILES].join(", ")} files are supported as sources in this build`);
-  return files(name);
+  if (ext === ".docx") return docxToMarkdown(await files(name), name);
+  if (!TEXT_FILES.has(ext)) throw new Error(`${name}: ${ext || "a file with no extension"} is not a source type; use ${SOURCE_FILE_TYPES.join(", ")}${ext === ".pdf" || ext === ".doc" ? ` (save it as .docx from Word${ext === ".pdf" ? ", or paste it into a .md file" : ""})` : ""}`);
+  return new TextDecoder().decode(await files(name));
 }
 
 async function readUrlSource(kbId: string, sourceId: string, url: string, deps: SourceDeps): Promise<string> {

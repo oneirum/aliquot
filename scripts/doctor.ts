@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 /**
- * pnpm doctor: checks this machine before a first `pnpm demo`, and says the
+ * pnpm run doctor: checks this machine before a first `pnpm demo`, and says the
  * fix for each problem. It changes nothing: it starts no container, writes
  * no file and calls no model.
  *
  * FAIL is something `pnpm demo` or the checks cannot run without. WARN is
  * something only part of Aliquot needs (the research tools, the agent CLIs,
  * the studio). The exit code is 1 when any line is FAIL.
+ *
+ * Always `pnpm run doctor`: pnpm 10 has a built-in `doctor` command, and a
+ * bare `pnpm doctor` runs that instead and prints nothing of ours.
  *
  *   node scripts/doctor.ts [--json]
  */

@@ -55,7 +55,10 @@ export function KbPanel() {
     setOutcome(null);
     setCompiled(null);
     setStatus("Compiling. The worker reads each source and checks coverage…");
-    const attached = await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })));
+    // A Word file goes as base64; the server reads it to Markdown. Text goes as text.
+    const attached = await Promise.all(
+      files.map(async (f) => (/\.docx$/i.test(f.name) ? { name: f.name, base64: toBase64(new Uint8Array(await f.arrayBuffer())) } : { name: f.name, text: await f.text() })),
+    );
     const res = await fetch(`/api/knowledge-bases/${id}/compile`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ files: attached }) });
     const body = (await res.json()) as { jobId?: string; error?: string };
     if (!res.ok || !body.jobId) {
@@ -116,9 +119,9 @@ export function KbPanel() {
       <h4>Compile and publish</h4>
       <p className="aq-help">{modified ? "Save your changes first. Compile uses the saved definition." : "Attach the source files, compile, read the coverage report, then publish."}</p>
       <label htmlFor="kb-files" className="aq-label">
-        Source files (.md or .txt), named as in Sources
+        Source files (.md, .txt or Word .docx), named as in Sources
       </label>
-      <input id="kb-files" data-testid="kb-files" type="file" multiple accept=".md,.markdown,.txt" onChange={(e) => setFiles([...(e.target.files ?? [])])} />
+      <input id="kb-files" data-testid="kb-files" type="file" multiple accept=".md,.markdown,.txt,.docx" onChange={(e) => setFiles([...(e.target.files ?? [])])} />
       <div className="aq-actions">
         <Button buttonStyle="secondary" size="small" disabled={busy || modified} onClick={guarded(compile)}>
           Compile
@@ -173,4 +176,10 @@ export function KbPanel() {
       ) : null}
     </section>
   );
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }

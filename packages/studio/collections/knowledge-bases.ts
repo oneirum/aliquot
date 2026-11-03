@@ -62,7 +62,8 @@ async function savedDefinition(req: PayloadRequest) {
 
 interface Attached {
   readonly name: string;
-  readonly text: string;
+  readonly text?: string;
+  readonly base64?: string;
 }
 
 export const KnowledgeBases: CollectionConfig = {
@@ -98,7 +99,7 @@ export const KnowledgeBases: CollectionConfig = {
         if (missing.length) return json({ error: `Attach ${missing.join(", ")} to compile.` }, 400);
         let sources;
         try {
-          sources = attachedFiles(files.map((f) => ({ name: String(f.name), text: String(f.text) })));
+          sources = attachedFiles(files.map((f) => (typeof f.base64 === "string" ? { name: String(f.name), base64: f.base64 } : { name: String(f.name), text: String(f.text) })));
         } catch (err) {
           return json({ error: reason(err) }, 400);
         }

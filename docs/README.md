@@ -4,7 +4,7 @@ Start with the [README](../README.md): what Aliquot does, the quickstart and the
 
 | If you are | Read |
 |---|---|
-| Trying it on a laptop | [Quickstart](../README.md#quickstart), then `pnpm doctor` if a step fails |
+| Trying it on a laptop | [Quickstart](../README.md#quickstart), then `pnpm run doctor` if a step fails |
 | Setting it up for a lab | [The studio](../README.md#the-studio), [`lab.example.toml`](../lab.example.toml) (every table, commented) and [Model providers](../README.md#model-providers) |
 | Research IT, a data steward or an IRB | [For research IT and the IRB](for-research-it-and-irb.md): where each data class may go, what runs where, what is stored and under which key, and what is not covered yet |
 | Changing the code | [`AGENTS.md`](../AGENTS.md) (setup and checks, for people and coding agents) and [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
@@ -17,7 +17,7 @@ What changed in each release is in [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Command | What it does |
 |---|---|
-| `pnpm doctor` | Checks this machine and prints the fix for each problem. Changes nothing. |
+| `pnpm run doctor` | Checks this machine and prints the fix for each problem. Changes nothing. |
 | `pnpm demo` | Runs the synthetic lab0 lab: Postgres, a published handbook, the worker and the web door. `--studio` adds the studio. |
 | `pnpm demo:agent --backend claude-code` | The same lab on a real Claude Code or Codex login, for a developer's machine. `--research` adds a data and literature question. |
 | `pnpm aliquot runs` | Lists the newest runs: start time, agent version, outcome, event count, chain check. |

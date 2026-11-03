@@ -14,6 +14,7 @@ import { createQueue } from "../packages/core/src/queue.ts";
 import { createHttpEgress, EgressRefused } from "../packages/core/src/tools.ts";
 import { createPayloadStore } from "../packages/core/src/record.ts";
 import { freshDatabase } from "./db.ts";
+import { FREEZER_SOP_MARKDOWN, freezerSop } from "./docx-fixture.ts";
 import { startFakeModel } from "./fake-model.ts";
 
 const dir = fileURLToPath(new URL("../fixtures/kb-lab/", import.meta.url));
@@ -283,4 +284,17 @@ test("a URL source that redirects is refused, and its target is never requested"
   const labWiki = { ...sourceDeps, http: createHttpEgress({ policy: DEFAULT_POLICY, hosts: { "127.0.0.1": "lab" }, fetchImpl: fetch }) };
   await assert.rejects(readSources(def, filesIn(dir), labWiki), /HTTP 302 redirects to \/elsewhere; name the final URL as the source/);
   assert.equal(followedRedirects, 0);
+});
+
+test("a Word source reads to Markdown before compile, from the studio as base64, and the lab's id patterns see its text", async () => {
+  const def = await definition("kb.json", (d) => ((d.sources as { location: string }[])[0]!.location = "sop-freezer.docx"));
+  const [first, ...rest] = def.sources.map((s) => s.location);
+  const attach = (bytes: Uint8Array) => attachedFiles([{ name: first!, base64: Buffer.from(bytes).toString("base64") }, ...rest.map((name) => ({ name, text: `# ${name}` }))]);
+  const read = await readSources(def, attach(freezerSop()), sourceDeps);
+  assert.equal(read[0]!.text, FREEZER_SOP_MARKDOWN);
+  assert.equal(read[0]!.ref.cls, def.sources[0]!.cls, "the declared class stands when no pattern matches");
+  const withId = await readSources(def, attach(freezerSop("Pending: LAB0-0003")), { ...sourceDeps, labPatterns: [/LAB0-\d{4}/] });
+  assert.equal(withId[0]!.ref.cls, "D3", "a participant id inside the Word file raises it to D3");
+  const pdf = await definition("kb.json", (d) => ((d.sources as { location: string }[])[0]!.location = "handbook.pdf"));
+  await assert.rejects(readSources(pdf, attachedFiles([]), sourceDeps), /handbook\.pdf: \.pdf is not a source type; use \.md, \.markdown, \.txt, \.docx \(save it as \.docx from Word, or paste it into a \.md file\)/);
 });

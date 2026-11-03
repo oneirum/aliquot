@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { diagnose, formatLines, type Facts } from "../scripts/doctor.ts";
 
@@ -50,9 +51,16 @@ test("a lab.toml that does not load is FAIL with the loader's own message", () =
   assert.deepEqual(levels({ ...ready, labToml: { present: true, problem: "lab.toml has a [tools] table" } }), ["FAIL lab.toml does not load: lab.toml has a [tools] table"]);
 });
 
-test("pnpm doctor runs on this machine and its exit code matches its lines", () => {
+test("pnpm run doctor runs on this machine and its exit code matches its lines", () => {
   const r = spawnSync(process.execPath, ["scripts/doctor.ts", "--json"], { cwd: root, encoding: "utf8", timeout: 60_000 });
   const lines = JSON.parse(r.stdout) as { level: string }[];
   assert.equal(r.status, lines.some((l) => l.level === "FAIL") ? 1 : 0);
   assert.ok(lines.some((l) => l.level === "PASS"));
+});
+
+test("the docs say pnpm run doctor, because a bare pnpm doctor runs pnpm's own built-in command", () => {
+  for (const file of ["README.md", "AGENTS.md", "CONTRIBUTING.md", "docs/README.md"]) {
+    const text = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(text, /pnpm doctor\b/, `${file} says pnpm doctor`);
+  }
 });

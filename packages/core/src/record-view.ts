@@ -14,7 +14,51 @@ export interface RecordView {
   readonly agent: string | null;
   readonly outcome: string;
   readonly chain: { readonly events: number; readonly firstBad: number | null };
+  readonly summary: RunSummary;
   readonly rows: readonly { readonly seq: number; readonly ms: number; readonly t: RunEvent["t"]; readonly cls: string; readonly detail: string; readonly refused: boolean }[];
+}
+
+/** What a reader asks first: how long, how many calls, what it cost, what it read, what was refused. */
+export interface RunSummary {
+  readonly ms: number;
+  readonly modelCalls: number;
+  readonly tokens: { readonly input: number; readonly output: number };
+  readonly toolCalls: readonly { readonly tool: string; readonly calls: number }[];
+  /** Distinct knowledge base entries any tool returned, cited or not. */
+  readonly entriesRetrieved: number;
+  readonly refused: number;
+  readonly withheld: number;
+}
+
+export function summarize(events: readonly StoredEvent[]): RunSummary {
+  const tools = new Map<string, number>();
+  const entries = new Set<string>();
+  let modelCalls = 0, input = 0, output = 0, refused = 0, withheld = 0;
+  for (const { event: e } of events) {
+    if (e.t === "model.completed") { modelCalls++; input += e.usage.input; output += e.usage.output; }
+    else if (e.t === "tool.requested") tools.set(e.tool, (tools.get(e.tool) ?? 0) + 1);
+    else if (e.t === "tool.completed") for (const r of e.retrieved ?? []) for (const h of r.entries) entries.add(h);
+    else if (e.t === "egress.refused") refused++;
+    else if (e.t === "tool.withheld") withheld++;
+  }
+  return {
+    ms: events.length ? Date.parse(events.at(-1)!.at) - Date.parse(events[0]!.at) : 0,
+    modelCalls,
+    tokens: { input, output },
+    toolCalls: [...tools].map(([tool, calls]) => ({ tool, calls })),
+    entriesRetrieved: entries.size,
+    refused,
+    withheld,
+  };
+}
+
+/** One line for a terminal: `2 model calls, 30 tokens in, 15 out; tools kb_search, kb_read; 3 entries retrieved; 0 refused`. */
+export function formatSummary(s: RunSummary): string {
+  const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+  const tools = s.toolCalls.length ? `tools ${s.toolCalls.map((t) => (t.calls > 1 ? `${t.tool} x${t.calls}` : t.tool)).join(", ")}` : "no tool calls";
+  const parts = [`${s.ms} ms`, n(s.modelCalls, "model call"), `${s.tokens.input} tokens in, ${s.tokens.output} out`, tools, n(s.entriesRetrieved, "entry retrieved", "entries retrieved"), `${s.refused} refused`];
+  if (s.withheld) parts.push(`${s.withheld} withheld`);
+  return parts.join("; ");
 }
 
 export function describeEvent(e: RunEvent): string {
@@ -71,6 +115,7 @@ export function recordView(runId: string, events: readonly StoredEvent[]): Recor
     agent: started?.t === "run.started" ? started.agent : null,
     outcome: finished?.t === "run.finished" ? finished.outcome : "running",
     chain: { events: events.length, firstBad: verifyChain(events) },
+    summary: summarize(events),
     rows: events.map((e) => ({ seq: e.seq, ms: Date.parse(e.at) - t0, t: e.event.t, cls: e.cls, detail: describeEvent(e.event), refused: e.event.t === "egress.refused" || e.event.t === "tool.withheld" })),
   };
 }
@@ -84,6 +129,7 @@ export function formatRecordView(v: RecordView): string {
     `agent    ${v.agent ?? "(no run.started)"}`,
     `outcome  ${v.outcome}`,
     `chain    ${chain}`,
+    `summary  ${formatSummary(v.summary)}`,
     "",
     ...v.rows.map((r) => `${String(r.seq).padStart(3)}  +${String(r.ms).padStart(6)} ms  ${r.t.padEnd(width)}  ${r.cls.padEnd(2)}  ${r.detail}`),
   ].join("\n");
