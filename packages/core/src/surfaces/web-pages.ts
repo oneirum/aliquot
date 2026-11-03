@@ -221,21 +221,44 @@ export function recordPage(runId: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Run record · Aliquot</title>
 <style>${BASE_CSS}
-.shell { max-width: 920px; margin: 0 auto; padding: 0 20px 64px; }
+.shell { max-width: 960px; margin: 0 auto; padding: 0 20px 64px; }
 header { display: flex; align-items: baseline; justify-content: space-between; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
-header .where { font-size: 13px; color: var(--muted); }
-h1 { font-size: 26px; letter-spacing: -0.02em; line-height: 1.15; margin: 36px 0 6px; font-weight: 650; }
-.sub { color: var(--muted); margin: 0 0 22px; font-size: 14.5px; }
+header nav { display: flex; gap: 16px; font-size: 13px; }
+header nav a { color: var(--muted); text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { header nav a:hover { color: var(--ink); } }
+.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 36px 0 18px; }
+h1 { font-size: 26px; letter-spacing: -0.02em; line-height: 1.15; margin: 0; font-weight: 650; }
+.when { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+.dl { display: inline-flex; align-items: center; gap: 7px; font: 600 13.5px/1 system-ui, sans-serif; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; text-decoration: none; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
+.dl:active { transform: scale(0.97); }
+.dl svg { width: 14px; height: 14px; }
+@media (hover: hover) and (pointer: fine) { .dl:hover { border-color: var(--muted); } }
+.dl[hidden] { display: none; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
+.summary[hidden] { display: none; }
+.stat { background: var(--surface); padding: 12px 14px 13px; min-width: 0; }
+.stat .k { font-size: 12.5px; color: var(--muted); }
+.stat .v { font-size: 19px; font-weight: 620; letter-spacing: -0.01em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat .v small { font-size: 13px; font-weight: 450; color: var(--muted); letter-spacing: 0; }
+.stat .s { font: 12px/1.4 var(--mono); color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+.stat.warn { background: var(--warn-bg); }
+.stat.warn .k, .stat.warn .v, .stat.warn .v small { color: var(--warn-ink); }
+.mark { display: inline-block; width: 1em; text-align: center; margin-right: 6px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0 0 26px; font-size: 14px; }
 dt { color: var(--muted); }
 dd { margin: 0; font-family: var(--mono); font-size: 13px; word-break: break-all; }
-.chain { display: inline-flex; gap: 8px; align-items: center; font-weight: 600; font-family: system-ui, sans-serif; font-size: 14px; }
+.chain { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; font-family: system-ui, sans-serif; font-size: 14px; }
 .chain.ok { color: var(--ok); } .chain.bad { color: var(--bad); }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 0 10px 8px 0; border-bottom: 1px solid var(--line); }
 td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
-td.seq, td.t { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; }
+td.seq, td.t { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 td.ev { font: 600 13px var(--mono); white-space: nowrap; }
+td.ev .kind { display: inline-block; width: 7px; height: 7px; margin: 0 9px 1px 0; background: var(--muted); vertical-align: middle; }
+tr.model td.ev .kind { border-radius: 50%; }
+tr.tool td.ev .kind { border-radius: 1px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+tr.run td.ev .kind { transform: rotate(45deg) scale(0.85); }
+tr.refused td.ev .kind { width: 0; height: 0; background: none; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--warn-ink); }
 tr.refused td.ev { color: var(--warn-ink); }
 tr.refused { background: var(--warn-bg); box-shadow: inset 3px 0 var(--warn-ink); }
 th:first-child, td:first-child { padding-left: 12px; }
@@ -243,18 +266,30 @@ th:first-child, td:first-child { padding-left: 12px; }
 .outcome.refused, .outcome.failed { color: var(--warn-ink); font-weight: 600; }
 .outcome.none { color: var(--muted); }
 .chain.none { color: var(--muted); font-weight: 400; }
-.note { color: var(--muted); font-size: 13px; margin-top: 16px; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+.legend span { display: inline-flex; align-items: center; }
+.legend .kind { display: inline-block; width: 7px; height: 7px; margin-right: 7px; background: var(--muted); }
+.legend .model .kind { border-radius: 50%; }
+.legend .tool .kind { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); border-radius: 1px; }
+.legend .run .kind { transform: rotate(45deg) scale(0.85); }
+.legend .refused .kind { width: 0; height: 0; background: none; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--warn-ink); }
+.legend[hidden] { display: none; }
+.note { color: var(--muted); font-size: 13px; margin-top: 16px; max-width: 70ch; }
 .state { color: var(--muted); font-size: 14.5px; padding: 18px 0; }
 .state.err { color: var(--bad); }
 .state[hidden], table[hidden] { display: none; }
 @media (max-width: 640px) {
-  h1 { font-size: 23px; margin-top: 28px; }
+  h1 { font-size: 23px; }
+  .top { margin-top: 28px; }
+  .summary { grid-template-columns: 1fr 1fr; }
   dl { grid-template-columns: 1fr; gap: 0; }
   dt { font-size: 12.5px; }
   dd { margin-bottom: 10px; }
   thead { display: none; }
   table, tbody { display: block; }
   tr { display: grid; grid-template-columns: 5ch 10ch 1fr; grid-template-areas: "ev ev cls" "detail detail detail" "seq t ."; gap: 3px 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  td.detail { padding-left: 16px; }
+  td.seq { padding-left: 16px; }
   tr.refused { margin: 0 -20px; padding: 11px 20px; }
   td, td:first-child { display: block; padding: 0; border: 0; }
   td.ev { grid-area: ev; white-space: normal; overflow-wrap: anywhere; }
@@ -268,13 +303,17 @@ th:first-child, td:first-child { padding-left: 12px; }
 </head>
 <body>
 <div class="shell">
-  <header><a class="wordmark" href="/">Aliquot</a><span class="where">Read only</span></header>
-  <h1>Run record</h1>
-  <p class="sub">Every model call, tool call and refusal in this run, in order. Bodies are encrypted in the payload store and are not shown here. The label is the class of the event row itself; a refusal names the class of what it refused.</p>
+  <header><a class="wordmark" href="/">Aliquot</a><nav><a href="/">Ask the lab</a><span class="where" style="color:var(--muted)">Read only</span></nav></header>
+  <div class="top">
+    <div><h1>Run record</h1><p class="when" id="when"></p></div>
+    <a class="dl" id="download" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Download JSON</a>
+  </div>
+  <section class="summary" id="summary" aria-label="Summary" hidden></section>
   <dl id="facts"></dl>
   <p class="state" id="state" role="status">Loading the record…</p>
+  <p class="legend" id="legend" hidden><span class="run"><i class="kind"></i>Run</span><span class="model"><i class="kind"></i>Model call</span><span class="tool"><i class="kind"></i>Tool call</span><span class="refused"><i class="kind"></i>Refused or withheld</span></p>
   <table id="table" hidden><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Label</th><th>Detail</th></tr></thead><tbody id="rows"></tbody></table>
-  <p class="note">Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
+  <p class="note">Bodies are encrypted in the payload store and never shown here. The label is the data class of the event row; a refusal names the class of what it refused. Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
 </div>
 <script type="module">
 const runId = ${JSON.stringify(runId)};
@@ -294,20 +333,53 @@ try {
 if (v.rows.length) {
   $("state").hidden = true;
   $("table").hidden = false;
+  $("legend").hidden = false;
+  const dl = $("download");
+  dl.href = "/runs/" + runId + "/view";
+  dl.download = "aliquot-run-" + runId + ".json";
+  dl.hidden = false;
 } else {
   $("state").textContent = "No run with the id " + runId + " has recorded any events. A run sent a moment ago shows its first event within a second; otherwise check the Record link. ";
   const back = el("a", "", "Back to the chat");
   back.href = "/";
   $("state").append(back);
 }
+if (v.startedAt) $("when").textContent = "Started " + new Date(v.startedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
+const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
+const ms = (n) => (n < 1000 ? n + " ms" : (n / 1000).toFixed(n < 10000 ? 1 : 0) + " s");
+const stat = (k, v, sub, warn) => {
+  const c = el("div", "stat" + (warn ? " warn" : ""));
+  c.append(el("div", "k", k));
+  const val = el("div", "v"); typeof v === "string" ? (val.textContent = v) : val.append(...v); c.append(val);
+  if (sub) c.append(el("div", "s", sub));
+  $("summary").append(c);
+};
+if (v.chain.events) {
+  const s = v.summary;
+  const bad = v.outcome === "refused" || v.outcome === "failed" || v.outcome === "faulted";
+  const om = el("span", "mark", bad ? "\u2298" : v.outcome === "running" ? "\u2026" : "\u2713"); om.setAttribute("aria-hidden", "true");
+  stat("Outcome", [om, v.outcome], null, bad);
+  stat("Time", ms(s.ms));
+  const tok = el("small", "", " in, " + s.tokens.output + " out");
+  stat("Model calls", String(s.modelCalls), s.modelCalls ? null : "nothing sent to a model");
+  stat("Tokens", [String(s.tokens.input), tok]);
+  stat("Tool calls", String(s.toolCalls.reduce((a, t) => a + t.calls, 0)), s.toolCalls.map((t) => t.calls > 1 ? t.tool + " \u00d7" + t.calls : t.tool).join(", ") || null);
+  stat("Entries retrieved", String(s.entriesRetrieved));
+  const blocked = s.refused + s.withheld;
+  stat("Refused", String(blocked), s.withheld ? plural(s.withheld, "result") + " withheld" : null, blocked > 0);
+  $("summary").hidden = false;
+}
 const fact = (k, val) => { $("facts").append(el("dt", "", k)); const d = el("dd"); typeof val === "string" ? (d.textContent = val) : d.append(val); $("facts").append(d); };
 fact("Run", v.runId);
 if (v.agent) fact("Agent version", v.agent);
-fact("Outcome", el("span", "outcome " + (v.chain.events ? v.outcome : "none"), v.chain.events ? v.outcome : "No events"));
-fact("Chain", v.chain.events === 0 ? el("span", "chain none", "Nothing to verify yet") : el("span", "chain " + (v.chain.firstBad === null ? "ok" : "bad"), v.chain.firstBad === null ? "Verified: chain intact over " + v.chain.events + " events" : "Chain broken at event " + v.chain.firstBad));
+const cm = (ok) => { const m = el("span", "", ok ? "\u2713" : "\u2717"); m.setAttribute("aria-hidden", "true"); return m; };
+if (v.chain.events === 0) fact("Chain", el("span", "chain none", "Nothing to verify yet"));
+else { const c = el("span", "chain " + (v.chain.firstBad === null ? "ok" : "bad")); c.append(cm(v.chain.firstBad === null), v.chain.firstBad === null ? "Verified: chain intact over " + v.chain.events + " events" : "Chain broken at event " + v.chain.firstBad); fact("Chain", c); }
+const kindOf = (t, refused) => refused ? "refused" : t.startsWith("model.") ? "model" : t.startsWith("tool.") ? "tool" : t.startsWith("run.") ? "run" : "other";
 for (const r of v.rows) {
-  const tr = el("tr", r.refused ? "refused" : "");
-  tr.append(el("td", "seq", String(r.seq)), el("td", "t", "+" + r.ms + " ms"), el("td", "ev", r.t));
+  const tr = el("tr", kindOf(r.t, r.refused));
+  const ev = el("td", "ev"); const k = el("i", "kind"); k.setAttribute("aria-hidden", "true"); ev.append(k, r.t);
+  tr.append(el("td", "seq", String(r.seq)), el("td", "t", "+" + r.ms + " ms"), ev);
   const cls = el("td", "cls"); cls.append(el("span", "pill " + String(r.cls).toLowerCase(), r.cls)); tr.append(cls);
   tr.append(el("td", "detail", r.detail));
   $("rows").append(tr);

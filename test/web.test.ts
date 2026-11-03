@@ -83,7 +83,7 @@ test("the chat page and the record page are self-contained HTML that loads nothi
 });
 
 test("the record view of a run with no events yet is empty, running and intact", async () => {
-  assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, startedAt: null, agent: null, outcome: "running", chain: { events: 0, firstBad: null }, rows: [] } });
+  assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, startedAt: null, agent: null, outcome: "running", chain: { events: 0, firstBad: null }, summary: { ms: 0, modelCalls: 0, tokens: { input: 0, output: 0 }, toolCalls: [], entriesRetrieved: 0, refused: 0, withheld: 0 }, rows: [] } });
 });
 
 test("a web surface bound to a channel puts every message there and refuses a body that names another", async () => {
