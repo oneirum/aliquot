@@ -54,7 +54,16 @@ header .where { font-size: 13px; color: var(--muted); }
 .turn { display: flex; flex-direction: column; gap: 10px; opacity: 1; transform: none; transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); }
 @starting-style { .turn { opacity: 0; transform: translateY(6px); } }
 .q { align-self: flex-end; max-width: 80%; background: var(--quiet); border-radius: 14px 14px 4px 14px; padding: 9px 14px; white-space: pre-wrap; }
-.a { max-width: 92%; white-space: pre-wrap; }
+.a { max-width: 92%; }
+.a > * { margin: 0 0 10px; }
+.a > :last-child { margin-bottom: 0; }
+.a p { white-space: pre-line; }
+.a ul, .a ol { padding-left: 1.3em; }
+.a li { margin: 3px 0; padding-left: 2px; }
+.a li::marker { color: var(--muted); }
+.a .h { font-weight: 650; letter-spacing: -0.01em; margin-top: 16px; }
+.a > .h:first-child { margin-top: 0; }
+.a pre { font: 12.5px/1.5 var(--mono); background: var(--quiet); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
 .a strong { font-weight: 650; }
 .a code { font: 12.5px var(--mono); background: var(--quiet); padding: 1px 5px; border-radius: 4px; }
 .steps { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -65,6 +74,7 @@ header .where { font-size: 13px; color: var(--muted); }
 .source { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 4px 9px; color: var(--ink); }
 .source b { font-weight: 600; font-size: 12px; color: var(--muted); }
 .source code { font: 12.5px var(--mono); }
+.facts { font-variant-numeric: tabular-nums; }
 .banner { border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px; max-width: 92%; }
 .banner strong { display: block; font-weight: 650; margin-bottom: 2px; }
 .banner p { margin: 0; font-size: 14.5px; }
@@ -123,15 +133,45 @@ $("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shift
 
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text !== undefined) x.textContent = text; return x; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// Models answer in Markdown. Bold, italic and code become elements; everything else stays text, so nothing is parsed as HTML.
+// Models answer in Markdown. Paragraphs, lists, headings and code blocks become elements, and so do bold,
+// italic and inline code; every piece of text goes in as text, so nothing is parsed as HTML.
+function inline(parent, text) {
+  for (const part of text.split(/(\\*\\*[^*\\n]+\\*\\*|\\*[^*\\s][^*\\n]*\\*|\`[^\`\\n]+\`)/)) {
+    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) parent.append(el("strong", "", part.slice(2, -2)));
+    else if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) parent.append(el("em", "", part.slice(1, -1)));
+    else if (part.length > 2 && part.startsWith("\`") && part.endsWith("\`")) parent.append(el("code", "", part.slice(1, -1)));
+    else if (part) parent.append(part);
+  }
+  return parent;
+}
 function answer(text) {
   const a = el("div", "a");
-  for (const part of text.split(/(\\*\\*[^*\\n]+\\*\\*|\\*[^*\\s][^*\\n]*\\*|\`[^\`\\n]+\`)/)) {
-    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) a.append(el("strong", "", part.slice(2, -2)));
-    else if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) a.append(el("em", "", part.slice(1, -1)));
-    else if (part.length > 2 && part.startsWith("\`") && part.endsWith("\`")) a.append(el("code", "", part.slice(1, -1)));
-    else if (part) a.append(part);
+  const lines = text.replace(/\\r\\n/g, "\\n").split("\\n");
+  let para = [], list = null;
+  const flush = () => { if (para.length) a.append(inline(el("p"), para.join("\\n"))); para = []; list = null; };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\\s*\`\`\`/.test(line)) {
+      flush();
+      const code = [];
+      while (++i < lines.length && !/^\\s*\`\`\`/.test(lines[i])) code.push(lines[i]);
+      a.append(el("pre", "", code.join("\\n")));
+      continue;
+    }
+    const h = /^\\s*#{1,6}\\s+(.*)$/.exec(line);
+    const li = /^\\s*(?:([-*•])|(\\d+)[.)])\\s+(.*)$/.exec(line);
+    if (h) { flush(); a.append(inline(el("div", "h"), h[1])); }
+    else if (li) {
+      if (para.length) { a.append(inline(el("p"), para.join("\\n"))); para = []; }
+      const tag = li[1] ? "ul" : "ol";
+      if (!list || list.tagName.toLowerCase() !== tag) { list = el(tag); if (li[2] && li[2] !== "1") list.start = Number(li[2]); a.append(list); }
+      list.append(inline(el("li"), li[3]));
+    }
+    else if (!line.trim()) { if (para.length) flush(); }
+    else if (list && /^\\s{2,}\\S/.test(line)) list.lastChild.append(" " + line.trim());
+    else { list = null; para.push(line); }
   }
+  flush();
   return a;
 }
 const REFUSAL = {
@@ -141,6 +181,20 @@ const REFUSAL = {
   "review-confidential-needs-lab": () => "Review-confidential content may only go to models on lab hardware.",
   "host-not-declared": (r) => "Host " + r.host + " is not in the tool's egress list.",
 };
+
+// One quiet line from the run's record: what it read and how long it took.
+async function facts(runId) {
+  try {
+    const v = await (await fetch("/runs/" + runId + "/view")).json();
+    const s = v.summary, parts = [];
+    if (s.entriesRetrieved) parts.push("read " + s.entriesRetrieved + (s.entriesRetrieved === 1 ? " entry" : " entries"));
+    const tools = s.toolCalls.reduce((n, t) => n + t.calls, 0);
+    if (tools) parts.push(tools + (tools === 1 ? " tool call" : " tool calls"));
+    parts.push(s.ms < 1000 ? s.ms + " ms" : (s.ms / 1000).toFixed(1) + " s");
+    const f = el("span", "facts", parts.join(" \u00b7 "));
+    return f;
+  } catch { return null; }
+}
 
 function recordLink(runId) { const a = el("a", "", "Record"); a.href = "/runs/" + runId; return a; }
 
@@ -186,6 +240,8 @@ async function ask(text) {
         const meta = el("div", "meta");
         if (m) { const s = el("span", "source"); s.append(el("b", "", "Source"), el("code", "", m[1].trim())); meta.append(s); }
         if (withheld) meta.append(el("span", "", withheld + (withheld === 1 ? " tool result" : " tool results") + " withheld from the model"));
+        const sum = await facts(runId);
+        if (sum) meta.append(sum);
         meta.append(recordLink(runId));
         turn.append(meta);
       }
@@ -238,12 +294,12 @@ h1 { font-size: 26px; letter-spacing: -0.02em; line-height: 1.15; margin: 0; fon
 .summary[hidden] { display: none; }
 .stat { background: var(--surface); padding: 12px 14px 13px; min-width: 0; }
 .stat .k { font-size: 12.5px; color: var(--muted); }
-.stat .v { font-size: 19px; font-weight: 620; letter-spacing: -0.01em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat .v { font-size: 19px; font-weight: 620; letter-spacing: -0.01em; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stat .v small { font-size: 13px; font-weight: 450; color: var(--muted); letter-spacing: 0; }
 .stat .s { font: 12px/1.4 var(--mono); color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
 .stat.warn { background: var(--warn-bg); }
 .stat.warn .k, .stat.warn .v, .stat.warn .v small { color: var(--warn-ink); }
-.mark { display: inline-block; width: 1em; text-align: center; margin-right: 6px; }
+.mark { font-size: 0.85em; margin-right: 6px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0 0 26px; font-size: 14px; }
 dt { color: var(--muted); }
 dd { margin: 0; font-family: var(--mono); font-size: 13px; word-break: break-all; }
@@ -258,6 +314,7 @@ td.ev .kind { display: inline-block; width: 7px; height: 7px; margin: 0 9px 1px 
 tr.model td.ev .kind { border-radius: 50%; }
 tr.tool td.ev .kind { border-radius: 1px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 tr.run td.ev .kind { transform: rotate(45deg) scale(0.85); }
+tr.other td.ev .kind { height: 2px; margin-bottom: 3px; }
 tr.refused td.ev .kind { width: 0; height: 0; background: none; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--warn-ink); }
 tr.refused td.ev { color: var(--warn-ink); }
 tr.refused { background: var(--warn-bg); box-shadow: inset 3px 0 var(--warn-ink); }
@@ -266,7 +323,7 @@ th:first-child, td:first-child { padding-left: 12px; }
 .outcome.refused, .outcome.failed { color: var(--warn-ink); font-weight: 600; }
 .outcome.none { color: var(--muted); }
 .chain.none { color: var(--muted); font-weight: 400; }
-.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+.legend { display: flex; gap: 6px 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
 .legend span { display: inline-flex; align-items: center; }
 .legend .kind { display: inline-block; width: 7px; height: 7px; margin-right: 7px; background: var(--muted); }
 .legend .model .kind { border-radius: 50%; }
@@ -282,14 +339,14 @@ th:first-child, td:first-child { padding-left: 12px; }
   h1 { font-size: 23px; }
   .top { margin-top: 28px; }
   .summary { grid-template-columns: 1fr 1fr; }
+  .stat:last-child:nth-child(odd) { grid-column: span 2; }
   dl { grid-template-columns: 1fr; gap: 0; }
   dt { font-size: 12.5px; }
   dd { margin-bottom: 10px; }
   thead { display: none; }
   table, tbody { display: block; }
   tr { display: grid; grid-template-columns: 5ch 10ch 1fr; grid-template-areas: "ev ev cls" "detail detail detail" "seq t ."; gap: 3px 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
-  td.detail { padding-left: 16px; }
-  td.seq { padding-left: 16px; }
+  tr td.detail, tr td.seq { padding-left: 16px; }
   tr.refused { margin: 0 -20px; padding: 11px 20px; }
   td, td:first-child { display: block; padding: 0; border: 0; }
   td.ev { grid-area: ev; white-space: normal; overflow-wrap: anywhere; }
