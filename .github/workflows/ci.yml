@@ -37,3 +37,26 @@ jobs:
       - run: pnpm lab0
       - run: pnpm slice1 --skip-ollama
       - run: pnpm unit3 --skip-ollama
+      - name: Studio migrations match the collections
+        working-directory: packages/studio
+        env: { PAYLOAD_SECRET: ci, DATABASE_URL: "postgres://postgres:labh@127.0.0.1:5432/labh", LABH_CONFIG: ../../lab.example.toml }
+        run: |
+          pnpm exec payload migrate:create drift --skip-empty
+          test -z "$(git status --porcelain migrations)" || { git status --porcelain migrations; echo "collections changed without a migration: run payload migrate:create"; exit 1; }
+
+  # The install research IT runs: a clean Ubuntu runner with only Docker brings the compose stack up, gets a cited
+  # answer from the lab0 handbook, reads the PDF fixtures in the sandbox, and backs up, wipes and restores.
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/compose-check.sh
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: PDF fixtures through the sandbox image the compose check built
+        run: node --test test/pdf.test.ts test/run-code.test.ts
