@@ -192,6 +192,7 @@ export async function runSocketMode(api: SlackApi, onMessage: (msg: unknown, rep
         if ((msg as { type?: unknown }).type === "disconnect") self.close();
         else onMessage(msg, (obj) => self.send(JSON.stringify(obj)));
       });
+      log("[slack] Socket Mode connected");
       wait = 1000;
       const stop = () => socket.close();
       signal.addEventListener("abort", stop, { once: true });

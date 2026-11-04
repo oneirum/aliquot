@@ -121,6 +121,10 @@ async function finalIn(thread: string): Promise<string> {
   });
 }
 
+test("the door logs a line once Socket Mode is connected", async () => {
+  await slack.waitFor("the connected line", () => (/\[slack\] Socket Mode connected/.test(stderr) ? true : undefined));
+});
+
 test("a mention asks the door as the slack surface and the thread gets the answer with its record link", async () => {
   const { id, ts } = mention("Where do samples go?");
   const text = await finalIn(ts);
