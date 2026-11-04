@@ -16,6 +16,8 @@ import type { DataClass } from "./dataclass.ts";
 import type { AskInput, AskOptions, DoorEvent } from "./door-client.ts";
 
 export const ACP_PROTOCOL_VERSION = 1;
+/** What acp and mcp report as their own version. */
+export const ALIQUOT_VERSION = "0.5.1";
 
 /** T3 Code wraps a thread's first prompt in its own instructions; only the person's words go to the door. */
 function personText(text: string): string {
@@ -127,7 +129,7 @@ export function acpAgent(deps: AcpDeps): (line: string) => Promise<void> {
         return reply(id, {
           protocolVersion: ACP_PROTOCOL_VERSION,
           agentCapabilities: { loadSession: false, promptCapabilities: { image: false, audio: false, embeddedContext: false } },
-          agentInfo: { name: "aliquot", title: "Aliquot", version: "0.5.0" },
+          agentInfo: { name: "aliquot", title: "Aliquot", version: ALIQUOT_VERSION },
           authMethods: [],
         });
       case "authenticate":

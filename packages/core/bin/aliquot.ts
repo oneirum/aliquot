@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n]>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
-// aliquot ask and aliquot acp need no lab.toml or database: they reach the web door named by --door, and only it.
+// aliquot ask, acp and mcp need no lab.toml or database: they reach the web door named by --door, and only it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { loadEvents, recentRunIds, type RunId } from "../src/record.ts";
 import { formatRecordView, formatRunList, recordView } from "../src/record-view.ts";
 import { DEFAULT_ALLOWANCE, PERMISSION_FLAGS, requireProcessPermission, sealNetwork } from "../src/seal.ts";
 import { acpAgent } from "../src/acp.ts";
+import { mcpServer } from "../src/mcp.ts";
 import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
 import { rank } from "../src/dataclass.ts";
 
@@ -35,8 +36,10 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       --json prints one JSON line per event: started, tool, finished, refused
   acp [--door url] [--user id] [--ceiling D0..D3]
                       speak the Agent Client Protocol on stdin and stdout, for T3 Code, Zed and other ACP clients
+  mcp [--door url] [--user id] [--ceiling D0..D3]
+                      serve one MCP tool, ask, on stdin and stdout, for a member's Claude Code, Codex or Cursor
                       --door defaults to $ALIQUOT_DOOR, else http://127.0.0.1:3000; --user to $ALIQUOT_USER
-                      $ALIQUOT_SURFACE_TOKEN names the surface ask and acp speak as, such as [surfaces.acp];
+                      $ALIQUOT_SURFACE_TOKEN names the surface ask, acp and mcp speak as, such as [surfaces.acp];
                       without it they speak as the web surface. The door withholds any answer above that
                       surface's placement. --ceiling is a stricter promise on this side, for a client that keeps a copy.
   init [--config config/lab.toml] [--env .env] [--force] [--yes --sample <id>... [--pattern <regex>...]]
@@ -88,7 +91,7 @@ if (command === "init") {
   if (runId !== undefined || values.json || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
   process.exit(await init());
 }
-if (command === "ask" || command === "acp") process.exit(await viaDoor(command, positionals.slice(1)));
+if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0;
 const valid =
@@ -97,24 +100,32 @@ const valid =
   ((command === "record" && !!runId && /^[0-9a-f-]{36}$/i.test(runId)) || (command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000));
 if (!valid) usage();
 
-async function viaDoor(command: "ask" | "acp", words: readonly string[]): Promise<number> {
+async function viaDoor(command: "ask" | "acp" | "mcp", words: readonly string[]): Promise<number> {
   // From the environment only, never a flag, so the token stays out of argv and ps.
   const door: Door = { url: values.door ?? process.env.ALIQUOT_DOOR ?? "http://127.0.0.1:3000", token: process.env[SURFACE_TOKEN_ENV] || null };
   const user = values.user ?? process.env.ALIQUOT_USER;
   const ceiling = values.ceiling;
   const timeout = Number(values.timeout);
   if (!user || (ceiling !== undefined && !isDataClass(ceiling)) || !Number.isFinite(timeout) || timeout <= 0) usage();
-  if (command === "acp") {
+  if (command === "acp" || command === "mcp") {
     if (words.length || values.json) usage();
-    const handle = acpAgent({
+    const serve = command === "acp" ? acpAgent : mcpServer;
+    const handle = serve({
       ask: (input, opts) => ask(door, input, { ...opts, timeoutMs: timeout * 1000 }),
       stop: (runId) => stop(door, runId, user),
       write: (line) => process.stdout.write(`${line}\n`),
       user,
       ...(ceiling && isDataClass(ceiling) ? { ceiling } : {}),
     });
-    // Not awaited per line, so a session/cancel is read while its prompt runs.
-    for await (const line of createInterface({ input: process.stdin })) void handle(line).catch((err) => process.stderr.write(`[acp] ${err instanceof Error ? err.message : String(err)}\n`));
+    // Not awaited per line, so a cancel is read while its prompt runs. When the client closes stdin, calls in flight
+    // still answer before the process exits; a client that will not wait sends SIGTERM.
+    const inFlight = new Set<Promise<void>>();
+    for await (const line of createInterface({ input: process.stdin })) {
+      const p = handle(line).catch((err) => void process.stderr.write(`[${command}] ${err instanceof Error ? err.message : String(err)}\n`));
+      inFlight.add(p);
+      void p.finally(() => inFlight.delete(p));
+    }
+    await Promise.all(inFlight);
     return 0;
   }
   const text = words.length === 1 && words[0] === "-" ? readFileSync(0, "utf8").trim() : words.join(" ").trim();

@@ -19,12 +19,15 @@
  */
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadAudit } from "../packages/core/src/audit.ts";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
+import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { loadManifest, tokenize, type KbSnapshot } from "../packages/core/src/kb.ts";
 import { createPayloadStore, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
@@ -57,7 +60,9 @@ const hosted = await startFakeModel("hosted-2", "answer");
 
 const payloadKey = randomBytes(32).toString("hex");
 const acpToken = randomBytes(32).toString("hex");
-const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken };
+const mcpToken = randomBytes(32).toString("hex");
+const personalToken = randomBytes(32).toString("hex");
+const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken };
 const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
@@ -83,6 +88,15 @@ function config(name: string, agentPath: string): string {
     'kind = "acp"',
     'placement = "zdr"',
     'token_env = "LAB0_ACP_TOKEN"',
+    // Check H: an MCP client on an approved seat (zdr, D1) gets the answer; one on a personal subscription (public, D0) gets the link.
+    "[surfaces.mcp]",
+    'kind = "mcp"',
+    'placement = "zdr"',
+    'token_env = "LAB0_MCP_TOKEN"',
+    "[surfaces.personal]",
+    'kind = "mcp"',
+    'placement = "public"',
+    'token_env = "LAB0_PERSONAL_TOKEN"',
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['${prereg.restricted.pattern}']`,
@@ -258,6 +272,46 @@ try {
     assert.ok(searchesOf(recorded).some((r) => r.entries.includes(published!.entries[q.expected]!)), "the run retrieved the pre-registered entry");
     await ps.stopAll();
     return `${events.map((e) => e.t).join(", ")}; surface ${surface}; answer names ${q.expected}; record ${finished.runId.slice(0, 8)} chain verified`;
+  });
+
+  await check("check H: aliquot mcp lists one tool, ask; through a zdr surface it returns the cited answer and the record link, through a public one the record link only", async () => {
+    assert.ok(published, "check 1 published a snapshot");
+    await ps.stopAll();
+    const web = await ps.startWeb(cfgHandbook);
+    ps.startWorker(cfgHandbook, "WH");
+    const q = prereg.inDocument[0]!;
+    /** One MCP session over stdio: initialize, tools/list, one ask; stdin closes and the server exits once the ask answers. */
+    const session = async (token: string) => {
+      const child = spawn(process.execPath, [...PERMISSION_FLAGS, join(root, "packages/core/bin/aliquot.ts"), "mcp", "--door", web.base, "--user", "member-1"], { cwd: root, env: { PATH: childEnv.PATH!, HOME: childEnv.HOME!, ALIQUOT_SURFACE_TOKEN: token } });
+      let out = "";
+      child.stdout.on("data", (c: Buffer) => (out += c));
+      const msgs = [
+        { id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "lab0", version: "1" } } },
+        { method: "notifications/initialized" },
+        { id: 2, method: "tools/list", params: {} },
+        { id: 3, method: "tools/call", params: { name: "ask", arguments: { question: q.question } } },
+      ];
+      child.stdin.end(msgs.map((m) => JSON.stringify({ jsonrpc: "2.0", ...m })).join("\n") + "\n");
+      const [code] = (await once(child, "close")) as [number | null];
+      assert.equal(code, 0);
+      const byId = new Map(out.trim().split("\n").map((l) => JSON.parse(l) as { id: number; result: any }).map((m) => [m.id, m.result]));
+      return { tools: byId.get(2).tools.map((t: { name: string }) => t.name), call: byId.get(3) };
+    };
+    const seat = await session(mcpToken);
+    assert.deepEqual(seat.tools, ["ask"]);
+    const answered = seat.call.structuredContent;
+    assert.ok(answered.answer?.includes(q.expected), `the answer does not name ${q.expected}: ${answered.answer}`);
+    const runId = answered.recordUrl.split("/").at(-1);
+    const recorded = await loadEvents(db, runId as RunId);
+    assert.equal(verifyChain(recorded), null);
+    assert.equal(recorded[0]?.event.t === "run.started" ? recorded[0].event.surface : null, "mcp");
+    const personal = (await session(personalToken)).call;
+    assert.equal(personal.structuredContent.withheld, true);
+    assert.equal(personal.structuredContent.answer, null);
+    assert.deepEqual(personal.content, [{ type: "text", text: `The answer is above what this client may keep. Read it in the record: ${personal.structuredContent.recordUrl}` }]);
+    assert.ok(!JSON.stringify(personal).includes(q.expected), "nothing of the answer reaches the public surface's client");
+    await ps.stopAll();
+    return `tools [ask]; zdr surface: answer names ${q.expected}, record ${runId.slice(0, 8)} on surface mcp, chain verified; public surface: withheld, record link only`;
   });
 
   await check("check B: questions outside the documents get the coverage-gap behaviour", async () => {

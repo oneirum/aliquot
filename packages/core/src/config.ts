@@ -53,7 +53,7 @@ const agentBackend = z.union([
   devLogin,
 ]);
 
-export const SURFACE_KINDS = ["web", "slack", "phone", "acp"] as const;
+export const SURFACE_KINDS = ["web", "slack", "phone", "acp", "mcp"] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 export interface WebSurfaceConfig {
@@ -81,7 +81,7 @@ const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
 const webSurface = z
   .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
   .strict();
-const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp"]), placement, token_env: z.string().min(1) }).strict();
+const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp", "mcp"]), placement, token_env: z.string().min(1) }).strict();
 
 const REFUSED_PLACEMENTS: Partial<Record<SurfaceKind, { readonly placements: readonly Placement[]; readonly why: string }>> = {
   slack: { placements: ["lab", "institution"], why: "Slack's servers keep a copy of every answer, so a Slack surface is placement approved at most" },

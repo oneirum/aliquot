@@ -181,9 +181,9 @@ test("a reply the door posted link-only comes back withheld, with the record lin
   assert.equal(person.stdout, `The answer is D2, above what this surface may show. Read it in the record.\nrecord  ${door}/runs/${RUN}\n`);
 });
 
-/** aliquot acp as an ACP client drives it: one JSON-RPC message per line each way. */
-function acp(args: readonly string[] = [], env: Record<string, string> = {}) {
-  const child = spawn(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", "acp", "--door", door, "--user", "member-1", ...args], { cwd: root, env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1", ...env } });
+/** aliquot acp or mcp as its client drives it: one JSON-RPC message per line each way. */
+function stdio(command: "acp" | "mcp", args: readonly string[] = [], env: Record<string, string> = {}) {
+  const child = spawn(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", command, "--door", door, "--user", "member-1", ...args], { cwd: root, env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1", ...env } });
   const msgs: any[] = [];
   let buf = "";
   child.stdout.on("data", (c) => {
@@ -198,6 +198,8 @@ function acp(args: readonly string[] = [], env: Record<string, string> = {}) {
   return {
     msgs,
     notify: (method: string, params: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`),
+    /** Sends a request without waiting for its response. */
+    send: (id: number, method: string, params: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`),
     /** Sends a request and resolves with its response. */
     async request(method: string, params: object): Promise<any> {
       const id = nextId++;
@@ -214,6 +216,7 @@ function acp(args: readonly string[] = [], env: Record<string, string> = {}) {
     },
   };
 }
+const acp = (args: readonly string[] = [], env: Record<string, string> = {}) => stdio("acp", args, env);
 
 const updates = (msgs: any[], kind: string) => msgs.filter((m) => m.method === "session/update" && m.params.update.sessionUpdate === kind).map((m) => m.params.update);
 
@@ -328,4 +331,101 @@ test("acp sends ALIQUOT_SURFACE_TOKEN as a Bearer header, and a link-only reply 
   await a.close();
   assert.deepEqual([...new Set(authorized.slice(from).map((x) => x.auth))], [`Bearer ${TOKEN}`]);
   assert.deepEqual(updates(a.msgs, "agent_message_chunk").map((u) => u.content.text), [`The answer is D2, above what this client may keep. Read it in the record: ${door}/runs/${RUN}`]);
+});
+
+const mcp = (args: readonly string[] = [], env: Record<string, string> = {}) => stdio("mcp", args, env);
+const askCall = (m: ReturnType<typeof mcp>, args: Record<string, unknown>) => m.request("tools/call", { name: "ask", arguments: args });
+
+test("aliquot mcp answers initialize with the client's protocol version and a tools capability, and lists one tool, ask", async () => {
+  const m = mcp();
+  const init = await m.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+  m.notify("notifications/initialized", {});
+  const newer = await m.request("initialize", { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+  const tools = await m.request("tools/list", {});
+  const ping = await m.request("ping", {});
+  const unknown = await m.request("resources/list", {});
+  await m.close();
+  assert.equal(init.result.protocolVersion, "2025-06-18");
+  assert.equal(newer.result.protocolVersion, "2025-11-25", "a version it does not know gets the newest it speaks");
+  assert.deepEqual(init.result.capabilities, { tools: { listChanged: false } });
+  assert.equal(init.result.serverInfo.name, "aliquot");
+  assert.deepEqual(tools.result.tools.map((t: any) => [t.name, t.inputSchema.required, Object.keys(t.inputSchema.properties)]), [["ask", ["question"], ["question", "thread"]]]);
+  assert.deepEqual(ping.result, {});
+  assert.equal(unknown.error.code, -32601);
+});
+
+test("ask returns the answer and the record link, starts a thread when none is given, and continues the one it is given", async () => {
+  script = answered("D0", "At -80 C.");
+  const before = posted.length;
+  const m = mcp();
+  const first = await askCall(m, { question: "Where do samples go?" });
+  const thread = first.result.structuredContent.thread;
+  const second = await askCall(m, { question: "And after a week?", thread });
+  await m.close();
+  assert.match(thread, /^mcp-/);
+  assert.deepEqual(first.result, {
+    content: [{ type: "text", text: `At -80 C.\n\nRecord: ${door}/runs/${RUN}\nThread: ${thread}` }],
+    structuredContent: { thread, answer: "At -80 C.", withheld: false, refused: null, recordUrl: `${door}/runs/${RUN}` },
+    isError: false,
+  });
+  assert.equal(second.result.structuredContent.thread, thread);
+  const asked = posted.slice(before).filter((p) => p.path === "/message");
+  assert.deepEqual(asked.map((p) => [p.body.thread, p.body.text, p.body.user]), [
+    [thread, "Where do samples go?", "member-1"],
+    [thread, "And after a week?", "member-1"],
+  ]);
+  assert.notEqual(asked[0]!.body.message, asked[1]!.body.message);
+});
+
+test("mcp sends ALIQUOT_SURFACE_TOKEN as a Bearer header, and an answer the door withheld comes back as the record link only", async () => {
+  script = linkOnly("D2");
+  const from = authorized.length;
+  const m = mcp([], { ALIQUOT_SURFACE_TOKEN: TOKEN });
+  const r = await askCall(m, { question: "who enrolled" });
+  await m.close();
+  assert.deepEqual([...new Set(authorized.slice(from).map((x) => x.auth))], [`Bearer ${TOKEN}`]);
+  assert.deepEqual(r.result.content, [{ type: "text", text: `The answer is above what this client may keep. Read it in the record: ${door}/runs/${RUN}` }]);
+  assert.deepEqual(r.result.structuredContent, { thread: r.result.structuredContent.thread, answer: null, withheld: true, refused: null, recordUrl: `${door}/runs/${RUN}` });
+  assert.ok(!JSON.stringify(r.result).includes("restricted data"), "the door's link-only reply text stays out too");
+});
+
+test("--ceiling on mcp withholds an answer above it, and a gate refusal is the door's message with no record", async () => {
+  script = answered("D2", "Participant P-0042 was enrolled on ...");
+  const m = mcp(["--ceiling", "D1"]);
+  const held = await askCall(m, { question: "who enrolled" });
+  script = { message: { status: 403, body: { t: "refused", userFacing: "This message is D3, and this agent's model may receive at most D1." } }, events: [], replies: [] };
+  const refused = await askCall(m, { question: "P-0042" });
+  await m.close();
+  assert.equal(held.result.structuredContent.withheld, true);
+  assert.ok(!JSON.stringify(held.result).includes("P-0042"));
+  assert.deepEqual(refused.result.content, [{ type: "text", text: "This message is D3, and this agent's model may receive at most D1." }]);
+  assert.equal(refused.result.structuredContent.recordUrl, null);
+});
+
+test("a cancelled ask stops its run through the door; a door that cannot be reached is a tool error; a bad call is invalid params", async () => {
+  script = { ...answered("D0", "never"), events: [{ seq: 0, event: { t: "run.started" } }] };
+  const before = posted.length;
+  const m = mcp();
+  const id = 1000;
+  m.send(id, "tools/call", { name: "ask", arguments: { question: "long one" } });
+  while (!posted.slice(before).some((p) => p.path === "/message")) await new Promise((r) => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 100));
+  m.notify("notifications/cancelled", { requestId: id, reason: "user" });
+  while (!posted.slice(before).some((p) => p.path === "/stop")) await new Promise((r) => setTimeout(r, 20));
+  const other = await m.request("tools/call", { name: "search", arguments: {} });
+  const empty = await askCall(m, { question: "  " });
+  await m.close();
+  assert.deepEqual(posted.slice(before).find((p) => p.path === "/stop")!.body, { runId: RUN, user: "member-1", confirmed: true });
+  assert.equal(m.msgs.some((x) => x.id === id), false, "no response to a cancelled request");
+  assert.equal(other.error.code, -32602);
+  assert.equal(empty.error.code, -32602);
+
+  const gone = spawn(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", "mcp", "--door", "http://127.0.0.1:9", "--user", "member-1"], { cwd: root, env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1" } });
+  let out = "";
+  gone.stdout.on("data", (c) => (out += c));
+  gone.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "ask", arguments: { question: "hi" } } })}\n`);
+  await once(gone, "close");
+  const r = JSON.parse(out.trim());
+  assert.equal(r.result.isError, true);
+  assert.match(r.result.content[0].text, /cannot reach the door at http:\/\/127\.0\.0\.1:9/);
 });
