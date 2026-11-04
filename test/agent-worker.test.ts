@@ -149,8 +149,8 @@ before(async () => {
       "[hosts]",
       '"127.0.0.1" = "approved"',
       ...[
-        ["claude", "claude-code", claude, 'auth_env = "LAB_CLAUDE_TOKEN"'],
-        ["rogue", "claude-code", rogue, 'auth_env = "LAB_CLAUDE_TOKEN"'],
+        ["claude", "claude-code", claude, 'api_key_env = "LAB_ANTHROPIC_KEY"'],
+        ["rogue", "claude-code", rogue, 'api_key_env = "LAB_ANTHROPIC_KEY"'],
         ["codex", "codex", codex, `auth_file = "${join(work, "codex-auth.json")}"`],
       ].flatMap(([id, kind, binary, auth]) => [`[agent_backends.${id}]`, `kind = "${kind}"`, 'placement = "approved"', `binary = "${binary}"`, auth!]),
       "[agent_backends.dev]",
@@ -169,7 +169,7 @@ before(async () => {
     HOME: home,
     DATABASE_URL: fresh.url,
     LABH_PAYLOAD_KEY: randomBytes(32).toString("hex"),
-    LAB_CLAUDE_TOKEN: "sk-ant-oat01-test-token",
+    LAB_ANTHROPIC_KEY: "sk-ant-api03-test-key",
     LIT_URL: `http://127.0.0.1:${(lit.address() as { port: number }).port}`,
     LABH_FAULTS: "1",
   };
@@ -313,7 +313,7 @@ test("nothing in the worker's HOME reaches the CLI: the canary codeword is not i
       `read ${home}/.claude/projects/p/memory/MEMORY.md: EPERM`,
       `read ${home}/.codex/AGENTS.md: EPERM`,
       `read ${home}/.claude.json: EPERM`,
-      "env: ALIQUOT_BRIDGE_TOKEN,CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,CLAUDE_CODE_OAUTH_TOKEN,CLAUDE_CODE_TMPDIR,CLAUDE_CONFIG_DIR,DISABLE_AUTOUPDATER,HOME,HTTPS_PROXY,HTTP_PROXY,LANG,NODE_OPTIONS,NO_PROXY,PATH,TMPDIR,USER; config: ",
+      "env: ALIQUOT_BRIDGE_TOKEN,ANTHROPIC_API_KEY,CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,CLAUDE_CODE_TMPDIR,CLAUDE_CONFIG_DIR,DISABLE_AUTOUPDATER,HOME,HTTPS_PROXY,HTTP_PROXY,LANG,NODE_OPTIONS,NO_PROXY,PATH,TMPDIR,USER; config: ",
     ].join("\n"),
   );
   const prompt = await core.store.get(of(events, "model.requested")[0]!.prompt);

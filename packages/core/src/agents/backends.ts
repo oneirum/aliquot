@@ -19,7 +19,10 @@ export type HostedPlacement = Extract<Placement, (typeof HOSTED_PLACEMENTS)[numb
 
 /** How the session hands the CLI its login. Never the operator's own state directory. */
 export type AgentAuth =
-  | { readonly t: "env"; readonly env: string }
+  /** A key the lab or institution owns, handed to the CLI as the kind's apiKeyEnv. */
+  | { readonly t: "api-key-env"; readonly env: string }
+  /** Development only, public placement only: a personal subscription's OAuth token, as CLAUDE_CODE_OAUTH_TOKEN. */
+  | { readonly t: "oauth-env"; readonly env: string }
   | { readonly t: "file"; readonly path: string }
   /** Development only, public placement only: the operator's own logged-in state directory, never written. */
   | { readonly t: "dev-shared"; readonly dir: string };
@@ -56,6 +59,8 @@ export type SelfCheck = { readonly ok: true } | { readonly ok: false; readonly c
 export interface KindSpec {
   /** The CLI's own state directory variable. Each session sets it to a fresh directory inside its workspace. */
   readonly configDirEnv: "CLAUDE_CONFIG_DIR" | "CODEX_HOME";
+  /** Where an api_key_env key goes: the variable the CLI reads an API key from in a non-interactive run. */
+  readonly apiKeyEnv: "ANTHROPIC_API_KEY" | "CODEX_API_KEY";
   /** Hosts the egress proxy may open a tunnel to, on port 443. Fixed here, not in lab.toml. */
   readonly vendorHosts: readonly string[];
   /** Extra environment, fixed per kind. Names only; no value comes from the worker's environment. */
@@ -95,6 +100,7 @@ const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v)
 
 const claudeCode: KindSpec = {
   configDirEnv: "CLAUDE_CONFIG_DIR",
+  apiKeyEnv: "ANTHROPIC_API_KEY",
   vendorHosts: ["api.anthropic.com", "console.anthropic.com", "platform.claude.com"],
   env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_AUTOUPDATER: "1" },
   initGated: true,
@@ -192,6 +198,7 @@ const CODEX_RESOURCE_TOOLS: ReadonlySet<string> = new Set(["list_mcp_resources",
 
 const codex: KindSpec = {
   configDirEnv: "CODEX_HOME",
+  apiKeyEnv: "CODEX_API_KEY",
   vendorHosts: ["api.openai.com", "chatgpt.com", "auth.openai.com"],
   // Without a CA bundle codex asks trustd, which the seatbelt denies: trustd fetches OCSP and AIA URLs itself, a route around the proxy.
   env: { SSL_CERT_FILE: "/etc/ssl/cert.pem" },

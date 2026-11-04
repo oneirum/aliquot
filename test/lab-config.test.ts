@@ -59,3 +59,14 @@ test("lab.example.toml names the literature hosts and the contact env var, and i
   assert.deepEqual(c.datasets, [{ id: "cohort-2024", path: "/srv/lab/data/cohort-2024", cls: "D2", description: "Wave 1 survey export, one row per participant" }]);
   assert.deepEqual(c.sandbox, { image: `aliquot-sandbox@sha256:${digest}`, digest, cpus: 1, memoryMb: 1024, timeoutMs: 60000, socket: "/var/run/docker.sock" });
 });
+
+test("lab.example.toml's OpenRouter block parses once uncommented and routes Claude only to the providers with zero-retention Claude endpoints", () => {
+  const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
+  const text = readFileSync(path, "utf8");
+  const start = text.indexOf("# [endpoints.openrouter]");
+  const end = text.indexOf("\n\n", start);
+  const block = text.slice(start, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1");
+  const openrouter = parseConfig(`${text.slice(0, start)}${block}${text.slice(end)}`, path).endpoints.find((e) => e.id === "openrouter");
+  assert.equal(openrouter?.placement, "zdr");
+  assert.deepEqual(openrouter?.providerRouting, { zdr: true, data_collection: "deny", allow_fallbacks: false, only: ["amazon-bedrock", "google-vertex"] });
+});

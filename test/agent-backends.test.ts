@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseAgentDocument, resolveAgent, verifyRunnable, versionHash, LOOP_CONTRACT, type Catalog, type ResolvedAgent } from "../packages/core/src/agent.ts";
-import { KINDS } from "../packages/core/src/agents/backends.ts";
+import { KINDS, type AgentAuth, type AgentCliKind } from "../packages/core/src/agents/backends.ts";
 import { installRoots } from "../packages/core/src/agents/confine.ts";
 import { confine, copyCodexDevLogin, installedCli, killRecorded, refuseManagedCodexConfig, processStart, recordProcess } from "../packages/core/src/agents/spawn.ts";
 import { parseConfig } from "../packages/core/src/config.ts";
@@ -39,18 +39,41 @@ const toml = (backends: string) => `[endpoints.local]\nbase_url = "http://127.0.
 
 test("lab.toml declares agent backends by kind, with the binary and the dedicated login each kind needs", () => {
   const c = parseConfig(
-    toml(`[agent_backends.claude]\nkind = "claude-code"\nplacement = "public"\nauth_env = "LAB_CLAUDE_TOKEN"\n[agent_backends.codex]\nkind = "codex"\nplacement = "zdr"\nbinary = "bin/codex.js"\nauth_file = "secrets/codex-auth.json"\n`),
+    toml(
+      `[agent_backends.claude]\nkind = "claude-code"\nplacement = "approved"\napi_key_env = "LAB_ANTHROPIC_KEY"\n` +
+        `[agent_backends.codex]\nkind = "codex"\nplacement = "zdr"\nbinary = "bin/codex.js"\nauth_file = "secrets/codex-auth.json"\n` +
+        `[agent_backends.codexkey]\nkind = "codex"\nplacement = "approved"\napi_key_env = "LAB_OPENAI_KEY"\n` +
+        `[agent_backends.dev]\nkind = "claude-code"\nplacement = "public"\nauth_env = "DEV_CLAUDE_TOKEN"\n`,
+    ),
     "/srv/lab/lab.toml",
   );
   assert.deepEqual(c.agentBackends, [
-    { id: "claude", kind: "claude-code", placement: "public", binary: null, auth: { t: "env", env: "LAB_CLAUDE_TOKEN" } },
+    { id: "claude", kind: "claude-code", placement: "approved", binary: null, auth: { t: "api-key-env", env: "LAB_ANTHROPIC_KEY" } },
     { id: "codex", kind: "codex", placement: "zdr", binary: "/srv/lab/bin/codex.js", auth: { t: "file", path: "/srv/lab/secrets/codex-auth.json" } },
+    { id: "codexkey", kind: "codex", placement: "approved", binary: null, auth: { t: "api-key-env", env: "LAB_OPENAI_KEY" } },
+    { id: "dev", kind: "claude-code", placement: "public", binary: null, auth: { t: "oauth-env", env: "DEV_CLAUDE_TOKEN" } },
   ]);
+});
+
+test("a subscription's OAuth token (auth_env) fails to parse at any placement but public", () => {
+  for (const placement of ["approved", "zdr"]) {
+    assert.throws(() => parseConfig(toml(`[agent_backends.c]\nkind = "claude-code"\nplacement = "${placement}"\nauth_env = "CLAUDE_CODE_OAUTH_TOKEN"\n`), "/l/lab.toml"), {
+      message: `lab.toml: agent backend c: auth_env is a personal subscription's OAuth token, which only a public placement under agent-worker --dev-shared-login may use; a lab's key goes in api_key_env`,
+    });
+  }
+  assert.throws(() => parseConfig(toml(`[agent_backends.c]\nkind = "codex"\nplacement = "public"\nauth_env = "T"\n`), "/l/lab.toml"));
+  assert.throws(() => parseConfig(toml(`[agent_backends.c]\nkind = "claude-code"\nplacement = "approved"\napi_key_env = "K"\nauth_env = "T"\n`), "/l/lab.toml"));
+});
+
+test("an OAuth auth_env backend is refused unless the agent worker runs in dev-login mode", async () => {
+  const backend = { id: "dev", kind: "claude-code", placement: "public", binary: "/nonexistent/claude", auth: { t: "oauth-env", env: "T" } } as const;
+  await assert.rejects(installedCli(backend, {}), { message: "agent backend dev: auth_env runs only under agent-worker --dev-shared-login, never in a lab deployment" });
+  await assert.rejects(installedCli(backend, {}, true), /ENOENT|no such file/);
 });
 
 test("the parser refuses lab and institution placements for an agent backend, a login of the wrong kind, and an id an endpoint already has", () => {
   for (const placement of ["lab", "institution"]) {
-    assert.throws(() => parseConfig(toml(`[agent_backends.c]\nkind = "claude-code"\nplacement = "${placement}"\nauth_env = "T"\n`), "/l/lab.toml"), /placement/);
+    assert.throws(() => parseConfig(toml(`[agent_backends.c]\nkind = "claude-code"\nplacement = "${placement}"\napi_key_env = "T"\n`), "/l/lab.toml"), /placement/);
   }
   assert.throws(() => parseConfig(toml(`[agent_backends.c]\nkind = "claude-code"\nplacement = "public"\nauth_file = "a.json"\n`), "/l/lab.toml"), /auth_env|auth_file/);
   assert.throws(() => parseConfig(toml(`[agent_backends.local]\nkind = "codex"\nplacement = "public"\nauth_file = "a.json"\n`), "/l/lab.toml"), /local is both an endpoint and an agent backend/);
@@ -203,12 +226,12 @@ test("a channel floor below D1 is allowed only for the web channel the server bi
 test("a dev login reads the operator's keychain through security; any other login cannot run it", () => {
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), "aliq-dev-")));
   const gateway = createGateway([], DEFAULT_POLICY, fetch, [{ id: "c", placement: "public" }]);
-  const session = (auth: { t: "dev-shared"; dir: string } | { t: "env"; env: string }) => {
+  const session = (auth: AgentAuth, kind: AgentCliKind = "claude-code") => {
     const content = Labelled.stamp("hi", "D0", "test");
     const d = gateway.admit(content, "c");
     assert.ok(d.allow);
     return confine(d.to, content, {
-      cli: { backend: { id: "c", kind: "claude-code", placement: "public", binary: "/opt/claude", auth }, binary: "/opt/claude", node: null, cliVersion: "2.1.303", sha256: "0".repeat(64) as Sha256 },
+      cli: { backend: { id: "c", kind, placement: "public", binary: "/opt/claude", auth }, binary: "/opt/claude", node: null, cliVersion: "2.1.303", sha256: "0".repeat(64) as Sha256 },
       model: "claude-haiku-5-5" as ExactModelId,
       workspace,
       bridge: { port: 1, url: "http://127.0.0.1:1/mcp" },
@@ -229,11 +252,15 @@ test("a dev login reads the operator's keychain through security; any other logi
     assert.doesNotMatch(dev.profile, /\(subpath "\/Users\/me\/\.claude/);
     assert.doesNotMatch(dev.profile, /file-write\*[^\n]*\/Users\/me/);
     assert.equal(session({ t: "dev-shared", dir: "/Users/me/.claude" }).env.CLAUDE_SECURESTORAGE_CONFIG_DIR, "");
-    const token = session({ t: "env", env: "TOKEN" });
+    const token = session({ t: "api-key-env", env: "TOKEN" });
     assert.equal("CLAUDE_SECURESTORAGE_CONFIG_DIR" in token.env, false);
     assert.equal(token.env.HOME, join(workspace, "home"));
     assert.equal(token.env.CLAUDE_CODE_TMPDIR, join(workspace, "tmp"));
     assert.doesNotMatch(token.profile, /\/usr\/bin\/security/);
+    const secrets = (env: Record<string, string>) => Object.keys(env).filter((k) => /KEY|TOKEN/.test(k) && k !== "ALIQUOT_BRIDGE_TOKEN").map((k) => `${k}=${env[k]}`);
+    assert.deepEqual(secrets(token.env), ["ANTHROPIC_API_KEY=x"]);
+    assert.deepEqual(secrets(session({ t: "api-key-env", env: "TOKEN" }, "codex").env), ["CODEX_API_KEY=x"]);
+    assert.deepEqual(secrets(session({ t: "oauth-env", env: "TOKEN" }).env), ["CLAUDE_CODE_OAUTH_TOKEN=x"]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

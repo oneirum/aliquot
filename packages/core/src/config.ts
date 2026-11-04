@@ -42,9 +42,14 @@ export interface SandboxConfig {
  * placement, so it is refused anywhere else, and it runs only under agent-worker --dev-shared-login.
  */
 const devLogin = z.object({ kind: z.enum(["claude-code", "codex"]), placement: z.literal("public"), binary: z.string().optional(), dev_shared_login: z.string().min(1) }).strict();
+/**
+ * api_key_env names a key the lab or institution owns. auth_env names a personal subscription's OAuth token
+ * (claude setup-token), which the vendors' terms keep off a shared server: public placement and dev-login mode only.
+ */
 const agentBackend = z.union([
-  z.object({ kind: z.literal("claude-code"), placement: z.enum(HOSTED_PLACEMENTS), binary: z.string().optional(), auth_env: z.string().min(1) }).strict(),
+  z.object({ kind: z.enum(["claude-code", "codex"]), placement: z.enum(HOSTED_PLACEMENTS), binary: z.string().optional(), api_key_env: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("codex"), placement: z.enum(HOSTED_PLACEMENTS), binary: z.string().optional(), auth_file: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("claude-code"), placement: z.literal("public"), binary: z.string().optional(), auth_env: z.string().min(1) }).strict(),
   devLogin,
 ]);
 
@@ -131,6 +136,10 @@ export function parseConfig(text: string, path: string): LabConfig {
   const raw = parseToml(text);
   // The schema strips unknown tables, so a lab that expects its tools to load would otherwise start without them.
   if ("tools" in raw) throw new Error(TOOL_FOLDERS_REFUSED);
+  for (const [id, b] of Object.entries((raw.agent_backends ?? {}) as Record<string, Record<string, unknown>>)) {
+    if ("auth_env" in b && b.placement !== "public")
+      throw new Error(`lab.toml: agent backend ${id}: auth_env is a personal subscription's OAuth token, which only a public placement under agent-worker --dev-shared-login may use; a lab's key goes in api_key_env`);
+  }
   const c = schema.parse(raw);
   const dir = dirname(path);
   const clash = Object.keys(c.agent_backends).filter((id) => id in c.endpoints);
@@ -158,7 +167,11 @@ export function parseConfig(text: string, path: string): LabConfig {
       kind: b.kind,
       placement: b.placement,
       binary: b.binary === undefined ? null : b.binary.includes("/") ? resolve(dir, b.binary) : b.binary,
-      auth: "dev_shared_login" in b ? { t: "dev-shared", dir: resolve(dir, b.dev_shared_login) } : "auth_env" in b ? { t: "env", env: b.auth_env } : { t: "file", path: resolve(dir, b.auth_file) },
+      auth:
+        "dev_shared_login" in b ? { t: "dev-shared", dir: resolve(dir, b.dev_shared_login) }
+        : "api_key_env" in b ? { t: "api-key-env", env: b.api_key_env }
+        : "auth_env" in b ? { t: "oauth-env", env: b.auth_env }
+        : { t: "file", path: resolve(dir, b.auth_file) },
     })),
     web: { placement: c.surfaces.web.placement, port: c.surfaces.web.port, baseUrl: c.surfaces.web.base_url ?? `http://localhost:${c.surfaces.web.port}`, channel: bound },
     hosts: Object.fromEntries(Object.entries(c.hosts).map(([h, p]) => [h.toLowerCase(), p])),

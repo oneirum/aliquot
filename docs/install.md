@@ -6,7 +6,9 @@ This page is for research IT. It covers one Linux machine running the whole stac
 
 - Linux with Docker Engine 25 or later and the Compose plugin 2.24 or later (`docker compose version`). Node is not needed on the machine. Ubuntu's `docker.io` package builds without buildx, which works but is slow; install `docker-buildx` as well.
 - About 3 GB of disk for the images, plus the database. The sandbox image adds about 1 GB.
-- A model the lab may use: Ollama on the same machine (`docker compose --profile ollama up -d`), a vLLM or other OpenAI-compatible server on lab hardware, or a hosted endpoint the institution approved. `lab.example.toml` lists every kind.
+- A model the lab may use. See **Models** below.
+
+**Models.** Aliquot calls models only with credentials the lab or the university owns: an Anthropic or OpenAI organization key, your campus AI gateway or another OpenAI-compatible endpoint the institution approved, or a model on lab hardware (Ollama on the same machine with `docker compose --profile ollama up -d`, or a vLLM server). Give each one the placement your institution approved for it. `lab.example.toml` lists every kind. A personal ChatGPT or Claude subscription cannot power Aliquot. The vendors' terms do not allow a shared server to use one, and consumer plans may train on what they receive. Members who have their own subscriptions keep them in their own tools and reach Aliquot through `aliquot acp` or `aliquot ask`, with a `--ceiling` that withholds what their tool may not keep. Bedrock, Azure and Gemini endpoints, a `litellm` profile for Vertex and AWS SigV4, and an `aliquot mcp` server for members' tools are planned.
 
 ## Install
 
@@ -27,7 +29,7 @@ The participant id question is the one that matters most. Every message, source 
 
 `docker compose up` starts four services. Postgres holds core's tables and the studio's tables (in a `studio` schema). The worker runs agents and compiles knowledge bases. The web door is the members' chat page and record pages, on port 3000. The studio is the authoring app, a production build on port 3001. Core applies its migrations when the worker or the web door starts. The studio applies its own committed migrations when it starts.
 
-Every port is published on `127.0.0.1`. The web door has no sign-in yet (planned for 0.8), so keep it on the machine, or behind a proxy that only lab members can reach. `LABH_BIND` in `.env` changes the address. `LABH_WEB_PORT`, `LABH_STUDIO_PORT` and `LABH_PG_PORT` change the ports.
+Every port is published on `127.0.0.1`. The web door has no sign-in yet (planned for 0.7), so keep it on the machine, or behind a proxy that only lab members can reach. `LABH_BIND` in `.env` changes the address. `LABH_WEB_PORT`, `LABH_STUDIO_PORT` and `LABH_PG_PORT` change the ports.
 
 ## Knowledge bases
 
