@@ -79,7 +79,7 @@ export const kbDefinitionSchema = z.object({
     .array(
       z.object({
         sourceId: slug.meta(says("Source id", "Short id for this document, for example sop-freezer.")),
-        kind: z.enum(SOURCE_KINDS).meta(says("Kind", "file: a .md, .txt or Word .docx file you attach when you compile. url: a page on a host lab.toml allows.")),
+        kind: z.enum(SOURCE_KINDS).meta(says("Kind", "file: a .md, .txt or Word .docx file you attach when you compile, or a .pdf, which only the kb command reads, in the sandbox container. url: a page on a host lab.toml allows.")),
         location: z.string().min(1).meta(says("Location", "The file name you will attach, with no folder, or the URL.")),
         cls: z.enum(DATA_CLASSES).meta(says("Data class", "The class you declare. A participant id in the text raises it to D3.")),
         licence: z.enum(LICENCES).meta(says("Licence")),
@@ -130,8 +130,8 @@ export interface LoadedSource {
 }
 
 const TEXT_FILES = new Set([".md", ".markdown", ".txt"]);
-/** Every extension a file source may have: text as is, and Word documents read to Markdown. */
-export const SOURCE_FILE_TYPES: readonly string[] = [...TEXT_FILES, ".docx"];
+/** Every extension a file source may have: text as is, Word documents read to Markdown, and PDFs when a PDF reader is wired. */
+export const SOURCE_FILE_TYPES: readonly string[] = [...TEXT_FILES, ".docx", ".pdf"];
 
 /** A file source names one file beside the definition, never a path: no folder, no parent, nothing absolute. */
 export function isBareFileName(name: string): boolean {
@@ -171,6 +171,8 @@ export interface SourceDeps {
   readonly actor: string;
   /** lab.toml's participant-id patterns. A source whose text matches one is D3 whatever its declared class. */
   readonly labPatterns: readonly RegExp[];
+  /** Reads a PDF in the sandbox container (Sandbox.readPdf). Absent when lab.toml has no [sandbox], and in the studio, which has no Docker socket. */
+  readonly pdf?: (bytes: Uint8Array, name: string) => Promise<string>;
 }
 
 /**
@@ -182,7 +184,7 @@ export interface SourceDeps {
 export async function readSources(def: KbDefinition, files: SourceFiles, deps: SourceDeps): Promise<LoadedSource[]> {
   return Promise.all(
     def.sources.map(async (s) => {
-      const text = s.kind === "file" ? await readFileSource(s.location, files) : await readUrlSource(def.kbId, s.sourceId, s.location, deps);
+      const text = s.kind === "file" ? await readFileSource(s.location, files, deps.pdf) : await readUrlSource(def.kbId, s.sourceId, s.location, deps);
       // The declared class is a floor: the gate's detectors and the lab's id patterns can only raise it.
       const cls = classifyText(text, s.cls, deps.labPatterns).cls;
       return { ref: { ...s, cls, contentHash: deps.address(cls, text) }, text };
@@ -190,10 +192,14 @@ export async function readSources(def: KbDefinition, files: SourceFiles, deps: S
   );
 }
 
-async function readFileSource(name: string, files: SourceFiles): Promise<string> {
+async function readFileSource(name: string, files: SourceFiles, pdf: SourceDeps["pdf"]): Promise<string> {
   const ext = extname(name).toLowerCase();
   if (ext === ".docx") return docxToMarkdown(await files(name), name);
-  if (!TEXT_FILES.has(ext)) throw new Error(`${name}: ${ext || "a file with no extension"} is not a source type; use ${SOURCE_FILE_TYPES.join(", ")}${ext === ".pdf" || ext === ".doc" ? ` (save it as .docx from Word${ext === ".pdf" ? ", or paste it into a .md file" : ""})` : ""}`);
+  if (ext === ".pdf") {
+    if (!pdf) throw new Error(`${name}: PDFs are read in the sandbox container, and this compile has none. Set [sandbox] in lab.toml and compile with the kb command, or save the document as .docx`);
+    return pdf(await files(name), name);
+  }
+  if (!TEXT_FILES.has(ext)) throw new Error(`${name}: ${ext || "a file with no extension"} is not a source type; use ${SOURCE_FILE_TYPES.join(", ")}${ext === ".doc" ? " (save it as .docx from Word)" : ""}`);
   return new TextDecoder().decode(await files(name));
 }
 

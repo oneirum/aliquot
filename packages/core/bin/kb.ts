@@ -59,7 +59,7 @@ try {
     case "compile": {
       const path = resolve(need("definition"));
       const def = parseKbDefinition(JSON.parse(await readFile(path, "utf8")));
-      const req = await requestCompile(core, def, await readSources(def, filesIn(dirname(path)), { http: core.http, address: core.store.address, db: core.db, actor: values.actor ?? "cli", labPatterns: core.config.participantIdPatterns }), new Date());
+      const req = await requestCompile(core, def, await readSources(def, filesIn(dirname(path)), { http: core.http, address: core.store.address, db: core.db, actor: values.actor ?? "cli", labPatterns: core.config.participantIdPatterns, ...(core.sandbox ? { pdf: core.sandbox.readPdf } : {}) }), new Date());
       if (!values.wait) {
         console.log(JSON.stringify(req));
         break;

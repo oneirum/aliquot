@@ -13,6 +13,7 @@
 
 import { request } from "node:http";
 import type { SandboxConfig } from "./config.ts";
+import { pdfText } from "./pdf.ts";
 
 export const OUTPUT_CAP_BYTES = 32 * 1024;
 export const FILES_CAP_BYTES = 256 * 1024;
@@ -22,6 +23,11 @@ export const TAR_ENTRIES_CAP = 4096;
 export const DOCKER_GRACE_MS = 2000;
 const API = "/v1.41";
 const PIDS_LIMIT = 256;
+/** A PDF source larger than this is refused before a container is made. */
+export const PDF_CAP_BYTES = 50 * 1024 * 1024;
+/** pdftotext's output past this is refused, not cut: a knowledge base source with a silent hole is worse than none. */
+export const PDF_TEXT_CAP_BYTES = 16 * 1024 * 1024;
+const IMAGE_LIST_CAP_BYTES = 4 * 1024 * 1024;
 
 export interface RunSpec {
   readonly language: "r" | "python";
@@ -44,16 +50,33 @@ export interface RunOutput {
 export interface Sandbox {
   hasImage(): Promise<boolean>;
   run(spec: RunSpec, signal: AbortSignal): Promise<RunOutput>;
+  /** A PDF source's text, read by poppler inside a container with no network. Throws naming `name` when it cannot. */
+  readPdf(bytes: Uint8Array, name: string): Promise<string>;
 }
 
 export function containerConfig(s: SandboxConfig, mounts: RunSpec["mounts"]): object {
+  return lockedContainer(s, "aliquot.run_code", {
+    Tmpfs: { "/work": "rw,nosuid,nodev,size=64m,uid=65534,gid=65534,mode=0700", "/out": "rw,nosuid,nodev,size=4m,uid=65534,gid=65534,mode=0700" },
+    Binds: mounts.map((m) => `${m.hostPath}:/data/${m.id}:ro`),
+  });
+}
+
+/**
+ * readPdf's container: the same lockdown, nothing writable, and an anonymous volume at /in. The PDF goes in through
+ * the archive endpoint before start; the daemon may write into a volume although the root is read-only.
+ */
+export function pdfContainerConfig(s: SandboxConfig): object {
+  return { ...lockedContainer(s, "aliquot.read_pdf", {}), Volumes: { "/in": {} } };
+}
+
+function lockedContainer(s: SandboxConfig, label: string, mounts: object): object {
   return {
     Image: s.image,
     Cmd: ["sleep", "infinity"],
     User: "65534:65534",
     WorkingDir: "/work",
     NetworkDisabled: true,
-    Labels: { "aliquot.run_code": "1" },
+    Labels: { [label]: "1" },
     HostConfig: {
       NetworkMode: "none",
       ReadonlyRootfs: true,
@@ -65,8 +88,7 @@ export function containerConfig(s: SandboxConfig, mounts: RunSpec["mounts"]): ob
       Memory: s.memoryMb * 1024 * 1024,
       MemorySwap: s.memoryMb * 1024 * 1024,
       PidsLimit: PIDS_LIMIT,
-      Tmpfs: { "/work": "rw,nosuid,nodev,size=64m,uid=65534,gid=65534,mode=0700", "/out": "rw,nosuid,nodev,size=4m,uid=65534,gid=65534,mode=0700" },
-      Binds: mounts.map((m) => `${m.hostPath}:/data/${m.id}:ro`),
+      ...mounts,
     },
   };
 }
@@ -134,7 +156,66 @@ export function createSandbox(s: SandboxConfig): Sandbox {
         await docker.call("DELETE", `/containers/${id}?force=true&v=true`).catch(() => {});
       }
     },
+    async readPdf(bytes, name) {
+      if (bytes.length > PDF_CAP_BYTES) throw new Error(`${name}: ${(bytes.length / 1024 / 1024).toFixed(1)} MB is over the ${PDF_CAP_BYTES / 1024 / 1024} MB limit for a PDF source; split it into smaller files`);
+      const created = JSON.parse((await docker.ok("POST", "/containers/create", pdfContainerConfig(s))).toString()) as { Id: string };
+      const id = created.Id;
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        void docker.call("POST", `/containers/${id}/kill`).catch(() => {});
+      }, s.timeoutMs);
+      const tooSlow = () => new Error(`${name}: reading the PDF took longer than the sandbox's ${s.timeoutMs} ms timeout`);
+      try {
+        await docker.ok("PUT", `/containers/${id}/archive?path=/in`, oneFileTar("source.pdf", bytes));
+        await docker.ok("POST", `/containers/${id}/start`);
+        const text = await docker.exec(id, ["pdftotext", "-enc", "UTF-8", "/in/source.pdf", "-"], PDF_TEXT_CAP_BYTES + 1);
+        if (timedOut) throw tooSlow();
+        if (text.exitCode !== 0) throw new Error(`${name}: pdftotext could not read it: ${popplerError(text.stderr)}`);
+        if (text.stdoutBytes > PDF_TEXT_CAP_BYTES) throw new Error(`${name}: the PDF holds more than ${PDF_TEXT_CAP_BYTES / 1024 / 1024} MB of text; split it into smaller files`);
+        const images = await docker.exec(id, ["pdfimages", "-list", "/in/source.pdf"], IMAGE_LIST_CAP_BYTES + 1);
+        if (timedOut) throw tooSlow();
+        if (images.exitCode !== 0) throw new Error(`${name}: pdfimages could not read it: ${popplerError(images.stderr)}`);
+        if (images.stdoutBytes > IMAGE_LIST_CAP_BYTES) throw new Error(`${name}: the PDF lists too many images to check for scanned pages; split it into smaller files`);
+        return pdfText(utf8Lossy.decode(text.stdout), images.stdout.toString("utf8"), name);
+      } catch (err) {
+        if (timedOut) throw tooSlow();
+        throw err;
+      } finally {
+        clearTimeout(timer);
+        await docker.call("DELETE", `/containers/${id}?force=true&v=true`).catch(() => {});
+      }
+    },
   };
+}
+
+const utf8Lossy = new TextDecoder("utf-8");
+
+/** Poppler prints warnings and earlier errors before the one that made it give up; the last line that says Error is the reason. */
+function popplerError(stderr: Buffer): string {
+  const lines = stderr.toString("utf8").split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.findLast((l) => /error/i.test(l)) ?? lines.at(-1) ?? "no message";
+}
+
+/** One regular file in a ustar archive, owned by 65534 and read-only, for the archive endpoint. */
+export function oneFileTar(name: string, data: Uint8Array): Buffer {
+  const header = Buffer.alloc(512);
+  const put = (text: string, at: number) => header.write(text, at, "ascii");
+  const octal = (n: number, width: number) => n.toString(8).padStart(width - 1, "0") + "\0";
+  put(name, 0);
+  put(octal(0o444, 8), 100);
+  put(octal(65534, 8), 108);
+  put(octal(65534, 8), 116);
+  put(octal(data.length, 12), 124);
+  put(octal(0, 12), 136);
+  put("        ", 148);
+  put("0", 156);
+  put("ustar\0", 257);
+  put("00", 263);
+  const sum = header.reduce((a, b) => a + b, 0);
+  put(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+  const padding = Buffer.alloc((512 - (data.length % 512)) % 512);
+  return Buffer.concat([header, Buffer.from(data.buffer, data.byteOffset, data.byteLength), padding, Buffer.alloc(1024)]);
 }
 
 /** Text files first come, first kept, until 256 KB. A file with a NUL byte or invalid UTF-8 is not text. */
@@ -215,8 +296,10 @@ interface ExecResult {
 function dockerClient(socketPath: string, idleMs: number) {
   const send = (method: string, path: string, body: unknown, onData: (chunk: Buffer) => void): Promise<number> =>
     new Promise((resolve, reject) => {
-      const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
-      const req = request({ socketPath, method, path: `${API}${path}`, headers: payload ? { "content-type": "application/json", "content-length": payload.length } : {} }, (res) => {
+      // A Buffer body is a tar archive for the archive endpoint; anything else is JSON.
+      const tar = Buffer.isBuffer(body);
+      const payload = body === undefined ? undefined : tar ? body : Buffer.from(JSON.stringify(body));
+      const req = request({ socketPath, method, path: `${API}${path}`, headers: payload ? { "content-type": tar ? "application/x-tar" : "application/json", "content-length": payload.length } : {} }, (res) => {
         res.on("data", onData);
         res.on("end", () => resolve(res.statusCode ?? 0));
         res.on("error", reject);
