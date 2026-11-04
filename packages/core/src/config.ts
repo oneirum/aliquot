@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
-import { DATA_CLASSES, PLACEMENTS, rank, type DataClass, type EgressPolicy, type Placement } from "./dataclass.ts";
+import { DATA_CLASSES, PLACEMENTS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
@@ -48,6 +48,80 @@ const agentBackend = z.union([
   devLogin,
 ]);
 
+export const SURFACE_KINDS = ["web", "slack", "phone", "acp"] as const;
+export type SurfaceKind = (typeof SURFACE_KINDS)[number];
+
+export interface WebSurfaceConfig {
+  readonly id: SurfaceId;
+  readonly kind: "web";
+  readonly placement: Placement;
+  readonly port: number;
+  readonly baseUrl: string;
+  /** The one channel this web surface serves, or null when the page names it. */
+  readonly channel: string | null;
+}
+
+/** A surface that names itself to the door with a bearer token, read from tokenEnv and never from lab.toml. */
+export interface TokenSurfaceConfig {
+  readonly id: SurfaceId;
+  readonly kind: Exclude<SurfaceKind, "web">;
+  readonly placement: Placement;
+  readonly tokenEnv: string;
+}
+
+export type SurfaceConfig = WebSurfaceConfig | TokenSurfaceConfig;
+
+/** The id is a segment of every run key, surface:channel:thread:message. */
+const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
+const webSurface = z
+  .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
+  .strict();
+const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp"]), placement, token_env: z.string().min(1) }).strict();
+
+/** Placements a surface kind may not take, and why. */
+const REFUSED_PLACEMENTS: Partial<Record<SurfaceKind, { readonly placements: readonly Placement[]; readonly why: string }>> = {
+  slack: { placements: ["lab", "institution"], why: "Slack's servers keep a copy of every answer, so a Slack surface is placement approved at most" },
+};
+
+function parseSurface(id: string, raw: unknown): SurfaceConfig {
+  const fail = (why: string): never => {
+    throw new Error(`lab.toml: [surfaces.${id}] ${why}`);
+  };
+  if (!SURFACE_ID.test(id)) fail("is not a surface id: lowercase letters, digits, _ and -, starting with a letter, because the id is part of every run key");
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return fail("must be a table");
+  const kind = "kind" in raw ? raw.kind : id === "web" ? "web" : undefined;
+  if (!SURFACE_KINDS.includes(kind as SurfaceKind)) fail(`needs kind = one of ${SURFACE_KINDS.join(", ")}`);
+  if ((kind === "web") !== (id === "web")) fail("is not allowed: kind web is [surfaces.web] only, and [surfaces.web] is kind web, because there is one web door");
+  // Read nowhere, so the lab would believe web is authenticated. It is not until sign-on.
+  if (id === "web" && "token_env" in raw) fail("takes no token_env: the web door has no token until sign-on");
+  const parsed = (id === "web" ? webSurface : tokenSurface).safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]!;
+    return fail(issue.path.length ? `${issue.path.join(".")}: ${issue.message}` : issue.message);
+  }
+  const e = parsed.data;
+  if ("token_env" in e) {
+    const refused = REFUSED_PLACEMENTS[e.kind];
+    if (refused?.placements.includes(e.placement)) fail(`placement ${e.placement} is refused: ${refused.why}`);
+    return { id: id as SurfaceId, kind: e.kind, placement: e.placement, tokenEnv: e.token_env };
+  }
+  return { id: id as SurfaceId, kind: "web", placement: e.placement, port: e.port, baseUrl: e.base_url ?? `http://localhost:${e.port}`, channel: e.channel ?? null };
+}
+
+/** Web first, then every other surface in file order. Without [surfaces.web], web is lab on port 3000, as before surfaces had ids. */
+function parseSurfaces(tables: Record<string, unknown>): readonly [WebSurfaceConfig, ...TokenSurfaceConfig[]] {
+  const all = Object.entries(tables).map(([id, raw]) => parseSurface(id, raw));
+  const web = all.find((s): s is WebSurfaceConfig => s.kind === "web") ?? (parseSurface("web", {}) as WebSurfaceConfig);
+  const others = all.filter((s): s is TokenSurfaceConfig => s.kind !== "web");
+  const owner = new Map<string, SurfaceId>();
+  for (const s of others) {
+    const first = owner.get(s.tokenEnv);
+    if (first) throw new Error(`lab.toml: [surfaces.${s.id}] names token_env ${s.tokenEnv}, which [surfaces.${first}] already names; one token is one surface`);
+    owner.set(s.tokenEnv, s.id);
+  }
+  return [web, ...others];
+}
+
 const schema = z.object({
   database: z.object({ url_env: z.string().default("DATABASE_URL") }).default({ url_env: "DATABASE_URL" }),
   store: z.object({ placement: placement.default("lab"), key_env: z.string().default("LABH_PAYLOAD_KEY") }).default({ placement: "lab", key_env: "LABH_PAYLOAD_KEY" }),
@@ -63,13 +137,7 @@ const schema = z.object({
       sampling: z.boolean().optional(),
     }),
   ),
-  surfaces: z
-    .object({
-      web: z
-        .object({ placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
-        .default({ placement: "lab", port: 3000 }),
-    })
-    .default({ web: { placement: "lab", port: 3000 } }),
+  surfaces: z.record(z.string(), z.unknown()).default({}),
   hosts: z.record(z.string(), placement).default({}),
   policy: z.object({ review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"), participant_id_patterns: z.array(z.string()).default([]) }).default({ review_confidential: "refuse", participant_id_patterns: [] }),
   agents: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
@@ -77,7 +145,7 @@ const schema = z.object({
    * "surface:channel" -> the class every message there starts at. Unlisted channels start at D1. Detectors only raise it.
    * A floor below D1 is allowed only for the channel [surfaces.web] channel binds, because anywhere else the sender names the channel.
    */
-  channel_floors: z.record(z.string().regex(/^[a-z]+:[^:]+$/), z.enum(DATA_CLASSES)).default({}),
+  channel_floors: z.record(z.string().regex(/^[a-z][a-z0-9_-]*:[^:]+$/), z.enum(DATA_CLASSES)).default({}),
   knowledge_bases: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
   agent_backends: z.record(z.string(), agentBackend).default({}),
   datasets: z
@@ -107,8 +175,9 @@ export interface LabConfig {
   readonly endpoints: readonly ModelEndpoint[];
   /** Agent CLIs. Their ids share one namespace with endpoints, because an agent names either as model.endpointId. */
   readonly agentBackends: readonly AgentBackend[];
-  /** channel: the one channel this web surface serves, or null when the page names it. */
-  readonly web: { readonly placement: Placement; readonly port: number; readonly baseUrl: string; readonly channel: string | null };
+  readonly web: WebSurfaceConfig;
+  /** Every [surfaces.<id>], web first and the same object as web. */
+  readonly surfaces: readonly SurfaceConfig[];
   readonly hosts: Readonly<Record<string, Placement>>;
   readonly policy: EgressPolicy;
   readonly participantIdPatterns: readonly RegExp[];
@@ -135,7 +204,8 @@ export function parseConfig(text: string, path: string): LabConfig {
   const dir = dirname(path);
   const clash = Object.keys(c.agent_backends).filter((id) => id in c.endpoints);
   if (clash.length) throw new Error(`lab.toml: ${clash.join(", ")} is both an endpoint and an agent backend; ids share one namespace`);
-  const bound = c.surfaces.web.channel ?? null;
+  const surfaces = parseSurfaces(c.surfaces);
+  const bound = surfaces[0].channel;
   const lowered = Object.entries(c.channel_floors).filter(([key, cls]) => rank(cls) < rank("D1") && key !== `web:${bound}`);
   if (lowered.length)
     throw new Error(`lab.toml: channel_floors ${lowered.map(([k]) => k).join(", ")} is below D1, which only the channel [surfaces.web] channel binds may be; the sender names any other channel`);
@@ -160,7 +230,8 @@ export function parseConfig(text: string, path: string): LabConfig {
       binary: b.binary === undefined ? null : b.binary.includes("/") ? resolve(dir, b.binary) : b.binary,
       auth: "dev_shared_login" in b ? { t: "dev-shared", dir: resolve(dir, b.dev_shared_login) } : "auth_env" in b ? { t: "env", env: b.auth_env } : { t: "file", path: resolve(dir, b.auth_file) },
     })),
-    web: { placement: c.surfaces.web.placement, port: c.surfaces.web.port, baseUrl: c.surfaces.web.base_url ?? `http://localhost:${c.surfaces.web.port}`, channel: bound },
+    web: surfaces[0],
+    surfaces,
     hosts: Object.fromEntries(Object.entries(c.hosts).map(([h, p]) => [h.toLowerCase(), p])),
     policy: { reviewConfidential: c.policy.review_confidential },
     participantIdPatterns: c.policy.participant_id_patterns.map((p) => new RegExp(p)),
