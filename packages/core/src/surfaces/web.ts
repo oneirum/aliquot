@@ -4,7 +4,7 @@
  * replies here and the page reads them, with no second channel.
  *
  * Routes:
- *   POST /message  {channel?, thread, message, text, user}  -> intake; a bound surface serves only its own channel
+ *   POST /message  {channel?, thread, message, text, user}  -> intake as the caller's surface; a bound web surface serves only its own channel
  *   POST /stop     {runId, user, confirmed?}                -> run_inbox stop (+ NOTIFY); confirmed is the second click
  *   GET  /replies?runId=                                     -> the run's reply and notices
  *   GET  /runs/:id/events                                    -> the run record (events, no bodies)
@@ -15,13 +15,20 @@
  *
  * Pages and JSON go out gzipped when the browser accepts it.
  *
+ * A request with no Authorization header is the web surface. "Bearer <token>"
+ * names another surface the door serves (DOOR_KINDS); any other Authorization
+ * is a 401 and never falls back to web. /stop and /replies serve only the
+ * caller's surface's runs, so a surface capped at D1 cannot read a web run's
+ * D3 reply.
+ *
  * Bodies are capped at MAX_BODY_BYTES, ids are validated before any query,
  * and an unexpected error is logged here and answered as "internal error".
- * Not yet done, recorded in DESIGN.md: authentication, and per-run
- * authorization on /stop, /replies and /runs/:id/events. The identity unit
- * owns both.
+ * Not yet done, recorded in DESIGN.md: sign-on for the web surface, and
+ * per-member authorization on /stop, /replies and /runs/:id/events. The
+ * identity unit owns both.
  */
 
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { gzipSync } from "node:zlib";
@@ -32,15 +39,16 @@ import type { AgentDocument } from "../agent.ts";
 import { intake, intakeTest, type IntakeDeps, type IntakeResult, type Surface } from "../frontdoor.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
 import { recordView } from "../record-view.ts";
-import type { LabConfig } from "../config.ts";
+import type { LabConfig, SurfaceConfig, SurfaceKind, TokenSurfaceConfig } from "../config.ts";
 import { chatPage, recordPage, runsPage, type RunFilter, type RunListRow } from "./web-pages.ts";
 
 export const WEB_SURFACE = "web" as SurfaceId;
 
-export function createWebSurface(db: Db, config: LabConfig): Surface {
+/** A surface over web_messages: the web page's, or one that reaches the door with a token. Its link is the record page. */
+export function createWebSurface(db: Db, config: LabConfig, surface: Pick<SurfaceConfig, "id" | "placement"> = config.web): Surface {
   return {
-    id: WEB_SURFACE,
-    placement: config.web.placement,
+    id: surface.id,
+    placement: surface.placement,
     async startStream() {
       // No streaming on the web page in this build: close() reports the stream unconfirmed, so finalize posts the answer.
       return { push() {}, close: async () => false };
@@ -57,7 +65,7 @@ export function createWebSurface(db: Db, config: LabConfig): Surface {
     async askConfirm(runId, threadId, prompt, callId) {
       await db.query("insert into web_messages (run_id, thread_id, kind, key, text) values ($1, $2, 'notice', $3, $4) on conflict (run_id, key) where kind = 'notice' do nothing", [runId, threadId, callId, prompt]);
     },
-    linkTo: (runId) => `${config.web.baseUrl}/chat/runs/${runId}`,
+    linkTo: (runId) => `${config.web.baseUrl}/runs/${runId}`,
   };
 }
 
@@ -103,6 +111,38 @@ export async function listRuns(db: Db, limit = RUNS_LISTED): Promise<RunListRow[
   return rows.rows.map((r) => ({ runId: r.run_id, startedAt: r.at.toISOString(), agent: r.agent, outcome: r.outcome, events: r.events, refusals: r.refusals }));
 }
 
+/** Kinds the door serves over HTTP. Slack is reached through its own adapter, so the door takes no Slack token. */
+export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "phone"];
+/** Shorter than this, a token could be guessed, so its surface accepts nothing. */
+export const MIN_TOKEN_LENGTH = 32;
+
+/** sha256 hex of a token to its surface. The door keeps no token. */
+export type DoorTokens = ReadonlyMap<string, TokenSurfaceConfig>;
+
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+/**
+ * Built once when the door starts. A surface whose env var is unset or short accepts nothing, and the door says so in one
+ * line. Two surfaces with one token could not be told apart, so that refuses to start.
+ */
+export function doorTokens(surfaces: readonly SurfaceConfig[], env: NodeJS.ProcessEnv, log: (line: string) => void): DoorTokens {
+  const tokens = new Map<string, TokenSurfaceConfig>();
+  for (const s of surfaces) {
+    if (s.kind === "web" || !DOOR_KINDS.includes(s.kind)) continue;
+    const token = env[s.tokenEnv] ?? "";
+    if (token.length < MIN_TOKEN_LENGTH) {
+      log(`[web] [surfaces.${s.id}] accepts no token: ${s.tokenEnv} is ${token ? `shorter than ${MIN_TOKEN_LENGTH} characters` : "not set"}`);
+      continue;
+    }
+    // Looked up by hash, so how long a lookup takes does not depend on how much of a real token a guess matches.
+    const hash = sha256(token);
+    const other = tokens.get(hash);
+    if (other) throw new Error(`${other.tokenEnv} and ${s.tokenEnv} hold the same token; [surfaces.${other.id}] and [surfaces.${s.id}] each need their own`);
+    tokens.set(hash, s);
+  }
+  return tokens;
+}
+
 /** A message is at most the router's 8,000 characters plus ids; anything near this is not a chat message. */
 export const MAX_BODY_BYTES = 64 * 1024;
 
@@ -146,37 +186,63 @@ function sendHtml(req: IncomingMessage, res: ServerResponse, html: string): void
   respond(req, res, 200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'", "x-content-type-options": "nosniff" }, html);
 }
 
-function send(req: IncomingMessage, res: ServerResponse, status: number, body: unknown): void {
-  respond(req, res, status, { "content-type": "application/json" }, JSON.stringify(body));
+function send(req: IncomingMessage, res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+  respond(req, res, status, { "content-type": "application/json", ...headers }, JSON.stringify(body));
+}
+
+/** The surface a request speaks as. No Authorization header is web; a request that tried to authenticate is never web. */
+function surfaceOf(req: IncomingMessage, tokens: DoorTokens): SurfaceId {
+  const header = req.headers.authorization;
+  if (header === undefined) return WEB_SURFACE;
+  const token = /^Bearer (\S+)$/i.exec(header)?.[1];
+  if (!token) throw new HttpError(401, "Authorization must be Bearer <surface token>");
+  const surface = tokens.get(sha256(token));
+  if (!surface) throw new HttpError(401, "unknown surface token");
+  return surface.id;
+}
+
+async function requireOwnRun(db: Db, runId: string, surface: SurfaceId): Promise<void> {
+  const run = await db.query("select 1 from jobs where id = $1 and kind = 'run' and payload->>'surface' = $2", [runId, surface]);
+  if (!run.rowCount) throw new HttpError(404, "no such run");
 }
 
 /**
  * bound is lab.toml's [surfaces.web] channel: when set, every message is in that channel and the body may not name another.
  * where is what the pages show as the lab: its [lab] name, else the machine's hostname.
+ * tokens is doorTokens(): without it, only the web surface is served.
  */
-export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) => void = (line) => console.error(line), bound: string | null = null, where = ""): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+export function createWebHandler(
+  db: Db,
+  deps: IntakeDeps,
+  log: (line: string) => void = (line) => console.error(line),
+  bound: string | null = null,
+  where = "",
+  tokens: DoorTokens = new Map(),
+): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      const surface = surfaceOf(req, tokens);
+      const boundHere = surface === WEB_SURFACE ? bound : null;
       if (req.method === "POST" && url.pathname === "/message") {
         const m = messageSchema.parse(await readJson(req));
-        if (bound !== null && m.channel !== undefined && m.channel !== bound) throw new HttpError(400, `this web surface serves channel ${bound} only`);
+        if (boundHere !== null && m.channel !== undefined && m.channel !== boundHere) throw new HttpError(400, `this web surface serves channel ${boundHere} only`);
         const result = await intake(
-          { channel: { surface: WEB_SURFACE, channelId: bound ?? m.channel ?? "lab" }, threadId: m.thread, messageId: m.message, platformUserId: m.user, text: m.text, attachments: [], addressed: true, at: new Date().toISOString() },
+          { channel: { surface, channelId: boundHere ?? m.channel ?? "lab" }, threadId: m.thread, messageId: m.message, platformUserId: m.user, text: m.text, attachments: [], addressed: true, at: new Date().toISOString() },
           deps,
         );
         return send(req, res, result.t === "refused" ? 403 : 202, result);
       }
       if (req.method === "POST" && url.pathname === "/stop") {
         const s = stopSchema.parse(await readJson(req));
-        const run = await db.query("select 1 from jobs where id = $1 and kind = 'run'", [s.runId]);
-        if (!run.rowCount) throw new HttpError(404, "no such run");
+        await requireOwnRun(db, s.runId, surface);
         const inboxId = await sendToInbox(db, s.runId as RunId, { t: "stop", confirmed: s.confirmed, by: s.user });
         return send(req, res, 202, { inboxId });
       }
       if (req.method === "GET" && url.pathname === "/replies") {
         const runId = uuid.safeParse(url.searchParams.get(`runId`));
         if (!runId.success) throw new HttpError(400, "runId must be a uuid");
+        await requireOwnRun(db, runId.data, surface);
         return send(req, res, 200, await readReplies(db, runId.data as RunId));
       }
       if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(req, res, chatPage(where));
@@ -195,7 +261,7 @@ export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) =
       }
       send(req, res, 404, { error: "not found" });
     } catch (err) {
-      if (err instanceof HttpError) return send(req, res, err.status, { error: err.message });
+      if (err instanceof HttpError) return send(req, res, err.status, { error: err.message }, err.status === 401 ? { "www-authenticate": "Bearer" } : {});
       if (err instanceof z.ZodError) return send(req, res, 400, { error: "invalid request", issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
       log(`[web] ${req.method} ${req.url}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
       send(req, res, 500, { error: "internal error" });

@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import { boot } from "../src/boot.ts";
 import { configProblem } from "../src/config.ts";
 import { requireProcessPermission, sealNetwork } from "../src/seal.ts";
-import { createWebHandler, listenWeb } from "../src/surfaces/web.ts";
+import { createWebHandler, doorTokens, listenWeb, type DoorTokens } from "../src/surfaces/web.ts";
 
 const denied = requireProcessPermission();
 if (denied) {
@@ -22,7 +22,16 @@ if (configRefused) {
   process.exit(2);
 }
 const core = await boot(values.config);
-const { server, port } = await listenWeb(createWebHandler(core.db, core.intake, (line) => console.error(line), core.config.web.channel, core.config.labName ?? hostname()), values.port ? Number(values.port) : core.config.web.port, values.host);
+const log = (line: string) => console.error(line);
+let tokens: DoorTokens;
+try {
+  tokens = doorTokens(core.config.surfaces, process.env, log);
+} catch (err) {
+  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  await core.close();
+  process.exit(2);
+}
+const { server, port } = await listenWeb(createWebHandler(core.db, core.intake, log, core.config.web.channel, core.config.labName ?? hostname(), tokens), values.port ? Number(values.port) : core.config.web.port, values.host);
 console.log(`[web] listening on http://${values.host}:${port}`);
 
 const shutdown = () => {
