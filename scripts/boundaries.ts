@@ -61,6 +61,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   // The slice harness spawns the binaries and drives them over HTTP. It is not deployed.
   "scripts/slice1.ts": ["network-globals", "module:child_process"],
   "scripts/procs.ts": ["network-globals", "module:child_process"],
+  // The compose check asks the web door over HTTP from inside its container. It is not deployed.
+  "scripts/compose-ask.ts": ["network-globals"],
   "scripts/unit3.ts": ["module:http"],
   "scripts/record-demo.ts": ["module:child_process"],
   "scripts/agent-demo.ts": ["module:child_process"],
