@@ -49,6 +49,8 @@ You need Node 26 or later, pnpm 10 and Docker. The demo and the checks use scrip
 
 Under each answer, **Record** opens the run's record: every model call, tool call and refusal, and a check that the hash chain is intact. `pnpm aliquot record <run-id>` prints the same record in a terminal, and `pnpm aliquot runs` lists the newest runs with their outcomes and chain checks, so you can find a run id without the browser. Both take `--json`. The demo prints the full commands, with its database.
 
+To set up a real lab, run `pnpm aliquot:init`. It asks where the lab's model runs, the web door port and the lab's participant id patterns, tests the patterns against ids you paste (a PASS or FAIL line for each), and writes `config/lab.toml`. It also writes `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values, but only when `.env` does not exist: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable.
+
 The demo's model is a scripted fake that searches, reads the top entry and quotes it. It shows the harness, not answer quality. Add `--studio` to start the authoring studio as well.
 
 To run the checks:
