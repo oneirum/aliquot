@@ -116,6 +116,8 @@ test("an answer above the acp surface's placement leaves the door as the record 
   const link = new URL(/Open it here: (\S+)$/.exec(notices[0]!.text)![1]!);
   assert.equal(link.pathname, `/runs/${runId}`);
   assert.equal((await raw("GET", link.pathname)).status, 200);
+  const view = JSON.parse((await raw("GET", `${link.pathname}/view`)).text) as { rows: { t: string; detail: string }[] };
+  assert.match(view.rows.find((r) => r.t === "run.started")!.detail, /^acp thread,/, "the record page names the surface");
 
   const cli = processes(root, work, { PATH: env.PATH, NODE_NO_WARNINGS: "1", ALIQUOT_SURFACE_TOKEN: ACP }).start("ask-acp", "aliquot.ts", ["ask", "--door", web.base, "--user", "member-1", "--json", QUESTION]);
   const { code } = await cli.exit;
