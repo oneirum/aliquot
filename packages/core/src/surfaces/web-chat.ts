@@ -30,8 +30,8 @@ export function chatPage(where = ""): string {
 <title>Ask the lab · Aliquot</title>
 ${APP_HEAD}
 <style>${BASE_CSS}
-:root { --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.22); --bar-btn: rgb(28 27 25 / 0.06); --accent: var(--ink); --accent-ink: var(--bg); --held: #00664a; --broken: #b34700; }
-@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: rgb(236 235 230 / 0.16); --bar-btn: rgb(236 235 230 / 0.1); --held: #5ee0b0; --broken: #ff8a4c; } }
+:root { --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.22); --edge: rgb(28 27 25 / 0.16); --accent: var(--ink); --accent-ink: var(--bg); --held: #00664a; --broken: #b34700; }
+@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: rgb(236 235 230 / 0.16); --edge: rgb(236 235 230 / 0.2); --held: #5ee0b0; --broken: #ff8a4c; } }
 html { scroll-padding: 64px 0 120px; }
 body { min-height: 100dvh; }
 svg { display: block; }
@@ -61,26 +61,28 @@ svg { display: block; }
 .pane { min-height: 100dvh; display: flex; flex-direction: column; padding-left: 260px; }
 body[data-side="closed"] .side { display: none; }
 body[data-side="closed"] .pane { padding-left: 0; }
-.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--bg); }
-.bar[data-edge] { box-shadow: 0 1px 0 var(--line); }
-.bar .title { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+/* The bar is a material the thread passes under: the page colour, translucent and blurred, running 16 px past the
+   bar's edge and fading out there, so text softens as it goes under instead of meeting a ruled line. */
+.bar::before { content: ""; position: absolute; inset: 0 0 -16px; z-index: -1; background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%); mask-image: linear-gradient(#000 calc(100% - 16px), transparent); pointer-events: none; }
+@media (prefers-reduced-transparency: reduce) { .bar::before { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+.bar .title { flex: 1; min-width: 0; margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .intro { display: contents; }
 .intro[hidden] { display: none; }
-.pane:has(.intro:not([hidden]))::before, .pane:has(.intro:not([hidden]))::after { content: ""; flex: 1 1 0; }
-.pane:has(.intro:not([hidden]))::before { order: 1; }
-.pane:has(.intro:not([hidden]))::after { order: 3; }
-.intro h1 { order: 2; align-self: center; width: min(720px, 100% - 48px); margin: 0; font-size: 28px; line-height: 36px; font-weight: 500; letter-spacing: -0.015em; text-align: center; }
-.pane:has(.intro:not([hidden])) .compose { order: 5; position: static; padding-top: 0; padding-bottom: calc(8px + env(safe-area-inset-bottom)); background: none; }
+/* Empty state: the title, the suggestions and the composer are one group at the bottom, with the open space above. */
+.pane:has(.intro:not([hidden]))::before { content: ""; flex: 1 1 0; order: 1; }
+.intro h1 { order: 2; align-self: center; width: min(720px, 100% - 48px); margin: 0 0 32px; font-size: 28px; line-height: 36px; font-weight: 500; letter-spacing: -0.015em; text-align: center; }
+.pane:has(.intro:not([hidden])) .compose { padding-top: 0; background: none; }
 .tries { order: 4; align-self: center; width: min(720px, 100% - 48px); list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .tries:empty { display: none; }
-.try { min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--field); color: var(--ink); font: 500 14px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
+.try { min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 20px; background: none; color: var(--ink); font: 15px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
 .try:active { transform: scale(0.97); }
-@media (hover: hover) and (pointer: fine) { .try:hover { border-color: var(--muted); } }
-.install { order: 6; align-self: center; width: min(720px, 100% - 48px); margin: 0; padding: 0 0 16px; font-size: 13px; line-height: 20px; color: var(--muted); text-align: center; text-wrap: balance; }
+@media (hover: hover) and (pointer: fine) { .try:hover { background: var(--hover); } }
+.install { flex: none; margin: 0; padding: 0 16px 8px; font-size: 13px; line-height: 20px; color: var(--muted); text-wrap: pretty; }
 @media (display-mode: standalone) { .install { display: none; } }
 
-#thread { order: 7; flex: 1; width: 100%; max-width: 768px; margin: 0 auto; padding: 24px 24px 32px; }
+#thread { order: 7; flex: 1; width: 100%; max-width: 768px; margin: 0 auto; padding: 24px 24px 32px; text-wrap: pretty; }
 #thread:empty { display: none; }
 .day { margin: 0 0 24px; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--muted); }
 .entry { margin: 0 0 48px; transition: opacity 200ms var(--ease-out); }
@@ -127,17 +129,20 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .glyph .ghost { color: var(--muted); }
 [data-chain="verified"] .status, [data-chain="verified"] .glyph { color: var(--held); font-weight: 500; }
 [data-chain="broken"] .status, [data-chain="broken"] .glyph { color: var(--broken); font-weight: 500; }
-.trail { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.trail { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .seal code { display: inline-block; font: 13px/20px var(--mono); color: var(--muted); }
-.acts { display: flex; }
-button.verify, .acts a { position: relative; display: inline-flex; align-items: center; height: 32px; margin: -6px 0; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: 500 13px/20px var(--sans); text-decoration: none; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
-button.verify::after, .acts a::after { content: ""; position: absolute; inset: -6px 0; }
-button.verify:active, .acts a:active { transform: scale(0.97); }
+.acts { display: flex; align-items: center; gap: 16px; }
+/* Check is a pill, 32 px tall with a 44 px touch target; Open record is an underlined link with the same target. */
+button.verify { position: relative; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 16px; background: none; color: var(--ink); font: 500 13px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
+button.verify::after { content: ""; position: absolute; inset: -7px -1px; }
+button.verify:active { transform: scale(0.97); }
 button.verify:disabled { cursor: default; color: var(--muted); transform: none; }
-@media (hover: hover) and (pointer: fine) { button.verify:not(:disabled):hover, .acts a:hover { background: var(--hover); } }
+.acts a { position: relative; color: var(--ink); font-size: 13px; line-height: 20px; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); transition: text-decoration-color 160ms ease; }
+.acts a::after { content: ""; position: absolute; inset: -12px -8px; }
+@media (hover: hover) and (pointer: fine) { button.verify:not(:disabled):hover { background: var(--hover); } .acts a:hover { text-decoration-color: currentColor; } }
 
 .compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px 24px calc(24px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 24px); }
-.box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 9px 9px 20px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
+.box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 11px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
 .box:focus-within { border-color: var(--field-focus); }
 textarea { flex: 1; min-width: 0; max-height: 192px; resize: none; border: 0; outline: 0; padding: 6px 0; background: transparent; color: var(--ink); font: 16px/24px var(--sans); }
 textarea::placeholder { color: var(--muted); }
@@ -158,16 +163,16 @@ button.send:disabled { cursor: default; transform: none; }
   .scrim { display: block; position: fixed; inset: 0; z-index: 4; background: rgb(0 0 0 / 0.32); opacity: 0; pointer-events: none; transition: opacity 200ms ease; }
   body[data-side="open"] .scrim { opacity: 1; pointer-events: auto; }
   .pane { padding-left: 0; }
-  .bar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; height: 56px; padding: 0 12px; }
-  .bar .icon { width: 40px; height: 40px; border-radius: 50%; background: var(--bar-btn); color: var(--ink); }
+  /* A 44 px drawer button with no fill; 2 px of bar padding puts its icon's stroke on the thread's 16 px gutter. */
+  .bar { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; height: 56px; padding: 0 2px; }
+  .bar .icon { width: 44px; height: 44px; border-radius: 50%; color: var(--ink); }
+  .bar .icon:active { background: var(--hover); }
   .bar .icon svg { width: 18px; height: 18px; }
   .bar .title { font-size: 17px; line-height: 24px; text-align: center; }
-  .intro h1 { font-size: 24px; line-height: 32px; }
-  .intro h1, .install { width: calc(100% - 32px); }
+  .intro h1 { margin-bottom: 24px; font-size: 24px; line-height: 32px; }
+  .intro h1, .tries { width: calc(100% - 32px); }
   #thread { padding: 16px 16px 24px; }
   .compose { padding: 16px 12px calc(16px + env(safe-area-inset-bottom)); }
-  .tries { width: calc(100% - 24px); flex-direction: column; }
-  .try { width: 100%; text-align: left; }
 }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
@@ -188,6 +193,7 @@ button.send:disabled { cursor: default; transform: none; }
     <a class="row" href="/runs?show=failed">${FAILED}<span>Failed runs</span></a>
   </nav>
   <ol class="history" id="history"></ol>
+  <p class="install" id="install">To open Aliquot like an app, choose Add to Home Screen or Install in the browser menu.</p>
   <div class="me"><span class="avatar" id="initial" aria-hidden="true"></span><span><span id="who"></span>${whereSpan(where)}</span></div>
 </aside>
 <div class="scrim" id="scrim"></div>
@@ -199,7 +205,6 @@ button.send:disabled { cursor: default; transform: none; }
   <section class="intro" id="intro">
     <h1>Ask the lab</h1>
     <ul class="tries" id="tries"></ul>
-    <p class="install" id="install">To open Aliquot like an app, choose Add to Home Screen or Install in the browser menu.</p>
   </section>
   <main id="thread" aria-live="polite"></main>
   <form id="ask" class="compose">
@@ -235,10 +240,6 @@ $("initial").textContent = user.slice(0, 1).toUpperCase();
 
 // The sidebar sits beside the thread on a wide screen, where the toggle hides it and the choice is remembered, and
 // slides over it as a drawer on a phone, where it starts closed.
-const bar = document.querySelector(".bar");
-const edge = () => bar.toggleAttribute("data-edge", scrollY > 0);
-addEventListener("scroll", edge, { passive: true });
-
 const wide = matchMedia("(min-width: 900px)");
 const SIDE = "aliquot.sidebar";
 const setSide = (open, focus) => {
