@@ -46,9 +46,11 @@ snapshot="$(printf '%s' "$compiled" | sed -n 's/.*"snapshot":"\([0-9a-f]\{64\}\)
 [[ "$(kb publish --snapshot "$snapshot")" == '{"ok":true}' ]] || fail "kb publish $snapshot"
 pass "lab0 handbook compiled and published as snapshot ${snapshot:0:12}"
 
-ask() { "${compose[@]}" exec -T web node --disable-warning=ExperimentalWarning scripts/compose-ask.ts "$@" "$web"; }
+ask() { local mode="$1"; shift; "${compose[@]}" exec -T web node --disable-warning=ExperimentalWarning scripts/compose-ask.ts "$mode" "$web" "$@"; }
+# Assigned before pass, never inside its arguments, so a failed step stops the script instead of printing PASS.
 run="$(ask ask | tail -1)" || fail "ask: $run"
-pass "$(ask verify "$run" | tail -1)"
+out="$(ask verify "$run" | tail -1)" || fail "verify $run: $out"
+pass "$out"
 
 "${compose[@]}" exec -T studio node -e "fetch('http://127.0.0.1:3001/admin/login').then(r => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))" || fail "studio /admin/login"
 pass "studio answers /admin/login on its production build"
@@ -68,6 +70,7 @@ pass "restore refuses a payload key that is not the backup's"
 scripts/restore.sh "$work/backup" > "$work/restore.log" 2>&1 || { cat "$work/restore.log" >&2; fail "restore"; }
 grep -q "$run" "$work/restore.log" || fail "aliquot runs after restore does not list $run"
 pass "restored: aliquot runs checked $(grep -c ' intact$' "$work/restore.log") run chain(s), all intact"
-pass "$(ask verify "$run" | tail -1) (after restore)"
+out="$(ask verify "$run" | tail -1)" || fail "verify $run after restore: $out"
+pass "$out (after restore)"
 
 echo "compose check passed"
