@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// labh web: node --permission --allow-fs-read=* --allow-net packages/core/bin/web.ts --config lab.toml [--port 3000]
+// labh web: node --permission --allow-fs-read=* --allow-net packages/core/bin/web.ts --config lab.toml [--port 3000] [--host 127.0.0.1]
 import { parseArgs } from "node:util";
 import { boot } from "../src/boot.ts";
 import { configProblem } from "../src/config.ts";
@@ -13,7 +13,7 @@ if (denied) {
 }
 sealNetwork();
 
-const { values } = parseArgs({ options: { config: { type: "string", default: "lab.toml" }, port: { type: "string" } } });
+const { values } = parseArgs({ options: { config: { type: "string", default: "lab.toml" }, port: { type: "string" }, host: { type: "string", default: "127.0.0.1" } } });
 
 const configRefused = await configProblem(values.config);
 if (configRefused) {
@@ -21,8 +21,8 @@ if (configRefused) {
   process.exit(2);
 }
 const core = await boot(values.config);
-const { server, port } = await listenWeb(createWebHandler(core.db, core.intake, (line) => console.error(line), core.config.web.channel), values.port ? Number(values.port) : core.config.web.port);
-console.log(`[web] listening on http://127.0.0.1:${port}`);
+const { server, port } = await listenWeb(createWebHandler(core.db, core.intake, (line) => console.error(line), core.config.web.channel), values.port ? Number(values.port) : core.config.web.port, values.host);
+console.log(`[web] listening on http://${values.host}:${port}`);
 
 const shutdown = () => {
   server.close(() => void core.close().then(() => process.exit(0)));

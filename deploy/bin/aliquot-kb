@@ -1,0 +1,3 @@
+#!/bin/sh
+# The kb command inside the app image: compile, coverage, publish, diff and search, reading the mounted lab.toml.
+exec node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net /app/packages/core/bin/kb.ts --config "${LABH_CONFIG:-/etc/aliquot/lab.toml}" "$@"

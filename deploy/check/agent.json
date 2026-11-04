@@ -1,0 +1,53 @@
+{
+  "agentId": "lab0-handbook",
+  "name": "Lab0 handbook",
+  "description": "Answers questions about the lab handbook: data classes, office hours, onboarding and equipment. Use when a lab member asks how something in the lab works. Not for literature search or statistics.",
+  "owner": "pi",
+  "maintainers": [
+    "ra-1"
+  ],
+  "instructions": "You answer lab members' practical questions from the lab0 handbook. Call kb_search with the member's question and answer from those entries only.",
+  "instructionsClass": "D1",
+  "model": {
+    "endpointId": "agentlab",
+    "modelId": "scripted-1",
+    "params": {
+      "temperature": 0,
+      "maxOutputTokens": 256
+    }
+  },
+  "skills": [],
+  "knowledgeBases": [
+    "lab0-handbook"
+  ],
+  "tools": [
+    {
+      "name": "kb_search",
+      "scopes": []
+    },
+    {
+      "name": "kb_read",
+      "scopes": []
+    }
+  ],
+  "audience": {
+    "t": "lab"
+  },
+  "channels": [],
+  "autoRespond": false,
+  "routable": true,
+  "sandbox": {
+    "enabled": false
+  },
+  "kind": "interactive",
+  "ceiling": "D3",
+  "provenancePolicy": {
+    "numbersMustTrace": false,
+    "claimsLinkEvidence": false
+  },
+  "evals": [],
+  "sampleQuestions": [
+    "What are the office hours?",
+    "Which data class is a participant id?"
+  ]
+}

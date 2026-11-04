@@ -170,9 +170,10 @@ export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) =
   };
 }
 
-export async function listenWeb(handler: ReturnType<typeof createWebHandler>, port: number): Promise<{ server: Server; port: number }> {
+/** Loopback unless the caller names another address, as the compose stack does inside its container. */
+export async function listenWeb(handler: ReturnType<typeof createWebHandler>, port: number, host = "127.0.0.1"): Promise<{ server: Server; port: number }> {
   const server = createServer((req, res) => void handler(req, res));
-  server.listen(port, "127.0.0.1");
+  server.listen(port, host);
   await once(server, "listening");
   const address = server.address();
   return { server, port: typeof address === "object" && address ? address.port : port };

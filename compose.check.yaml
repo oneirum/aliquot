@@ -1,0 +1,19 @@
+# The compose check (scripts/compose-check.sh): the same stack on the lab0 handbook agent, with the scripted
+# fake models in place of a real one, and no host port on Postgres so it never meets a dev database.
+#   docker compose -p aliquot-check -f compose.yaml -f compose.check.yaml up -d --build --wait
+x-check-app: &check-app
+  volumes: !override ["./deploy/check:/etc/aliquot:ro"]
+  depends_on:
+    postgres: { condition: service_healthy }
+    fake-model: { condition: service_started }
+
+services:
+  postgres:
+    ports: !reset []
+  worker: *check-app
+  web: *check-app
+  studio: *check-app
+  fake-model:
+    build: .
+    image: aliquot-app:0.5.0
+    command: ["node", "test/fake-model-server.ts"]

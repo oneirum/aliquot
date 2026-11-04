@@ -1,18 +1,67 @@
-# docker compose up -d postgres: the database the harness and its checks use.
-# The worker, web door and studio run on the host for now (see README); container
-# images for them are on the roadmap. Ollama is the optional local model; drop it
-# when the lab points endpoints.local at its own vLLM box.
+# The Aliquot stack on one machine: docker compose up -d starts Postgres, the worker, the web door and the
+# production studio. It reads two files you make once with `docker compose run --rm init`: config/lab.toml
+# (what is where) and .env (three secrets). Every port is published on 127.0.0.1 unless .env sets LABH_BIND;
+# put the lab's reverse proxy in front of the web door and the studio.
+#
+# For development and the checks, docker compose up -d postgres still starts only the database.
+# Ollama is the optional local model (--profile ollama); drop it when lab.toml points at the lab's own vLLM box.
+x-app: &app
+  build: .
+  image: aliquot-app:0.5.0
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+  environment: &app-env
+    DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-labh}@postgres:5432/labh
+    LABH_PAYLOAD_KEY: ${LABH_PAYLOAD_KEY:-}
+    LABH_CONFIG: /etc/aliquot/lab.toml
+  volumes: ["./config:/etc/aliquot:ro"]
+
 services:
   postgres:
-    image: postgres:17-alpine
-    environment: { POSTGRES_PASSWORD: labh, POSTGRES_DB: labh }
+    image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+    restart: unless-stopped
+    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-labh}", POSTGRES_DB: labh }
     volumes: [pg:/var/lib/postgresql/data]
-    ports: ["${LABH_PG_PORT:-5432}:5432"]    # host-run processes and the checks reach it here; LABH_PG_PORT moves it
+    ports: ["${LABH_BIND:-127.0.0.1}:${LABH_PG_PORT:-5432}:5432"]   # host-run processes and the checks reach it here; LABH_PG_PORT moves it
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "labh"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    <<: *app
+    command: ["node", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/worker.ts", "--config", "/etc/aliquot/lab.toml", "--worker-id", "compose-worker"]
+
+  web:
+    <<: *app
+    command: ["node", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/web.ts", "--config", "/etc/aliquot/lab.toml", "--host", "0.0.0.0", "--port", "3000"]
+    ports: ["${LABH_BIND:-127.0.0.1}:${LABH_WEB_PORT:-3000}:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  studio:
+    <<: *app
+    working_dir: /app/packages/studio
+    command: ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3001"]
+    environment:
+      <<: *app-env
+      PAYLOAD_SECRET: ${PAYLOAD_SECRET:-}
+    ports: ["${LABH_BIND:-127.0.0.1}:${LABH_STUDIO_PORT:-3001}:3001"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/admin/login').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
 
   ollama:
     image: ollama/ollama
     profiles: [ollama]                       # docker compose --profile ollama up -d
     volumes: [models:/root/.ollama]
-    ports: ["11434:11434"]
+    ports: ["${LABH_BIND:-127.0.0.1}:11434:11434"]
 
 volumes: { pg: {}, models: {} }

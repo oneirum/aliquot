@@ -1,0 +1,3219 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "studio.users_sessions": {
+      "name": "users_sessions",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "varchar",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "users_sessions_order_idx": {
+          "name": "users_sessions_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_sessions_parent_id_idx": {
+          "name": "users_sessions_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "users_sessions_parent_id_fk": {
+          "name": "users_sessions_parent_id_fk",
+          "tableFrom": "users_sessions",
+          "tableTo": "users",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.users": {
+      "name": "users",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "enum_users_role",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'member'"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reset_password_token": {
+          "name": "reset_password_token",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reset_password_expiration": {
+          "name": "reset_password_expiration",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "salt": {
+          "name": "salt",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hash": {
+          "name": "hash",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reset_password_requested_at": {
+          "name": "reset_password_requested_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "login_attempts": {
+          "name": "login_attempts",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "lock_until": {
+          "name": "lock_until",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "users_updated_at_idx": {
+          "name": "users_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_created_at_idx": {
+          "name": "users_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_email_idx": {
+          "name": "users_email_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.agents_models_by_class": {
+      "name": "agents_models_by_class",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "varchar",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "up_to": {
+          "name": "up_to",
+          "type": "enum_agents_models_by_class_up_to",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_endpoint_id": {
+          "name": "model_endpoint_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_model_id": {
+          "name": "model_model_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_params_temperature": {
+          "name": "model_params_temperature",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "model_params_max_output_tokens": {
+          "name": "model_params_max_output_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 1024
+        },
+        "model_params_seed": {
+          "name": "model_params_seed",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_params_top_p": {
+          "name": "model_params_top_p",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "agents_models_by_class_order_idx": {
+          "name": "agents_models_by_class_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agents_models_by_class_parent_id_idx": {
+          "name": "agents_models_by_class_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agents_models_by_class_parent_id_fk": {
+          "name": "agents_models_by_class_parent_id_fk",
+          "tableFrom": "agents_models_by_class",
+          "tableTo": "agents",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.agents_tools": {
+      "name": "agents_tools",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "varchar",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "agents_tools_order_idx": {
+          "name": "agents_tools_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agents_tools_parent_id_idx": {
+          "name": "agents_tools_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agents_tools_parent_id_fk": {
+          "name": "agents_tools_parent_id_fk",
+          "tableFrom": "agents_tools",
+          "tableTo": "agents",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.agents_evals": {
+      "name": "agents_evals",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "varchar",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expect_t": {
+          "name": "expect_t",
+          "type": "enum_agents_evals_expect_t",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expect_text": {
+          "name": "expect_text",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expect_rubric": {
+          "name": "expect_rubric",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "agents_evals_order_idx": {
+          "name": "agents_evals_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agents_evals_parent_id_idx": {
+          "name": "agents_evals_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agents_evals_parent_id_fk": {
+          "name": "agents_evals_parent_id_fk",
+          "tableFrom": "agents_evals",
+          "tableTo": "agents",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.agents": {
+      "name": "agents",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner": {
+          "name": "owner",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instructions": {
+          "name": "instructions",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instructions_class": {
+          "name": "instructions_class",
+          "type": "enum_agents_instructions_class",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'D1'"
+        },
+        "model_endpoint_id": {
+          "name": "model_endpoint_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model_model_id": {
+          "name": "model_model_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model_params_temperature": {
+          "name": "model_params_temperature",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "model_params_max_output_tokens": {
+          "name": "model_params_max_output_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 1024
+        },
+        "model_params_seed": {
+          "name": "model_params_seed",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_params_top_p": {
+          "name": "model_params_top_p",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "read_cap_tokens": {
+          "name": "read_cap_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "audience_t": {
+          "name": "audience_t",
+          "type": "enum_agents_audience_t",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'lab'"
+        },
+        "audience_study_id": {
+          "name": "audience_study_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "auto_respond": {
+          "name": "auto_respond",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "routable": {
+          "name": "routable",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": true
+        },
+        "sandbox_enabled": {
+          "name": "sandbox_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "sandbox_mount_ceiling": {
+          "name": "sandbox_mount_ceiling",
+          "type": "enum_agents_sandbox_mount_ceiling",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "enum_agents_kind",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'interactive'"
+        },
+        "limits_max_steps": {
+          "name": "limits_max_steps",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "limits_max_tokens": {
+          "name": "limits_max_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "limits_max_wall_ms": {
+          "name": "limits_max_wall_ms",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "schedule_cron": {
+          "name": "schedule_cron",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "schedule_prompt": {
+          "name": "schedule_prompt",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ceiling": {
+          "name": "ceiling",
+          "type": "enum_agents_ceiling",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provenance_policy_numbers_must_trace": {
+          "name": "provenance_policy_numbers_must_trace",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "provenance_policy_claims_link_evidence": {
+          "name": "provenance_policy_claims_link_evidence",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "irb_protocol": {
+          "name": "irb_protocol",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consent_purpose": {
+          "name": "consent_purpose",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agents_agent_id_idx": {
+          "name": "agents_agent_id_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agents_updated_at_idx": {
+          "name": "agents_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agents_created_at_idx": {
+          "name": "agents_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.agents_texts": {
+      "name": "agents_texts",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "agents_texts_order_parent": {
+          "name": "agents_texts_order_parent",
+          "columns": [
+            {
+              "expression": "order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agents_texts_parent_fk": {
+          "name": "agents_texts_parent_fk",
+          "tableFrom": "agents_texts",
+          "tableTo": "agents",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._agents_v_version_models_by_class": {
+      "name": "_agents_v_version_models_by_class",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "up_to": {
+          "name": "up_to",
+          "type": "enum__agents_v_version_models_by_class_up_to",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_endpoint_id": {
+          "name": "model_endpoint_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_model_id": {
+          "name": "model_model_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_params_temperature": {
+          "name": "model_params_temperature",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "model_params_max_output_tokens": {
+          "name": "model_params_max_output_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 1024
+        },
+        "model_params_seed": {
+          "name": "model_params_seed",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_params_top_p": {
+          "name": "model_params_top_p",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "_uuid": {
+          "name": "_uuid",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "_agents_v_version_models_by_class_order_idx": {
+          "name": "_agents_v_version_models_by_class_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_version_models_by_class_parent_id_idx": {
+          "name": "_agents_v_version_models_by_class_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_agents_v_version_models_by_class_parent_id_fk": {
+          "name": "_agents_v_version_models_by_class_parent_id_fk",
+          "tableFrom": "_agents_v_version_models_by_class",
+          "tableTo": "_agents_v",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._agents_v_version_tools": {
+      "name": "_agents_v_version_tools",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "_uuid": {
+          "name": "_uuid",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "_agents_v_version_tools_order_idx": {
+          "name": "_agents_v_version_tools_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_version_tools_parent_id_idx": {
+          "name": "_agents_v_version_tools_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_agents_v_version_tools_parent_id_fk": {
+          "name": "_agents_v_version_tools_parent_id_fk",
+          "tableFrom": "_agents_v_version_tools",
+          "tableTo": "_agents_v",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._agents_v_version_evals": {
+      "name": "_agents_v_version_evals",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expect_t": {
+          "name": "expect_t",
+          "type": "enum__agents_v_version_evals_expect_t",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expect_text": {
+          "name": "expect_text",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expect_rubric": {
+          "name": "expect_rubric",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "_uuid": {
+          "name": "_uuid",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "_agents_v_version_evals_order_idx": {
+          "name": "_agents_v_version_evals_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_version_evals_parent_id_idx": {
+          "name": "_agents_v_version_evals_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_agents_v_version_evals_parent_id_fk": {
+          "name": "_agents_v_version_evals_parent_id_fk",
+          "tableFrom": "_agents_v_version_evals",
+          "tableTo": "_agents_v",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._agents_v": {
+      "name": "_agents_v",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_agent_id": {
+          "name": "version_agent_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_name": {
+          "name": "version_name",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_description": {
+          "name": "version_description",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_owner": {
+          "name": "version_owner",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_instructions": {
+          "name": "version_instructions",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_instructions_class": {
+          "name": "version_instructions_class",
+          "type": "enum__agents_v_version_instructions_class",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'D1'"
+        },
+        "version_model_endpoint_id": {
+          "name": "version_model_endpoint_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_model_model_id": {
+          "name": "version_model_model_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_model_params_temperature": {
+          "name": "version_model_params_temperature",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "version_model_params_max_output_tokens": {
+          "name": "version_model_params_max_output_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 1024
+        },
+        "version_model_params_seed": {
+          "name": "version_model_params_seed",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_model_params_top_p": {
+          "name": "version_model_params_top_p",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_read_cap_tokens": {
+          "name": "version_read_cap_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_audience_t": {
+          "name": "version_audience_t",
+          "type": "enum__agents_v_version_audience_t",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'lab'"
+        },
+        "version_audience_study_id": {
+          "name": "version_audience_study_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_auto_respond": {
+          "name": "version_auto_respond",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "version_routable": {
+          "name": "version_routable",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": true
+        },
+        "version_sandbox_enabled": {
+          "name": "version_sandbox_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "version_sandbox_mount_ceiling": {
+          "name": "version_sandbox_mount_ceiling",
+          "type": "enum__agents_v_version_sandbox_mount_ceiling",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_kind": {
+          "name": "version_kind",
+          "type": "enum__agents_v_version_kind",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'interactive'"
+        },
+        "version_limits_max_steps": {
+          "name": "version_limits_max_steps",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_limits_max_tokens": {
+          "name": "version_limits_max_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_limits_max_wall_ms": {
+          "name": "version_limits_max_wall_ms",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_schedule_cron": {
+          "name": "version_schedule_cron",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_schedule_prompt": {
+          "name": "version_schedule_prompt",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_ceiling": {
+          "name": "version_ceiling",
+          "type": "enum__agents_v_version_ceiling",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_provenance_policy_numbers_must_trace": {
+          "name": "version_provenance_policy_numbers_must_trace",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "version_provenance_policy_claims_link_evidence": {
+          "name": "version_provenance_policy_claims_link_evidence",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "version_irb_protocol": {
+          "name": "version_irb_protocol",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_consent_purpose": {
+          "name": "version_consent_purpose",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_updated_at": {
+          "name": "version_updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_created_at": {
+          "name": "version_created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "_agents_v_parent_idx": {
+          "name": "_agents_v_parent_idx",
+          "columns": [
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_version_version_agent_id_idx": {
+          "name": "_agents_v_version_version_agent_id_idx",
+          "columns": [
+            {
+              "expression": "version_agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_version_version_updated_at_idx": {
+          "name": "_agents_v_version_version_updated_at_idx",
+          "columns": [
+            {
+              "expression": "version_updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_version_version_created_at_idx": {
+          "name": "_agents_v_version_version_created_at_idx",
+          "columns": [
+            {
+              "expression": "version_created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_created_at_idx": {
+          "name": "_agents_v_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_agents_v_updated_at_idx": {
+          "name": "_agents_v_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_agents_v_parent_id_agents_id_fk": {
+          "name": "_agents_v_parent_id_agents_id_fk",
+          "tableFrom": "_agents_v",
+          "tableTo": "agents",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._agents_v_texts": {
+      "name": "_agents_v_texts",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "_agents_v_texts_order_parent": {
+          "name": "_agents_v_texts_order_parent",
+          "columns": [
+            {
+              "expression": "order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_agents_v_texts_parent_fk": {
+          "name": "_agents_v_texts_parent_fk",
+          "tableFrom": "_agents_v_texts",
+          "tableTo": "_agents_v",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.knowledge_bases_sources": {
+      "name": "knowledge_bases_sources",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "varchar",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "enum_knowledge_bases_sources_kind",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location": {
+          "name": "location",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cls": {
+          "name": "cls",
+          "type": "enum_knowledge_bases_sources_cls",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "licence": {
+          "name": "licence",
+          "type": "enum_knowledge_bases_sources_licence",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "knowledge_bases_sources_order_idx": {
+          "name": "knowledge_bases_sources_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_bases_sources_parent_id_idx": {
+          "name": "knowledge_bases_sources_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "knowledge_bases_sources_parent_id_fk": {
+          "name": "knowledge_bases_sources_parent_id_fk",
+          "tableFrom": "knowledge_bases_sources",
+          "tableTo": "knowledge_bases",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.knowledge_bases": {
+      "name": "knowledge_bases",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kb_id": {
+          "name": "kb_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "compiler_endpoint_id": {
+          "name": "compiler_endpoint_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "compiler_model_id": {
+          "name": "compiler_model_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "compiler_params_temperature": {
+          "name": "compiler_params_temperature",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "compiler_params_max_output_tokens": {
+          "name": "compiler_params_max_output_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 8192
+        },
+        "compiler_params_seed": {
+          "name": "compiler_params_seed",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "irb_protocol": {
+          "name": "irb_protocol",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consent_scope": {
+          "name": "consent_scope",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "definition_class": {
+          "name": "definition_class",
+          "type": "enum_knowledge_bases_definition_class",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "knowledge_bases_kb_id_idx": {
+          "name": "knowledge_bases_kb_id_idx",
+          "columns": [
+            {
+              "expression": "kb_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_bases_updated_at_idx": {
+          "name": "knowledge_bases_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_bases_created_at_idx": {
+          "name": "knowledge_bases_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.knowledge_bases_texts": {
+      "name": "knowledge_bases_texts",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "knowledge_bases_texts_order_parent": {
+          "name": "knowledge_bases_texts_order_parent",
+          "columns": [
+            {
+              "expression": "order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "knowledge_bases_texts_parent_fk": {
+          "name": "knowledge_bases_texts_parent_fk",
+          "tableFrom": "knowledge_bases_texts",
+          "tableTo": "knowledge_bases",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._knowledge_bases_v_version_sources": {
+      "name": "_knowledge_bases_v_version_sources",
+      "schema": "studio",
+      "columns": {
+        "_order": {
+          "name": "_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "_parent_id": {
+          "name": "_parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "enum__knowledge_bases_v_version_sources_kind",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location": {
+          "name": "location",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cls": {
+          "name": "cls",
+          "type": "enum__knowledge_bases_v_version_sources_cls",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "licence": {
+          "name": "licence",
+          "type": "enum__knowledge_bases_v_version_sources_licence",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "_uuid": {
+          "name": "_uuid",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "_knowledge_bases_v_version_sources_order_idx": {
+          "name": "_knowledge_bases_v_version_sources_order_idx",
+          "columns": [
+            {
+              "expression": "_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_knowledge_bases_v_version_sources_parent_id_idx": {
+          "name": "_knowledge_bases_v_version_sources_parent_id_idx",
+          "columns": [
+            {
+              "expression": "_parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_knowledge_bases_v_version_sources_parent_id_fk": {
+          "name": "_knowledge_bases_v_version_sources_parent_id_fk",
+          "tableFrom": "_knowledge_bases_v_version_sources",
+          "tableTo": "_knowledge_bases_v",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "_parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._knowledge_bases_v": {
+      "name": "_knowledge_bases_v",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_kb_id": {
+          "name": "version_kb_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_title": {
+          "name": "version_title",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_purpose": {
+          "name": "version_purpose",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_compiler_endpoint_id": {
+          "name": "version_compiler_endpoint_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_compiler_model_id": {
+          "name": "version_compiler_model_id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_compiler_params_temperature": {
+          "name": "version_compiler_params_temperature",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "version_compiler_params_max_output_tokens": {
+          "name": "version_compiler_params_max_output_tokens",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 8192
+        },
+        "version_compiler_params_seed": {
+          "name": "version_compiler_params_seed",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_irb_protocol": {
+          "name": "version_irb_protocol",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_consent_scope": {
+          "name": "version_consent_scope",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_definition_class": {
+          "name": "version_definition_class",
+          "type": "enum__knowledge_bases_v_version_definition_class",
+          "typeSchema": "studio",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_updated_at": {
+          "name": "version_updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version_created_at": {
+          "name": "version_created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "_knowledge_bases_v_parent_idx": {
+          "name": "_knowledge_bases_v_parent_idx",
+          "columns": [
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_knowledge_bases_v_version_version_kb_id_idx": {
+          "name": "_knowledge_bases_v_version_version_kb_id_idx",
+          "columns": [
+            {
+              "expression": "version_kb_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_knowledge_bases_v_version_version_updated_at_idx": {
+          "name": "_knowledge_bases_v_version_version_updated_at_idx",
+          "columns": [
+            {
+              "expression": "version_updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_knowledge_bases_v_version_version_created_at_idx": {
+          "name": "_knowledge_bases_v_version_version_created_at_idx",
+          "columns": [
+            {
+              "expression": "version_created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_knowledge_bases_v_created_at_idx": {
+          "name": "_knowledge_bases_v_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "_knowledge_bases_v_updated_at_idx": {
+          "name": "_knowledge_bases_v_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_knowledge_bases_v_parent_id_knowledge_bases_id_fk": {
+          "name": "_knowledge_bases_v_parent_id_knowledge_bases_id_fk",
+          "tableFrom": "_knowledge_bases_v",
+          "tableTo": "knowledge_bases",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio._knowledge_bases_v_texts": {
+      "name": "_knowledge_bases_v_texts",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "_knowledge_bases_v_texts_order_parent": {
+          "name": "_knowledge_bases_v_texts_order_parent",
+          "columns": [
+            {
+              "expression": "order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "_knowledge_bases_v_texts_parent_fk": {
+          "name": "_knowledge_bases_v_texts_parent_fk",
+          "tableFrom": "_knowledge_bases_v_texts",
+          "tableTo": "_knowledge_bases_v",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.payload_kv": {
+      "name": "payload_kv",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "payload_kv_key_idx": {
+          "name": "payload_kv_key_idx",
+          "columns": [
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.payload_locked_documents": {
+      "name": "payload_locked_documents",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "global_slug": {
+          "name": "global_slug",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payload_locked_documents_global_slug_idx": {
+          "name": "payload_locked_documents_global_slug_idx",
+          "columns": [
+            {
+              "expression": "global_slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_locked_documents_updated_at_idx": {
+          "name": "payload_locked_documents_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_locked_documents_created_at_idx": {
+          "name": "payload_locked_documents_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.payload_locked_documents_rels": {
+      "name": "payload_locked_documents_rels",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "users_id": {
+          "name": "users_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "payload_locked_documents_rels_order_idx": {
+          "name": "payload_locked_documents_rels_order_idx",
+          "columns": [
+            {
+              "expression": "order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_locked_documents_rels_parent_idx": {
+          "name": "payload_locked_documents_rels_parent_idx",
+          "columns": [
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_locked_documents_rels_path_idx": {
+          "name": "payload_locked_documents_rels_path_idx",
+          "columns": [
+            {
+              "expression": "path",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_locked_documents_rels_users_id_idx": {
+          "name": "payload_locked_documents_rels_users_id_idx",
+          "columns": [
+            {
+              "expression": "users_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payload_locked_documents_rels_parent_fk": {
+          "name": "payload_locked_documents_rels_parent_fk",
+          "tableFrom": "payload_locked_documents_rels",
+          "tableTo": "payload_locked_documents",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "payload_locked_documents_rels_users_fk": {
+          "name": "payload_locked_documents_rels_users_fk",
+          "tableFrom": "payload_locked_documents_rels",
+          "tableTo": "users",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "users_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.payload_preferences": {
+      "name": "payload_preferences",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payload_preferences_key_idx": {
+          "name": "payload_preferences_key_idx",
+          "columns": [
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_preferences_updated_at_idx": {
+          "name": "payload_preferences_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_preferences_created_at_idx": {
+          "name": "payload_preferences_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.payload_preferences_rels": {
+      "name": "payload_preferences_rels",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "users_id": {
+          "name": "users_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "payload_preferences_rels_order_idx": {
+          "name": "payload_preferences_rels_order_idx",
+          "columns": [
+            {
+              "expression": "order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_preferences_rels_parent_idx": {
+          "name": "payload_preferences_rels_parent_idx",
+          "columns": [
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_preferences_rels_path_idx": {
+          "name": "payload_preferences_rels_path_idx",
+          "columns": [
+            {
+              "expression": "path",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_preferences_rels_users_id_idx": {
+          "name": "payload_preferences_rels_users_id_idx",
+          "columns": [
+            {
+              "expression": "users_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payload_preferences_rels_parent_fk": {
+          "name": "payload_preferences_rels_parent_fk",
+          "tableFrom": "payload_preferences_rels",
+          "tableTo": "payload_preferences",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "payload_preferences_rels_users_fk": {
+          "name": "payload_preferences_rels_users_fk",
+          "tableFrom": "payload_preferences_rels",
+          "tableTo": "users",
+          "schemaTo": "studio",
+          "columnsFrom": [
+            "users_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "studio.payload_migrations": {
+      "name": "payload_migrations",
+      "schema": "studio",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "batch": {
+          "name": "batch",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payload_migrations_updated_at_idx": {
+          "name": "payload_migrations_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payload_migrations_created_at_idx": {
+          "name": "payload_migrations_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "studio.enum_users_role": {
+      "name": "enum_users_role",
+      "schema": "studio",
+      "values": [
+        "member",
+        "author",
+        "publisher",
+        "steward",
+        "pi"
+      ]
+    },
+    "studio.enum_agents_models_by_class_up_to": {
+      "name": "enum_agents_models_by_class_up_to",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum_agents_evals_expect_t": {
+      "name": "enum_agents_evals_expect_t",
+      "schema": "studio",
+      "values": [
+        "contains",
+        "rubric"
+      ]
+    },
+    "studio.enum_agents_instructions_class": {
+      "name": "enum_agents_instructions_class",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum_agents_audience_t": {
+      "name": "enum_agents_audience_t",
+      "schema": "studio",
+      "values": [
+        "lab",
+        "study-team",
+        "pi-only",
+        "members"
+      ]
+    },
+    "studio.enum_agents_sandbox_mount_ceiling": {
+      "name": "enum_agents_sandbox_mount_ceiling",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum_agents_kind": {
+      "name": "enum_agents_kind",
+      "schema": "studio",
+      "values": [
+        "interactive",
+        "background"
+      ]
+    },
+    "studio.enum_agents_ceiling": {
+      "name": "enum_agents_ceiling",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum__agents_v_version_models_by_class_up_to": {
+      "name": "enum__agents_v_version_models_by_class_up_to",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum__agents_v_version_evals_expect_t": {
+      "name": "enum__agents_v_version_evals_expect_t",
+      "schema": "studio",
+      "values": [
+        "contains",
+        "rubric"
+      ]
+    },
+    "studio.enum__agents_v_version_instructions_class": {
+      "name": "enum__agents_v_version_instructions_class",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum__agents_v_version_audience_t": {
+      "name": "enum__agents_v_version_audience_t",
+      "schema": "studio",
+      "values": [
+        "lab",
+        "study-team",
+        "pi-only",
+        "members"
+      ]
+    },
+    "studio.enum__agents_v_version_sandbox_mount_ceiling": {
+      "name": "enum__agents_v_version_sandbox_mount_ceiling",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum__agents_v_version_kind": {
+      "name": "enum__agents_v_version_kind",
+      "schema": "studio",
+      "values": [
+        "interactive",
+        "background"
+      ]
+    },
+    "studio.enum__agents_v_version_ceiling": {
+      "name": "enum__agents_v_version_ceiling",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum_knowledge_bases_sources_kind": {
+      "name": "enum_knowledge_bases_sources_kind",
+      "schema": "studio",
+      "values": [
+        "file",
+        "url"
+      ]
+    },
+    "studio.enum_knowledge_bases_sources_cls": {
+      "name": "enum_knowledge_bases_sources_cls",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum_knowledge_bases_sources_licence": {
+      "name": "enum_knowledge_bases_sources_licence",
+      "schema": "studio",
+      "values": [
+        "open",
+        "internal-only",
+        "copyrighted"
+      ]
+    },
+    "studio.enum_knowledge_bases_definition_class": {
+      "name": "enum_knowledge_bases_definition_class",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum__knowledge_bases_v_version_sources_kind": {
+      "name": "enum__knowledge_bases_v_version_sources_kind",
+      "schema": "studio",
+      "values": [
+        "file",
+        "url"
+      ]
+    },
+    "studio.enum__knowledge_bases_v_version_sources_cls": {
+      "name": "enum__knowledge_bases_v_version_sources_cls",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    },
+    "studio.enum__knowledge_bases_v_version_sources_licence": {
+      "name": "enum__knowledge_bases_v_version_sources_licence",
+      "schema": "studio",
+      "values": [
+        "open",
+        "internal-only",
+        "copyrighted"
+      ]
+    },
+    "studio.enum__knowledge_bases_v_version_definition_class": {
+      "name": "enum__knowledge_bases_v_version_definition_class",
+      "schema": "studio",
+      "values": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "R"
+      ]
+    }
+  },
+  "schemas": {
+    "studio": "studio"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "id": "ae965ddd-7e7d-4855-99cc-6aa652896291",
+  "prevId": "00000000-0000-0000-0000-000000000000"
+}

@@ -1,0 +1,3 @@
+#!/bin/sh
+# aliquot inside the app image: the CLI under Node's permission model, reading the mounted lab.toml.
+exec node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net /app/packages/core/bin/aliquot.ts --config "${LABH_CONFIG:-/etc/aliquot/lab.toml}" "$@"

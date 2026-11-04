@@ -45,7 +45,7 @@ function respond(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-export async function startFakeModel(modelId: string, script: Script): Promise<FakeModel> {
+export async function startFakeModel(modelId: string, script: Script, at: { readonly port: number; readonly host: string } = { port: 0, host: "127.0.0.1" }): Promise<FakeModel> {
   const state = { script, delayMs: 0, requests: 0, completions: 0, paths: [] as string[], bodies: [] as unknown[] };
   const server: Server = createServer(async (req, res) => {
     state.requests += 1;
@@ -124,12 +124,12 @@ export async function startFakeModel(modelId: string, script: Script): Promise<F
         return respond(res, 200, answer(`Scripted answer to: ${lastUser}`));
     }
   });
-  server.listen(0, "127.0.0.1");
+  server.listen(at.port, at.host);
   await once(server, "listening");
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
   return {
-    url: `http://127.0.0.1:${port}/v1`,
+    url: `http://${at.host}:${port}/v1`,
     modelId,
     get script() {
       return state.script;

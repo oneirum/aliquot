@@ -5,6 +5,7 @@ import { buildConfig } from "payload";
 import { Agents } from "./collections/agents.ts";
 import { KnowledgeBases } from "./collections/knowledge-bases.ts";
 import { Users } from "./collections/users.ts";
+import { migrations } from "./migrations/index.ts";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +24,8 @@ export default buildConfig({
   collections: [Users, Agents, KnowledgeBases],
   secret: required("PAYLOAD_SECRET"),
   // Payload's tables live in their own schema beside core's; core never reads them.
-  db: postgresAdapter({ pool: { connectionString: required("DATABASE_URL") }, schemaName: "studio" }),
+  // A dev server pushes the schema from the collections; a production build applies the committed migrations at start.
+  db: postgresAdapter({ pool: { connectionString: required("DATABASE_URL") }, schemaName: "studio", migrationDir: path.resolve(dirname, "migrations"), prodMigrations: migrations }),
   graphQL: { disable: true },
   // With Payload drafts off, every revision is labelled "published". What is live is agent_heads, so call them revisions.
   i18n: { translations: { en: { version: { currentlyPublished: "Revision", previouslyPublished: "Revision" } } } },
