@@ -4,6 +4,10 @@ Each release is tagged on `main`. Dates are in US Central time.
 
 ## Unreleased
 
+- `aliquot ask` asks a question through the web door from a terminal or a script. `--json` prints one line per step (`started`, `tool`, `finished`, `refused`), each with the run's record link, and the exit code says whether it was answered. `--ceiling` withholds an answer above a class from a caller that keeps its own copy. `pnpm lab0` gains check G: `aliquot ask --json` gets the same cited answer as the chat page, and a record whose chain verifies.
+- `aliquot acp` speaks the Agent Client Protocol on stdin and stdout, so T3 Code (as a local ACP command), Zed and other ACP clients run Aliquot agents as threads. One session is one Aliquot thread. The tools the run used appear as steps, a refusal ends the turn as `refusal`, and cancelling stops the run.
+- `scripts/tmux.sh` (`pnpm up:tmux`) lays out the worker, the web door, the studio and an `ask` shell as one tmux session. A window whose process exits keeps its last lines. [`docs/harnesses.md`](docs/harnesses.md) covers all three.
+
 - The chat and record pages show the lab's name at the top right, from a new `[lab] name` in `lab.toml` (`aliquot init` asks for it), or the machine's hostname when it is unset. The header labels "Runs on this machine" and "Read only", the chat page's footer line and its intro paragraph are gone.
 - The README demo is a new recording of the current pages, and the chat and record stills are retaken in light and dark.
 

@@ -26,6 +26,14 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 - `scripts/backup.sh` and `scripts/restore.sh` for the database and the payload key.
 - Checked by `scripts/compose-check.sh`, which CI runs on a clean Ubuntu runner: a cited answer from the lab0 handbook, the PDF fixtures (a Word PDF, a LaTeX PDF, a scanned page that must fail), and a backup, wipe and restore that ends with the same run verifying again.
 
+## 0.5.1: reach it from other harnesses
+
+- **For:** whoever already works in a terminal, tmux, T3 Code, an editor, or a lab's own orchestrator.
+- **After it:** one contract with no adapter per tool. `aliquot ask --json` prints a JSON line per step, each with the record link. `aliquot acp` speaks the Agent Client Protocol, so T3 Code, Zed and JetBrains run Aliquot agents as threads. `scripts/tmux.sh` lays the processes out in one tmux session. `--ceiling` keeps an answer above a class out of a client that stores its own copy. [`docs/harnesses.md`](harnesses.md) is the guide.
+- **Why here:** it needs only the web door, and nothing after it depends on it. A door reachable from another machine waits for sign-on in 0.8.
+- **Done when:** a test drives the real binary against a fake door, `pnpm lab0` gets a cited answer and a verified record through `aliquot ask --json`, a test lays out the tmux session on a private tmux server, and the official ACP SDK parses every message `aliquot acp` sends.
+- **Not planned:** a fork of T3 Code. Its license allows one, but it would carry about a million lines of developer tooling into the trust base. Its thread store would sit outside the record, and its device pairing grants a shell on the host. Aliquot runs inside T3 as an ACP agent instead.
+
 ## 0.6: ask where the lab already talks
 
 - **For:** the members who will ask questions every day.
@@ -46,6 +54,7 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 
 ## Later
 
+- Harness doors off the machine, after sign-on: an `acp` surface in the door with its own placement, so the server enforces the ceiling, and `ask` and `acp` against a signed-in remote door.
 - Agent CLI confinement on Linux, so Claude Code and Codex agents run on a campus VM.
 - Tools a lab adds itself, each behind an OS-level boundary (a separate user, a container or a VM).
 - One repair attempt when a model returns a malformed tool call.

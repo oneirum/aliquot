@@ -41,6 +41,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/gateway.ts": ["platform-fetch", "egress-decision"],
   "packages/core/src/tools.ts": ["platform-fetch", "egress-decision", "computed-specifier", "stamp"],
   "packages/core/src/surfaces/web.ts": ["module:http"],
+  // aliquot ask and acp: a client of the web door's routes, over http or https.
+  "packages/core/src/door-client.ts": ["module:http", "module:https"],
   // run_code's Docker Engine client, over the daemon's unix socket.
   "packages/core/src/sandbox.ts": ["module:http"],
   // The agent worker: the one spawn in core, the loopback MCP server, and the CONNECT proxy.

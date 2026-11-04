@@ -55,6 +55,10 @@ An agent may run on Claude Code or Codex instead of a model endpoint (`[agent_ba
 - `test/agent-confinement.test.ts` runs a probe under the real profile and asserts one denial per gap. It skips off macOS.
 - `pnpm demo:agent --backend claude-code` (or `--backend codex --model <id>`) runs a real CLI on the operator's own login through `dev_shared_login`. That login is a public placement, so the agent sees D0 only. It is a developer's smoke test, not a lab deployment. See "Live smoke resolution" in `docs/design/DESIGN-v02.md`.
 
+## Other harnesses
+
+`aliquot ask` and `aliquot acp` (Agent Client Protocol for T3 Code and other ACP clients) are clients of the web door's HTTP routes. `packages/core/src/door-client.ts` is the only file they add to the seal, and `scripts/boundaries.ts` allows it `http` and `https` only. They decide no egress: the door does. `packages/core/src/acp.ts` is the protocol, with no network of its own. `scripts/tmux.sh` lays the processes out in tmux. Its test (`test/tmux.test.ts`) uses a private tmux server (`ALIQUOT_TMUX_SOCKET`), never the default one, and skips without tmux. `docs/harnesses.md` is the user guide.
+
 ## Where things are
 
 - `packages/core/src/loop.ts` holds `next()`, the whole run policy as one pure function.

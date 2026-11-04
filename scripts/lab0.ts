@@ -229,6 +229,28 @@ try {
     return `${rows.length}/${rows.length} answered, retrieved and named the pre-registered entry; ranked first in ${rank1}/${rows.length}`;
   });
 
+  await check("check G: aliquot ask --json, the contract T3 Code and tmux use, gets the same cited answer and a record whose chain verifies", async () => {
+    assert.ok(published, "check 1 published a snapshot");
+    await ps.stopAll();
+    const web = await ps.startWeb(cfgHandbook);
+    ps.startWorker(cfgHandbook, "WG");
+    const q = prereg.inDocument[0]!;
+    const cli = ps.start("ask-G", "aliquot.ts", ["ask", "--door", web.base, "--user", "member-1", "--json", q.question]);
+    const { code } = await cli.exit;
+    assert.equal(code, 0, cli.out.join(""));
+    // out holds stderr too (Node's warnings); the events are the JSON lines.
+    const events = cli.out.join("").split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l) as { t: string; runId: string; answer?: string; recordUrl: string });
+    const finished = events.at(-1)!;
+    assert.equal(finished.t, "finished");
+    assert.ok(finished.answer?.includes(q.expected), `the answer does not name ${q.expected}: ${finished.answer}`);
+    assert.equal(finished.recordUrl, `${web.base}/runs/${finished.runId}`);
+    const recorded = await loadEvents(db, finished.runId as RunId);
+    assert.equal(verifyChain(recorded), null);
+    assert.ok(searchesOf(recorded).some((r) => r.entries.includes(published!.entries[q.expected]!)), "the run retrieved the pre-registered entry");
+    await ps.stopAll();
+    return `${events.map((e) => e.t).join(", ")}; answer names ${q.expected}; record ${finished.runId.slice(0, 8)} chain verified`;
+  });
+
   await check("check B: questions outside the documents get the coverage-gap behaviour", async () => {
     assert.ok(published, "check 1 published a snapshot");
     const web = await ps.startWeb(cfgHandbook);

@@ -189,6 +189,18 @@ Each run records an `agent.session` event: the CLI version, exit code, tool call
 
 A lab gives each CLI a dedicated service login: a token from `claude setup-token`, or a dedicated Codex `auth.json`. Use a placement your institution actually approved for that account. A personal subscription is `public`.
 
+## From other harnesses
+
+A terminal, tmux, T3 Code or a lab's own orchestrator can reach Aliquot's agents through one contract, with no adapter per tool. Every route goes through the web door, so the gate and the record apply as they do for the chat page. [`docs/harnesses.md`](docs/harnesses.md) has the details.
+
+| From | Run |
+|---|---|
+| A terminal or a script | `pnpm aliquot ask --user member-1 --json "question"`: one JSON line per step (`started`, `tool`, `finished` or `refused`), each with the record link |
+| tmux | `pnpm up:tmux --config lab.toml`: the worker, the web door and an `ask` shell as windows of one session |
+| T3 Code, Zed or another ACP client | `aliquot acp`, added as a local ACP command: each question a thread, ending with the record link |
+
+`--ceiling D1` keeps an answer above D1 out of a client that stores its own copy, such as T3 Code's thread history. The client gets the record link instead.
+
 ## Research tools
 
 	[datasets.sleep-diary]
@@ -329,6 +341,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - PDF sources for knowledge bases, read by poppler inside the no-network sandbox container, never in a Node process.
 - One `docker compose up` on Linux with a production studio build and committed migrations, `aliquot init`, and backup and restore, checked end to end on a clean Ubuntu runner.
 - A summary at the top of every record, in the page, the terminal and `--json`, and a JSON download from the record page.
+- `aliquot ask --json` and `aliquot acp` (Agent Client Protocol) through the web door, and a tmux layout, so T3 Code, tmux and other harnesses reach the lab's agents.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
