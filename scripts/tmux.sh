@@ -5,7 +5,7 @@
 #   scripts/tmux.sh [--config lab.toml] [--session aliquot] [--port 3000] [--studio] [--attach]
 #   scripts/tmux.sh --stop [--session aliquot]
 #
-# It reads .env when there is one (DATABASE_URL, LABH_PAYLOAD_KEY, PAYLOAD_SECRET) and passes
+# It reads .env when there is one (DATABASE_URL, LABH_PAYLOAD_KEY, PAYLOAD_SECRET, ALIQUOT_STUDIO_TOKEN) and passes
 # only those and LABH_CONFIG into the session. A window whose process exits stays open with
 # its last lines, so a crash can be read. ALIQUOT_TMUX_SOCKET names a private tmux server
 # (tmux -L) instead of the default one; the tests use it.
@@ -63,7 +63,8 @@ tm set-option -t "$session" remain-on-exit on >/dev/null
 tm respawn-pane -k -t "$session:worker" -c "$root" "${env_args[@]}" "$node_bin packages/core/bin/worker.ts --config '$config'"
 tm new-window -t "$session:" -n web -c "$root" "${env_args[@]}" "$node_bin packages/core/bin/web.ts --config '$config' $web_port_arg"
 if [ "$studio" = 1 ]; then
-  tm new-window -t "$session:" -n studio -c "$root" "${env_args[@]}" "pnpm --filter @labh/studio dev --port 3001"
+  # The studio holds no payload key, which the tmux server may carry from .env: it reaches core through the door.
+  tm new-window -t "$session:" -n studio -c "$root" "${env_args[@]}" "env -u LABH_PAYLOAD_KEY LABH_DOOR_URL='$door' pnpm --filter @labh/studio dev --port 3001"
 fi
 tm new-window -t "$session:" -n ask -c "$root" "${env_args[@]}" -e "ALIQUOT_DOOR=$door" \
   "echo 'Ask the door at $door:  pnpm aliquot ask --user <member> \"your question\"   (--json for one JSON line per event)'; exec \"\${SHELL:-sh}\""

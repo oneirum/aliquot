@@ -19,6 +19,7 @@
 
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { NETWORK_GLOBALS, networkModule } from "../packages/core/src/seal.ts";
 
@@ -345,4 +346,11 @@ function readCurrent(root: string, file: string): string {
   } catch {
     return "";
   }
+}
+
+// Run directly (node or tsx scripts/boundaries.ts): prints each violation and exits 1 when there is one.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const violations = scanBoundaries(fileURLToPath(new URL("..", import.meta.url)));
+  for (const v of violations) console.error(describe(v));
+  process.exit(violations.length ? 1 : 0);
 }

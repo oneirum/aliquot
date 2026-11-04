@@ -84,6 +84,14 @@ const s = (v: string) => JSON.stringify(v);
 
 /** The env var init names as [surfaces.acp] token_env, and writes into a new .env. */
 export const ACP_TOKEN_ENV = "ALIQUOT_ACP_TOKEN";
+/** The env var init names as [surfaces.studio] token_env, and writes into a new .env. compose.yaml hands it to the door and the studio. */
+export const STUDIO_TOKEN_ENV = "ALIQUOT_STUDIO_TOKEN";
+
+/** Each surface token init writes into a new .env, and what a .env without it loses. */
+const SURFACE_TOKENS = [
+  { env: ACP_TOKEN_ENV, without: "the door takes no token for [surfaces.acp]" },
+  { env: STUDIO_TOKEN_ENV, without: "the studio cannot reach the door" },
+] as const;
 
 export function renderLabToml(a: InitAnswers): string {
   // The default name is a placeholder, so it stays a comment and the pages show the hostname.
@@ -117,6 +125,13 @@ port = ${a.port}                        # the web door, on this machine only unt
 kind = "acp"
 placement = "zdr"
 token_env = "${ACP_TOKEN_ENV}"      # the token is in .env, never here
+
+# The studio holds no payload key: it sends every read and write of core to the door with this surface's token, and
+# its test threads are answered here.
+[surfaces.studio]
+kind = "studio"
+placement = "lab"
+token_env = "${STUDIO_TOKEN_ENV}"
 
 [hosts]
 "api.openalex.org" = "public"        # the literature tools; each reaches only the hosts it names, and only with D0 text
@@ -161,6 +176,8 @@ LABH_PAYLOAD_KEY=${random(32).toString("hex")}
 PAYLOAD_SECRET=${random(32).toString("hex")}
 # ${ACP_TOKEN_ENV} is the bearer token aliquot acp sends as ALIQUOT_SURFACE_TOKEN; the door serves [surfaces.acp] to it.
 ${ACP_TOKEN_ENV}=${random(32).toString("hex")}
+# ${STUDIO_TOKEN_ENV} is the studio's token for the door's /studio routes, in place of the payload key.
+${STUDIO_TOKEN_ENV}=${random(32).toString("hex")}
 `;
   if (!sandbox) return secrets;
   return `${secrets}
@@ -248,8 +265,9 @@ export function defaultAnswers(patterns: readonly string[], sample: readonly str
   return { lines: report.lines, answers: report.ok ? { ...DEFAULTS, patterns: tried, sandboxImage: null } : null };
 }
 
-/** For a .env init leaves as it is: the line that says how to add the acp token, or null when it has one. Never a secret. */
-export function acpTokenHint(envText: string, envPath: string): string | null {
-  if (new RegExp(`^${ACP_TOKEN_ENV}=.`, "m").test(envText)) return null;
-  return `${envPath} has no ${ACP_TOKEN_ENV}, so the door takes no token for [surfaces.acp]. Add one: echo "${ACP_TOKEN_ENV}=$(openssl rand -hex 32)" >> ${envPath}`;
+/** For a .env init leaves as it is: a line for each surface token it lacks, saying how to add it. Never a secret. */
+export function surfaceTokenHints(envText: string, envPath: string): string[] {
+  return SURFACE_TOKENS.filter((t) => !new RegExp(`^${t.env}=.`, "m").test(envText)).map(
+    (t) => `${envPath} has no ${t.env}, so ${t.without}. Add one: echo "${t.env}=$(openssl rand -hex 32)" >> ${envPath}`,
+  );
 }

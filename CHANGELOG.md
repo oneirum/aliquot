@@ -2,6 +2,10 @@
 
 Each release is tagged on `main`. Dates are in US Central time.
 
+## Unreleased
+
+- The studio holds no payload key. Every read and write it made of core's state goes to the web door's new `/studio` routes with the token of a new `[surfaces.studio]` (kind `studio`): KB compiles (the door reads the sources and stores them encrypted, then queues the worker job), compile results, KB and agent publishes, test messages, test-run replies, and an entry preview for authors that never shows a D3 entry. Each route checks the member's role and the data's class in the door. Test threads now run on the `studio` surface, so their run keys and record pages say `studio`. `compose.yaml` gives the studio its own environment with `ALIQUOT_STUDIO_TOKEN` and `LABH_DOOR_URL` and no `LABH_PAYLOAD_KEY`, and `scripts/compose-check.sh` asserts it. `aliquot init` writes `[surfaces.studio]` and the token. An existing lab adds the table from `lab.example.toml` and `ALIQUOT_STUDIO_TOKEN=$(openssl rand -hex 32)` to `.env`; without them the studio says what is missing. `test/boundaries.test.ts` fails when anything the studio loads reads the key.
+
 ## 0.5.1 (2026-11-04)
 
 - Security: `next` 16.4.5 fixes the 11 Next.js advisories open against 16.3.3 (GHSA-vcvr-r3jv-pc5j, GHSA-2464-fhr4-w9xw and GHSA-673q-mjm6-r5xr critical; GHSA-cjq9-62q9-8jv4 and GHSA-p3m5-59mp-jv5r high; six medium or low). Overrides lift `dompurify` (from monaco-editor) to 3.4.17 and drizzle-kit's old `esbuild` to 0.25. `deepmerge` has no fixed release, so `vendor/deepmerge` is 4.3.1 with the GHSA-gcqx-w48m-w2h4 fix and a test. `.github/dependabot.yml` turns on weekly grouped npm updates.

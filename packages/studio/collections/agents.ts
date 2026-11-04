@@ -1,7 +1,8 @@
 /**
  * Agent drafts. Payload owns drafts and revisions only: versions on, Payload
  * drafts off, so every save is a revision with a diff and a restore. What is
- * live is agent_heads, owned by core and moved only by confirmPublish.
+ * live is agent_heads, owned by core and moved only by confirmPublish, which
+ * the web door runs for the studio (its /studio routes).
  *
  * Fields are generated from core's agentDocumentSchema (fields.ts). A save
  * needs a document that parses, so every revision can be tested and checked.
@@ -10,26 +11,9 @@
  * written in this file.
  */
 
-import { randomUUID } from "node:crypto";
-import {
-  agentDocumentSchema,
-  confirmPublish,
-  describePublishRefusal,
-  isTestRunOf,
-  loadEvents,
-  mayPreview,
-  parseAgentDocument,
-  PublishRefused,
-  readReplies,
-  requestPublish,
-  testDraft,
-  type AgentDocument,
-  type Issue,
-  type RunId,
-  type Sha256,
-} from "@labh/core/studio";
+import { agentDocumentSchema, describePublishRefusal, parseAgentDocument, type AgentDocument, type Issue } from "@labh/core/studio";
 import { addDataAndFileToRequest, type Access, type CollectionConfig, type PayloadRequest } from "payload";
-import { actorOf, core, isEditor } from "../core.ts";
+import { actorOf, core, isEditor, relay } from "../core.ts";
 import { documentJson, formOf, issueOwner, payloadFields, validatedPaths } from "../fields.ts";
 
 const form = formOf(agentDocumentSchema);
@@ -55,10 +39,15 @@ const editor: Access = ({ req }) => isEditor(req.user);
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 
-/** The saved document behind a request, as core's AgentDocument. Unsaved form edits are never published or tested. */
-async function savedDraft(req: PayloadRequest): Promise<{ ok: true; doc: AgentDocument } | { ok: false; issues: Issue[] }> {
+/**
+ * The saved document behind a request, parsed, and as the JSON the door parses again. Unsaved form edits are never
+ * published or tested.
+ */
+async function savedDraft(req: PayloadRequest): Promise<{ ok: true; doc: AgentDocument; json: unknown } | { ok: false; issues: Issue[] }> {
   const saved = await req.payload.findByID({ collection: "agents", id: String(req.routeParams?.id), depth: 0, overrideAccess: false, user: req.user });
-  return parseAgentDocument(documentJson(form, saved));
+  const json = documentJson(form, saved);
+  const parsed = parseAgentDocument(json);
+  return parsed.ok ? { ...parsed, json } : parsed;
 }
 
 export const Agents: CollectionConfig = {
@@ -89,9 +78,7 @@ export const Agents: CollectionConfig = {
         if (!actor) return json({ error: "Sign in first." }, 401);
         const draft = await savedDraft(req);
         if (!draft.ok) return json({ check: null, issues: draft.issues });
-        const c = await core();
-        const check = await requestPublish({ db: c.db, catalog: c.catalog }, draft.doc, actor);
-        return json({ check, refusal: check.refusal ? describePublishRefusal(check.refusal) : null });
+        return relay(await (await core()).call("agent-check", actor, { draft: draft.json }));
       },
     },
     {
@@ -104,14 +91,7 @@ export const Agents: CollectionConfig = {
         const body = (req.data ?? {}) as { draftHash?: unknown; changelog?: unknown };
         const draft = await savedDraft(req);
         if (!draft.ok) return json({ error: describePublishRefusal({ t: "invalid", issues: draft.issues }) }, 409);
-        const c = await core();
-        try {
-          const result = await confirmPublish({ db: c.db, catalog: c.catalog }, draft.doc, String(body.draftHash ?? "") as Sha256, actor, String(body.changelog ?? ""));
-          return json(result);
-        } catch (err) {
-          if (err instanceof PublishRefused) return json({ error: err.message, refusal: err.refusal }, err.refusal.t === "role" ? 403 : 409);
-          throw err;
-        }
+        return relay(await (await core()).call("agent-publish", actor, { draft: draft.json, draftHash: String(body.draftHash ?? ""), changelog: String(body.changelog ?? "") }));
       },
     },
     {
@@ -126,10 +106,8 @@ export const Agents: CollectionConfig = {
         if (!text) return json({ error: "Write a message to test with." }, 400);
         const draft = await savedDraft(req);
         if (!draft.ok) return json({ error: describePublishRefusal({ t: "invalid", issues: draft.issues }) }, 409);
-        if (!mayPreview(actor.role, draft.doc.ceiling)) return json({ error: `Testing an agent at ${draft.doc.ceiling} needs the data steward or the PI.` }, 403);
-        const c = await core();
         const thread = `studio-${String(req.routeParams?.id)}-${String(body.thread ?? "default").replace(/[^a-zA-Z0-9-]/g, "")}`;
-        return json(await testDraft(draft.doc, { member: actor.id, thread, message: randomUUID(), text }, c.intake));
+        return relay(await (await core()).call("agent-test", actor, { draft: draft.json, thread, text }));
       },
     },
     {
@@ -146,18 +124,7 @@ export const Agents: CollectionConfig = {
       handler: async (req) => {
         const actor = actorOf(req.user);
         if (!actor) return json({ error: "Sign in first." }, 401);
-        const runId = String(req.routeParams?.runId) as RunId;
-        if (!/^[0-9a-f-]{36}$/.test(runId)) return json({ error: "Not a run id." }, 400);
-        const c = await core();
-        if (!(await isTestRunOf(c.db, runId, actor.id))) return json({ error: "No test run of yours has that id." }, 404);
-        const events = await loadEvents(c.db, runId);
-        const started = events.find((e) => e.event.t === "run.started")?.event;
-        const finished = events.find((e) => e.event.t === "run.finished")?.event;
-        return json({
-          agent: started?.t === "run.started" ? started.agent : null,
-          outcome: finished?.t === "run.finished" ? finished.outcome : null,
-          replies: await readReplies(c.db, runId),
-        });
+        return relay(await (await core()).call("test-run", actor, { runId: String(req.routeParams?.runId) }));
       },
     },
   ],

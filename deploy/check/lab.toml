@@ -18,6 +18,11 @@ placement = "lab"
 placement = "lab"
 port = 3000
 
+[surfaces.studio]
+kind = "studio"
+placement = "lab"
+token_env = "ALIQUOT_STUDIO_TOKEN"
+
 [policy]
 review_confidential = "refuse"
 participant_id_patterns = ['\bP-\d{5}\b']

@@ -1,14 +1,14 @@
 /**
- * The wiring every process shares: lab.toml and the environment read once,
+ * The wiring every sealed process shares: lab.toml and the environment read once,
  * Postgres, the payload store, the queue, the HTTP choke point, the catalog a
  * draft resolves against, and intake. It builds no model gateway and no tool
- * runner, so the studio (studio.ts) boots from here and the sealed binaries
- * add those in boot.ts.
+ * runner; the sealed binaries add those in boot.ts. It reads the payload key,
+ * so the studio never loads it (test/boundaries.test.ts).
  */
 
 import { readFile } from "node:fs/promises";
 import { parseAgentDocument, type AgentDocument, type Catalog, type MemberId } from "./agent.ts";
-import { databaseUrlFromEnv, loadConfig, payloadKeyFromEnv, type LabConfig } from "./config.ts";
+import { databaseUrlFromEnv, loadConfig, type LabConfig } from "./config.ts";
 import { applySchema, connect, type Db } from "./db.ts";
 import type { IntakeDeps } from "./frontdoor.ts";
 import type { GateDeps } from "./gate.ts";
@@ -102,4 +102,11 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     registry,
     close: () => db.end(),
   };
+}
+
+/** Reads the one secret the store needs. 64 hex characters, from the env var lab.toml names. */
+export function payloadKeyFromEnv(config: LabConfig, env: NodeJS.ProcessEnv = process.env): Uint8Array {
+  const hex = env[config.store.keyEnv];
+  if (!hex || !/^[0-9a-f]{64}$/i.test(hex)) throw new Error(`${config.store.keyEnv} must hold 64 hex characters (32 bytes) for the payload store`);
+  return Buffer.from(hex, "hex");
 }

@@ -32,6 +32,10 @@
  *
  *   node scripts/unit2.ts [--headed] [--shots <dir>] [--proof <dir>]
  *
+ * The studio runs without LABH_PAYLOAD_KEY in its environment and reaches
+ * core only through the web door's /studio routes, with [surfaces.studio]'s
+ * token.
+ *
  * Postgres comes from LABH_TEST_PG (default localhost:5432). The browser is
  * Playwright's Chromium: `pnpm exec playwright install chromium` once, or
  * LABH_CHROMIUM naming a Chromium executable already on disk.
@@ -150,6 +154,10 @@ writeFileSync(
     "[surfaces.web]",
     'placement = "lab"',
     "port = 0",
+    "[surfaces.studio]",
+    'kind = "studio"',
+    'placement = "lab"',
+    'token_env = "UNIT2_STUDIO_TOKEN"',
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['\\bP-\\d{5}\\b', '${prereg.restricted.pattern}']`,
@@ -177,9 +185,16 @@ const env: Record<string, string> = {
   PAYLOAD_SECRET: randomBytes(24).toString("hex"),
   NEXT_TELEMETRY_DISABLED: "1",
   LABH_STUDIO_DIST_DIR: ".next-unit2",
+  UNIT2_STUDIO_TOKEN: randomBytes(32).toString("hex"),
 };
 
 const ps = processes(root, work, env);
+let studioPs: ReturnType<typeof processes> | null = null;
+/** The studio's own environment: the worker and the door hold the payload key, the studio holds only the door's address and its token. */
+const studioEnv = (door: string): Record<string, string> => {
+  const { LABH_PAYLOAD_KEY: _sealedOnly, ...rest } = env;
+  return { ...rest, LABH_DOOR_URL: door };
+};
 const started: Proc[] = [];
 let browser: Browser | null = null;
 const results: { name: string; ok: boolean }[] = [];
@@ -201,7 +216,10 @@ try {
   const webBase = web.base;
   const studioPort = Number(process.env.LABH_STUDIO_PORT ?? (await freePort()));
   const studioBase = `http://127.0.0.1:${studioPort}`;
-  started.push(ps.startGroup("studio", join(root, "packages/studio/node_modules/.bin/next"), ["dev", "-H", "127.0.0.1", "-p", String(studioPort)], join(root, "packages/studio")));
+  const forStudio = studioEnv(webBase);
+  assert.equal("LABH_PAYLOAD_KEY" in forStudio, false, "the studio starts without the payload key");
+  studioPs = processes(root, work, forStudio);
+  started.push(studioPs.startGroup("studio", join(root, "packages/studio/node_modules/.bin/next"), ["dev", "-H", "127.0.0.1", "-p", String(studioPort)], join(root, "packages/studio")));
 
   // Studio accounts. Seeding is the PI's one-time setup, done over the
   // studio's own REST API; everything after it happens in the browser.
@@ -746,6 +764,7 @@ try {
   });
 } finally {
   await browser?.close();
+  await studioPs?.stopAll();
   await ps.stopAll();
   await Promise.all([agentModel.close(), compiler.close(), hosted.close()]);
   await db.end();

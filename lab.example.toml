@@ -88,6 +88,13 @@ kind = "acp"
 placement = "zdr"                        # D1 at most: T3 Code keeps a copy of every thread
 token_env = "ALIQUOT_ACP_TOKEN"
 
+# The studio holds no payload key. It sends every read and write of core to the door's /studio routes with this token,
+# and the door answers its test threads on this surface. There is one studio, so the table is [surfaces.studio].
+[surfaces.studio]
+kind = "studio"
+placement = "lab"                        # the most a test thread shows its author; the door withholds anything above it
+token_env = "ALIQUOT_STUDIO_TOKEN"
+
 # Slack's servers keep a copy of every answer, so a Slack surface may be approved at most, never lab or institution.
 # [surfaces.slack]
 # kind = "slack"

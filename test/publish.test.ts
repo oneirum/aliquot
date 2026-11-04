@@ -4,14 +4,15 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { parseAgentDocument, resolveAgent, versionHash, type AgentDocument, type Catalog, type MemberId } from "../packages/core/src/agent.ts";
 import { loadAudit, verifyAudit } from "../packages/core/src/audit.ts";
-import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
+import { DEFAULT_POLICY, type SurfaceId } from "../packages/core/src/dataclass.ts";
 import { intake, type IntakeDeps } from "../packages/core/src/frontdoor.ts";
 import type { SnapshotId, ToolHash } from "../packages/core/src/hash.ts";
 import { confirmPublish, draftHashOf, PublishRefused, publishedAgentFor, requestPublish } from "../packages/core/src/publish.ts";
 import { mayPreview, type Actor } from "../packages/core/src/roles.ts";
 import { createQueue } from "../packages/core/src/queue.ts";
 import { createPayloadStore } from "../packages/core/src/record.ts";
-import { WEB_SURFACE, testDraft } from "../packages/core/src/surfaces/web.ts";
+import { WEB_SURFACE } from "../packages/core/src/surfaces/web.ts";
+import { testDraft } from "../packages/core/src/surfaces/studio-door.ts";
 import { freshDatabase } from "./db.ts";
 
 const { db } = await freshDatabase("labh_test_publish");
@@ -162,12 +163,12 @@ test("intake runs the head bound to the channel; a studio test runs the unpublis
   assert.equal(live.t === "enqueued" ? live.agent : live.t, published.head.version);
 
   const draft = doc({ agentId: "bound", channels: ["web:bound"], instructions: "Answer in one word." });
-  const tested = await testDraft(draft, { member: "ana", thread: "studio-bound", message: "x1", text: "Office hours?" }, intakeDeps);
+  const tested = await testDraft(draft, { member: "ana", thread: "studio-bound", message: "x1", text: "Office hours?" }, intakeDeps, "studio" as SurfaceId);
   assert.ok(tested.t === "enqueued");
   const r = resolveAgent(draft, catalog);
   assert.ok(r.ok);
   assert.equal(tested.agent, versionHash(r.agent));
   const job = await db.query<{ key: string; payload: { trigger: unknown } }>("select key, payload from jobs where id = $1", [tested.runId]);
-  assert.deepEqual(job.rows[0], { key: "test:web:studio:studio-bound:x1", payload: { ...job.rows[0]!.payload, trigger: { t: "test", memberId: "ana" } } });
+  assert.deepEqual(job.rows[0], { key: "test:studio:studio:studio-bound:x1", payload: { ...job.rows[0]!.payload, trigger: { t: "test", memberId: "ana" } } });
   assert.equal((await intake({ ...msg, channel: { surface: WEB_SURFACE, channelId: "unbound" } }, intakeDeps)).t, "refused");
 });

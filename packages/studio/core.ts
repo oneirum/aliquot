@@ -1,8 +1,9 @@
 /**
  * The studio's handle on core: one booted studio core per server process, and
  * the mapping from a signed-in studio user to core's Actor. The studio reaches
- * core only through @labh/core/studio, which holds no model gateway and no tool
- * runner. Core never imports this package.
+ * core only through @labh/core/studio, which holds no payload key, no model
+ * gateway and no tool runner: each read or write is a call to the web door.
+ * Core never imports this package.
  */
 
 import { bootStudio, mayEdit, ROLES, type Actor, type MemberId, type Role, type StudioCore } from "@labh/core/studio";
@@ -10,7 +11,7 @@ import { bootStudio, mayEdit, ROLES, type Actor, type MemberId, type Role, type 
 const holder = globalThis as typeof globalThis & { labhCore?: Promise<StudioCore> };
 
 export function core(): Promise<StudioCore> {
-  // A failed boot (Postgres down at the first request) is not kept: the next request tries again.
+  // A failed boot (lab.toml unreadable at the first request) is not kept: the next request tries again.
   holder.labhCore ??= bootStudio(process.env.LABH_CONFIG ?? "lab.toml").catch((err: unknown) => {
     holder.labhCore = undefined;
     throw err;
@@ -34,3 +35,6 @@ export function actorOf(user: unknown): Actor | null {
   if (!role || !user || typeof user !== "object" || !("email" in user) || typeof user.email !== "string") return null;
   return { id: user.email as MemberId, role };
 }
+
+/** The door's answer to a studio op, as the studio's own route answers the browser. */
+export const relay = (r: { readonly status: number; readonly json: unknown }): Response => Response.json(r.json, { status: r.status });

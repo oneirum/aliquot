@@ -80,6 +80,10 @@ writeFileSync(
     "[surfaces.web]",
     'placement = "lab"',
     `port = ${Number(values.port)}`,
+    "[surfaces.studio]",
+    'kind = "studio"',
+    'placement = "lab"',
+    'token_env = "DEMO_STUDIO_TOKEN"',
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['${restricted.pattern}']`,
@@ -90,7 +94,8 @@ writeFileSync(
 );
 
 const payloadKey = randomBytes(32).toString("hex");
-const ps = processes(root, work, { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey });
+const shared = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, DEMO_STUDIO_TOKEN: randomBytes(32).toString("hex") };
+const ps = processes(root, work, { ...shared, LABH_PAYLOAD_KEY: payloadKey });
 
 ps.startWorker(cfg, "demo");
 const kb = async (args: string[]) => {
@@ -113,7 +118,9 @@ step("worker and web door running");
 let studio: string | null = null;
 if (values.studio) {
   const port = Number(values.port) + 1;
-  const proc = ps.startGroup("studio", join(root, "packages/studio/node_modules/.bin/next"), ["dev", "-H", "127.0.0.1", "-p", String(port)], join(root, "packages/studio"));
+  // The studio holds no payload key: it reaches core through the door's /studio routes.
+  const studioEnv = { ...shared, LABH_CONFIG: cfg, LABH_DOOR_URL: `http://127.0.0.1:${values.port}`, PAYLOAD_SECRET: randomBytes(24).toString("hex") };
+  const proc = processes(root, work, studioEnv).startGroup("studio", join(root, "packages/studio/node_modules/.bin/next"), ["dev", "-H", "127.0.0.1", "-p", String(port)], join(root, "packages/studio"));
   studio = `http://127.0.0.1:${port}/admin`;
   await waitLine(proc, /Ready in/, 180_000);
   step("studio running");

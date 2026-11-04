@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 import { boot } from "../src/boot.ts";
 import { configProblem } from "../src/config.ts";
 import { requireProcessPermission, sealNetwork } from "../src/seal.ts";
+import { studioRoute } from "../src/surfaces/studio-door.ts";
 import { createWebHandler, doorTokens, listenWeb, type DoorTokens } from "../src/surfaces/web.ts";
 
 const denied = requireProcessPermission();
@@ -31,7 +32,7 @@ try {
   await core.close();
   process.exit(2);
 }
-const { server, port } = await listenWeb(createWebHandler(core.db, core.intake, log, core.config.web.channel, core.config.labName ?? hostname(), tokens), values.port ? Number(values.port) : core.config.web.port, values.host);
+const { server, port } = await listenWeb(createWebHandler(core.db, core.intake, log, core.config.web.channel, core.config.labName ?? hostname(), tokens, (surface, op, json) => studioRoute(core, surface, op, json)), values.port ? Number(values.port) : core.config.web.port, values.host);
 console.log(`[web] listening on http://${values.host}:${port}`);
 
 const shutdown = () => {

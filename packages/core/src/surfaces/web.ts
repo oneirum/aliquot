@@ -12,12 +12,14 @@
  *   GET  /                                                   -> the member chat page
  *   GET  /runs?show=refusals|failed                          -> the newest runs, optionally only those with a refusal or that failed
  *   GET  /runs/:id                                           -> the read-only record page
+ *   POST /studio/<op>  {actor, ...}                          -> the studio's reads and writes of core (studio-door.ts), studio token only
  *
  * Pages and JSON go out gzipped when the browser accepts it.
  *
  * "Bearer <token>" names a surface the door serves (DOOR_KINDS), and a bearer
  * the door does not accept is a 401 that never falls back to web. Any other
- * request is the web surface, as before tokens. /stop and /replies serve only
+ * request is the web surface, as before tokens. The studio's token reaches
+ * /studio routes only, and only the studio's token reaches them. /stop and /replies serve only
  * the caller's surface's runs. That keeps each client on its own surface, but
  * it is not access control while web has no sign-in: anyone who reaches the
  * door can ask as web.
@@ -36,8 +38,7 @@ import { gzipSync } from "node:zlib";
 import { z } from "zod";
 import type { SurfaceId } from "../dataclass.ts";
 import type { Db } from "../db.ts";
-import type { AgentDocument } from "../agent.ts";
-import { intake, intakeTest, type IntakeDeps, type IntakeResult, type Surface } from "../frontdoor.ts";
+import { intake, type IntakeDeps, type Surface } from "../frontdoor.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
 import { recordView } from "../record-view.ts";
 import type { LabConfig, SurfaceConfig, SurfaceKind, TokenSurfaceConfig } from "../config.ts";
@@ -81,21 +82,6 @@ export async function readReplies(db: Db, runId: RunId): Promise<WebReply[]> {
   return rows.rows.map((r) => ({ kind: r.kind, text: r.text, at: r.at.toISOString() }));
 }
 
-/** Did this member start this run from the studio's test thread? Only they read its replies there. */
-export async function isTestRunOf(db: Db, runId: RunId, member: string): Promise<boolean> {
-  const row = await db.query("select 1 from jobs where id::text = $1 and kind = 'run' and payload->'trigger'->>'t' = 'test' and payload->'trigger'->>'memberId' = $2", [runId, member]);
-  return row.rowCount === 1;
-}
-
-/** The studio's test thread is a web thread in channel "studio": replies land in web_messages like any web answer. */
-export function testDraft(draft: AgentDocument, m: { readonly member: string; readonly thread: string; readonly message: string; readonly text: string }, deps: IntakeDeps): Promise<IntakeResult> {
-  return intakeTest(
-    { channel: { surface: WEB_SURFACE, channelId: "studio" }, threadId: m.thread, messageId: m.message, platformUserId: m.member, text: m.text, attachments: [], addressed: true, at: new Date().toISOString() },
-    draft,
-    deps,
-  );
-}
-
 /** How many runs the runs page lists. */
 export const RUNS_LISTED = 100;
 
@@ -113,7 +99,7 @@ export async function listRuns(db: Db, limit = RUNS_LISTED): Promise<RunListRow[
 }
 
 /** Kinds the door serves over HTTP. Slack is reached through its own adapter, so the door takes no Slack token. */
-export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "mcp", "phone"];
+export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "mcp", "phone", "studio"];
 /** Shorter than this, a token could be guessed, so its surface accepts nothing. */
 const MIN_TOKEN_LENGTH = 32;
 
@@ -146,6 +132,11 @@ export function doorTokens(surfaces: readonly SurfaceConfig[], env: NodeJS.Proce
 
 /** A message is at most the router's 8,000 characters plus ids; anything near this is not a chat message. */
 export const MAX_BODY_BYTES = 64 * 1024;
+/** A studio compile carries its source files, base64 in JSON. */
+export const STUDIO_MAX_BODY_BYTES = 32 * 1024 * 1024;
+
+/** Serves POST /studio/<op> for the studio's surface: studioRoute in studio-door.ts, bound to the door's core. */
+export type StudioHandler = (surface: SurfaceId, op: string, json: unknown) => Promise<{ readonly status: number; readonly body: unknown }>;
 
 const messageSchema = z.object({ channel: z.string().optional(), thread: z.string().min(1), message: z.string().min(1), text: z.string().min(1), user: z.string().min(1) });
 const stopSchema = z.object({ runId: z.string().uuid(), user: z.string().min(1), confirmed: z.boolean().default(false) });
@@ -160,12 +151,12 @@ class HttpError extends Error {
   }
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const c of req) {
     bytes += (c as Buffer).length;
-    if (bytes > MAX_BODY_BYTES) throw new HttpError(413, `body exceeds ${MAX_BODY_BYTES} bytes`);
+    if (bytes > limit) throw new HttpError(413, `body exceeds ${limit} bytes`);
     chunks.push(c as Buffer);
   }
   const text = Buffer.concat(chunks).toString("utf8");
@@ -195,14 +186,14 @@ function send(req: IncomingMessage, res: ServerResponse, status: number, body: u
  * The surface a request speaks as. A bearer the door does not accept is never web. Any other request is web, including
  * one carrying a reverse proxy's Basic credentials, which nginx and Traefik forward upstream by default.
  */
-function surfaceOf(req: IncomingMessage, tokens: DoorTokens): SurfaceId {
+function surfaceOf(req: IncomingMessage, tokens: DoorTokens): { readonly id: SurfaceId; readonly kind: SurfaceKind } {
   const header = req.headers.authorization ?? "";
-  if (!/^bearer\b/i.test(header)) return WEB_SURFACE;
+  if (!/^bearer\b/i.test(header)) return { id: WEB_SURFACE, kind: "web" };
   const token = /^Bearer (\S+)$/i.exec(header)?.[1];
   if (!token) throw new HttpError(401, "Authorization must be Bearer <surface token>");
   const surface = tokens.get(sha256(token));
   if (!surface) throw new HttpError(401, "unknown surface token");
-  return surface.id;
+  return surface;
 }
 
 async function requireOwnRun(db: Db, runId: string, surface: SurfaceId): Promise<void> {
@@ -214,6 +205,7 @@ async function requireOwnRun(db: Db, runId: string, surface: SurfaceId): Promise
  * bound is lab.toml's [surfaces.web] channel: when set, every message is in that channel and the body may not name another.
  * where is what the pages show as the lab: its [lab] name, else the machine's hostname.
  * tokens is doorTokens(): without it, only the web surface is served.
+ * studio serves the /studio routes (studio-door.ts); without it, they answer 404.
  */
 export function createWebHandler(
   db: Db,
@@ -222,11 +214,21 @@ export function createWebHandler(
   bound: string | null = null,
   where = "",
   tokens: DoorTokens = new Map(),
+  studio: StudioHandler | null = null,
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
-      const surface = surfaceOf(req, tokens);
+      const caller = surfaceOf(req, tokens);
+      const surface = caller.id;
+      const studioPath = /^\/studio\/([a-z-]+)$/.exec(url.pathname);
+      if (studioPath || url.pathname.startsWith("/studio")) {
+        if (caller.kind !== "studio") throw new HttpError(401, "the /studio routes take the [surfaces.studio] token");
+        if (!studio || !studioPath || req.method !== "POST") throw new HttpError(404, "not found");
+        const reply = await studio(surface, studioPath[1]!, await readJson(req, STUDIO_MAX_BODY_BYTES));
+        return send(req, res, reply.status, reply.body);
+      }
+      if (caller.kind === "studio") throw new HttpError(403, "the studio's token reaches the /studio routes only");
       const boundHere = surface === WEB_SURFACE ? bound : null;
       if (req.method === "POST" && url.pathname === "/message") {
         const m = messageSchema.parse(await readJson(req));

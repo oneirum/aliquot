@@ -3,7 +3,8 @@
 #   scripts/compose-check.sh [--keep]
 #  1. builds the images and brings the stack up (compose.yaml + compose.check.yaml, project aliquot-check)
 #  2. compiles and publishes the lab0 handbook with the kb command, asks the web door a pre-registered question
-#     and requires an answer citing the expected entry, an intact hash chain and a stored answer that decrypts
+#     and requires an answer citing the expected entry, an intact hash chain and a stored answer that decrypts;
+#     requires the studio container to hold no payload key and to reach the door's /studio routes with its token
 #  3. reads a LaTeX PDF and a Word PDF with the kb command through the sandbox container, and requires a scanned
 #     page to fail with the no-OCR message
 #  4. backs up, wipes the database volume, brings the stack up empty, restores, and requires the same run again
@@ -37,6 +38,7 @@ hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
   echo "POSTGRES_PASSWORD=$(hex 16)"
   echo "LABH_PAYLOAD_KEY=$(hex 32)"
   echo "PAYLOAD_SECRET=$(hex 24)"
+  echo "ALIQUOT_STUDIO_TOKEN=$(hex 32)"
   echo "LABH_WEB_PORT=${LABH_WEB_PORT:-3000}"
   echo "LABH_STUDIO_PORT=${LABH_STUDIO_PORT:-3001}"
 } > "$ALIQUOT_ENV"
@@ -80,6 +82,11 @@ pass "$out"
 
 "${compose[@]}" exec -T studio node -e "fetch('http://127.0.0.1:3001/admin/login').then(r => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))" || fail "studio /admin/login"
 pass "studio answers /admin/login on its production build"
+
+"${compose[@]}" exec -T studio node -e "process.exit('LABH_PAYLOAD_KEY' in process.env ? 1 : 0)" || fail "the studio container has LABH_PAYLOAD_KEY in its environment"
+studio_op="fetch(process.env.LABH_DOOR_URL + '/studio/test-run', { method: 'POST', headers: { authorization: 'Bearer ' + process.env.ALIQUOT_STUDIO_TOKEN, 'content-type': 'application/json' }, body: JSON.stringify({ actor: { id: 'compose-check', role: 'pi' }, runId: '00000000-0000-4000-8000-000000000000' }) }).then(r => process.exit(r.status === 404 ? 0 : 1), () => process.exit(1))"
+"${compose[@]}" exec -T studio node -e "$studio_op" || fail "the studio cannot reach the door's /studio routes with ALIQUOT_STUDIO_TOKEN"
+pass "the studio container holds no payload key and reaches the door's /studio routes with its token"
 
 scripts/backup.sh "$work/backup" >/dev/null || fail "backup"
 pass "backup: $(wc -c < "$work/backup/labh.dump" | tr -d ' ') byte dump and the payload key"

@@ -53,7 +53,7 @@ const agentBackend = z.union([
   devLogin,
 ]);
 
-export const SURFACE_KINDS = ["web", "slack", "phone", "acp", "mcp"] as const;
+export const SURFACE_KINDS = ["web", "slack", "phone", "acp", "mcp", "studio"] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 export interface WebSurfaceConfig {
@@ -81,7 +81,7 @@ const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
 const webSurface = z
   .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
   .strict();
-const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp", "mcp"]), placement, token_env: z.string().min(1) }).strict();
+const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
 
 const REFUSED_PLACEMENTS: Partial<Record<SurfaceKind, { readonly placements: readonly Placement[]; readonly why: string }>> = {
   slack: { placements: ["lab", "institution"], why: "Slack's servers keep a copy of every answer, so a Slack surface is placement approved at most" },
@@ -96,6 +96,7 @@ function parseSurface(id: string, raw: unknown): SurfaceConfig {
   const kind = "kind" in raw ? raw.kind : id === "web" ? "web" : undefined;
   if (!SURFACE_KINDS.includes(kind as SurfaceKind)) fail(`needs kind = one of ${SURFACE_KINDS.join(", ")}`);
   if ((kind === "web") !== (id === "web")) fail("is not allowed: kind web is [surfaces.web] only, and [surfaces.web] is kind web, because there is one web door");
+  if ((kind === "studio") !== (id === "studio")) fail("is not allowed: kind studio is [surfaces.studio] only, and [surfaces.studio] is kind studio, because there is one studio");
   // Read nowhere, so the lab would believe web is authenticated. It is not until sign-on.
   if (id === "web" && "token_env" in raw) fail("takes no token_env: the web door has no token until sign-on");
   const parsed = (id === "web" ? webSurface : tokenSurface).safeParse(raw);
@@ -288,13 +289,6 @@ export async function configProblem(path: string): Promise<string | null> {
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }
-}
-
-/** Reads the one secret the store needs. 64 hex characters, from the env var lab.toml names. */
-export function payloadKeyFromEnv(config: LabConfig, env: NodeJS.ProcessEnv = process.env): Uint8Array {
-  const hex = env[config.store.keyEnv];
-  if (!hex || !/^[0-9a-f]{64}$/i.test(hex)) throw new Error(`${config.store.keyEnv} must hold 64 hex characters (32 bytes) for the payload store`);
-  return Buffer.from(hex, "hex");
 }
 
 /** The polite-pool contact, or null when lab.toml names no env var or the var is unset. */

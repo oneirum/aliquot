@@ -17,6 +17,10 @@
  * then says withheld. ceiling is the caller's own, stricter promise: an
  * answer whose class ranks above it is withheld here too, for a caller that
  * keeps a copy, such as T3 Code's thread store.
+ *
+ * studioCall() is the studio's one way into core's state: a POST to the
+ * door's /studio routes (surfaces/studio-door.ts) with [surfaces.studio]'s
+ * token, which the studio holds in place of the payload key.
  */
 
 import { request as httpRequest } from "node:http";
@@ -76,8 +80,8 @@ export function isDataClass(s: string): s is DataClass {
 
 const base = (door: Door) => (door.url.endsWith("/") ? door.url : `${door.url}/`);
 
-/** The door's JSON over http or https, by the URL's scheme. Any other scheme is refused before a socket opens. */
-function call(door: Door, method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
+/** The door's JSON over http or https, by the URL's scheme. Any other scheme is refused before a socket opens. tokenEnv names where the caller read its token. */
+function call(door: Door, method: "GET" | "POST", path: string, body?: unknown, tokenEnv = SURFACE_TOKEN_ENV): Promise<{ status: number; json: unknown }> {
   const url = new URL(path, base(door));
   const send = url.protocol === "https:" ? httpsRequest : url.protocol === "http:" ? httpRequest : null;
   if (!send) return Promise.reject(new DoorError(`the door URL must be http or https, not ${url.protocol}`));
@@ -97,7 +101,7 @@ function call(door: Door, method: "GET" | "POST", path: string, body?: unknown):
         }
         if (res.statusCode === 401) {
           const why = (json as { error?: unknown } | null | undefined)?.error;
-          return reject(new DoorError(`the door refused ${SURFACE_TOKEN_ENV} (401${typeof why === "string" ? `: ${why}` : ""}). It must hold the token of a surface the door serves, and the door must start with that surface's token variable set.`));
+          return reject(new DoorError(`the door refused ${tokenEnv} (401${typeof why === "string" ? `: ${why}` : ""}). It must hold the token of a surface the door serves, and the door must start with that surface's token variable set.`));
         }
         if (json === undefined) return reject(new DoorError(`${method} ${url.pathname} answered ${res.statusCode} with a body that is not JSON`));
         resolve({ status: res.statusCode ?? 0, json });
@@ -169,4 +173,16 @@ export async function* ask(door: Door, input: AskInput, opts: AskOptions = {}): 
 export async function stop(door: Door, runId: string, user: string): Promise<void> {
   const r = await call(door, "POST", "stop", { runId, user, confirmed: true });
   if (r.status !== 202) throw new DoorError(`the door did not stop run ${runId} (${r.status})`);
+}
+
+/** The studio's reads and writes of core, each a POST /studio/<op> that studio-door.ts serves. */
+export const STUDIO_OPS = ["kb-compile", "kb-compile-result", "kb-publish", "kb-entry", "agent-check", "agent-publish", "agent-test", "test-run"] as const;
+export type StudioOpName = (typeof STUDIO_OPS)[number];
+
+/** Where the studio finds the web door when it is not at [surfaces.web] base_url, as inside the compose network. */
+export const STUDIO_DOOR_URL_ENV = "LABH_DOOR_URL";
+
+/** One studio op as the signed-in actor. The door's status and JSON come back as they are, for the studio to pass on. */
+export function studioCall(door: Door, tokenEnv: string, op: StudioOpName, actor: { readonly id: string; readonly role: string }, fields: Record<string, unknown>): Promise<{ status: number; json: unknown }> {
+  return call(door, "POST", `studio/${op}`, { ...fields, actor }, tokenEnv);
 }

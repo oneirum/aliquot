@@ -57,7 +57,7 @@ tool that may stand in for a built-in under its name and version.
 |---|---|---|
 | Worker (runs agents) | lab server, under Node's permission model | Postgres, the model endpoints in `lab.toml`, and each built-in tool's declared host |
 | Web door | lab server, bound to 127.0.0.1 | none outward |
-| Studio (authoring) | lab server | Postgres only; it never calls a model. This is not enforced: the studio runs outside the seal. |
+| Studio (authoring) | lab server, holding no payload key | Postgres for its own tables, and the web door's `/studio` routes for everything in core; it never calls a model. The studio runs outside the seal, so this is not enforced in its process. |
 | Postgres | lab server (Docker in the quickstart) | local |
 | Local model (optional) | lab hardware, for example Ollama | local |
 | Agent worker (optional) | lab server; runs Claude Code or Codex in a macOS sandbox | the vendor's API hosts only, through a host-pinned proxy |
@@ -72,6 +72,7 @@ ceiling of its placement. An answer above it is posted as the record link only, 
 |---|---|---|---|
 | `web` | the chat page, and `aliquot ask` or `aliquot acp` with no token; no sign-in until the sign-on release | `lab` by default | D3 |
 | `acp` | `aliquot acp` for T3 Code and other ACP clients, and `aliquot ask`, with the surface's bearer token | `zdr`, as `aliquot init` writes it | D1 |
+| `studio` | the studio's reads and writes of core and its test threads, on the `/studio` routes only, with the surface's bearer token | `lab`, as `aliquot init` writes it | D3 |
 | `slack` (planned) | Slack, through its own adapter, never the web door | `approved` at most; `lab.toml` refuses `lab` and `institution` because Slack keeps a copy of every answer | D2 |
 | `phone` (planned) | the phone bridge, with its own bearer token | set by the lab | that placement's |
 
@@ -80,6 +81,10 @@ its hash. A request with an unknown bearer token, or `Bearer` with no token, is 
 as web. A request with no bearer token is the web surface. A surface reads and stops only its own runs, which keeps
 each client on its own surface. While the web surface has no sign-in this is not access control, because anyone who
 reaches the door can ask as web.
+
+The studio's token is the one credential from which the door takes a member and a role, because the studio's accounts
+hold the lab's roles until sign-on. The door makes every role and class check on the studio's requests, and never
+sends the studio the text of a D3 knowledge base entry.
 
 ### Hosted agent CLIs
 
@@ -167,7 +172,9 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 - **No sign-on.** Keep the web door on the machine until sign-on lands.
 - **No key rotation, no per-class keys, no retention sweep.**
 - **The version hash does not yet cover the system prompt text that the core builds around an agent's instructions.**
-- **The studio runs outside the network seal and holds the payload key.** It never calls a model.
+- **The studio runs outside the network seal and still holds the database password.** It holds no payload key, so it
+  cannot read a stored payload. But it connects to Postgres as the same user as the worker, for its own tables, and
+  the web door's reply table (`web_messages`) holds answers as text. A separate database user for the studio is planned.
 - **A lab cannot add its own tools yet.** Contributed tools are planned, behind an operating-system boundary (a
   separate user, a container or a VM).
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.

@@ -1,7 +1,8 @@
 # The Aliquot stack on one machine: docker compose up -d starts Postgres, the worker, the web door and the
 # production studio. It reads two files you make once with `docker compose run --rm init`: config/lab.toml
-# (what is where) and .env (three secrets). Every port is published on 127.0.0.1 unless .env sets LABH_BIND;
-# put the lab's reverse proxy in front of the web door and the studio.
+# (what is where) and .env (its secrets). Every port is published on 127.0.0.1 unless .env sets LABH_BIND;
+# put the lab's reverse proxy in front of the web door and the studio. LABH_PAYLOAD_KEY goes to the sealed
+# services only, the worker and the web door; the studio reaches core through the door with ALIQUOT_STUDIO_TOKEN.
 #
 # For development and the checks, docker compose up -d postgres still starts only the database.
 # Ollama is the optional local model (--profile ollama); drop it when lab.toml points at the lab's own vLLM box.
@@ -37,6 +38,9 @@ services:
   web:
     <<: *app
     command: ["node", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/web.ts", "--config", "/etc/aliquot/lab.toml", "--host", "0.0.0.0", "--port", "3000"]
+    environment:
+      <<: *app-env
+      ALIQUOT_STUDIO_TOKEN: ${ALIQUOT_STUDIO_TOKEN:-}
     ports: ["${LABH_BIND:-127.0.0.1}:${LABH_WEB_PORT:-3000}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
@@ -44,12 +48,20 @@ services:
       timeout: 5s
       retries: 40
 
+  # Its own environment, not the anchor's: the studio holds no payload key (compose-check.sh asserts it). DATABASE_URL
+  # is for Payload's own tables, in the studio schema.
   studio:
     <<: *app
+    depends_on:
+      postgres: { condition: service_healthy }
+      web: { condition: service_healthy }
     working_dir: /app/packages/studio
     command: ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3001"]
     environment:
-      <<: *app-env
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-labh}@postgres:5432/labh
+      LABH_CONFIG: /etc/aliquot/lab.toml
+      LABH_DOOR_URL: http://web:3000
+      ALIQUOT_STUDIO_TOKEN: ${ALIQUOT_STUDIO_TOKEN:-}
       PAYLOAD_SECRET: ${PAYLOAD_SECRET:-}
     ports: ["${LABH_BIND:-127.0.0.1}:${LABH_STUDIO_PORT:-3001}:3001"]
     healthcheck:

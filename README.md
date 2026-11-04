@@ -84,7 +84,7 @@ A Linux machine needs only Docker. One `docker compose up` starts Postgres, the 
 	docker compose run --rm init
 	docker compose up -d --build
 
-`init` asks where the lab's model runs, the web door port and the lab's participant id patterns. It tests the patterns against ids you paste, with a PASS or FAIL line for each, and asks again on a FAIL. It writes `config/lab.toml`, and `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values. It never rewrites an existing `.env`: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable. On a machine with Node, `pnpm aliquot:init` does the same.
+`init` asks where the lab's model runs, the web door port and the lab's participant id patterns. It tests the patterns against ids you paste, with a PASS or FAIL line for each, and asks again on a FAIL. It writes `config/lab.toml`, and `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values and the `ALIQUOT_ACP_TOKEN` and `ALIQUOT_STUDIO_TOKEN` surface tokens. It never rewrites an existing `.env`: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable. On a machine with Node, `pnpm aliquot:init` does the same.
 
 The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. The web door has no sign-in yet, so keep it on the machine until sign-on lands in 0.7. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
 
@@ -147,14 +147,15 @@ The studio is where lab members write agents and knowledge bases, with no reposi
 <summary>Run the studio by hand</summary>
 
 	cp lab.example.toml lab.toml
-	export DATABASE_URL=postgres://postgres:labh@localhost:5432/labh
-	export LABH_PAYLOAD_KEY=$(openssl rand -hex 32) PAYLOAD_SECRET=$(openssl rand -hex 24) LABH_CONFIG=$PWD/lab.toml
-	node --permission '--allow-fs-read=*' --allow-net packages/core/bin/worker.ts &
-	pnpm --filter @labh/studio dev --port 3001
+	export DATABASE_URL=postgres://postgres:labh@localhost:5432/labh LABH_CONFIG=$PWD/lab.toml ALIQUOT_STUDIO_TOKEN=$(openssl rand -hex 32)
+	key=$(openssl rand -hex 32)
+	LABH_PAYLOAD_KEY=$key node --permission '--allow-fs-read=*' --allow-net packages/core/bin/worker.ts &
+	LABH_PAYLOAD_KEY=$key node --permission '--allow-fs-read=*' --allow-net packages/core/bin/web.ts &
+	PAYLOAD_SECRET=$(openssl rand -hex 24) pnpm --filter @labh/studio dev --port 3001
 
-Open `http://localhost:3001/admin` and create the first account before anyone else can reach the port: the first account is the PI. The PI adds the others and gives each a role. Keep `LABH_PAYLOAD_KEY`, because the payload store is encrypted with it. The worker answers the test thread and compiles knowledge bases. Point `[endpoints.local]` in `lab.toml` at Ollama or another OpenAI-compatible server for real answers.
+Open `http://localhost:3001/admin` and create the first account before anyone else can reach the port: the first account is the PI. The PI adds the others and gives each a role. Keep `$key`, because the payload store is encrypted with it. Only the worker and the web door get it. The studio reaches core through the web door with `ALIQUOT_STUDIO_TOKEN`, the token `[surfaces.studio]` names. The worker answers the test thread and compiles knowledge bases. Point `[endpoints.local]` in `lab.toml` at Ollama or another OpenAI-compatible server for real answers.
 
-The studio process runs outside Node's permission model, because Next.js starts child processes. It holds no model gateway and no tool runner: every model call happens in the sealed worker. The Tools panel reads a plain-data list (name, first sentence, class, hosts), not the tools themselves. It does hold the payload key, so do not give it provider API keys. [`DESIGN.md`](docs/design/DESIGN.md#unit-2-studio-and-publish) has the details.
+The studio process runs outside Node's permission model, because Next.js starts child processes. So it holds no payload key, no model gateway and no tool runner. Every read and write it makes of core goes to the web door's `/studio` routes, which check the member's role and the data's class, and every model call happens in the sealed worker. The Tools panel reads a plain-data list (name, first sentence, class, hosts), not the tools themselves. Do not give it provider API keys. [`DESIGN.md`](docs/design/DESIGN.md#unit-2-studio-and-publish) has the details.
 
 </details>
 

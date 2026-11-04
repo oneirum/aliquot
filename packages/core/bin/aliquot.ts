@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { configProblem, databaseUrlFromEnv, loadConfig } from "../src/config.ts";
 import { connect } from "../src/db.ts";
-import { acpTokenHint, askAnswers, defaultAnswers, InitAborted, renderEnv, renderLabToml, type Prompt } from "../src/init.ts";
+import { askAnswers, defaultAnswers, InitAborted, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
 import { loadEvents, recentRunIds, type RunId } from "../src/record.ts";
 import { formatRecordView, formatRunList, recordView } from "../src/record-view.ts";
 import { DEFAULT_ALLOWANCE, PERMISSION_FLAGS, requireProcessPermission, sealNetwork } from "../src/seal.ts";
@@ -210,11 +210,10 @@ async function init(): Promise<number> {
   say(`Wrote ${labPath}`);
   if (writeEnv) {
     writeFileSync(envPath, renderEnv(answers.sandboxImage !== null), { flag: "wx", mode: 0o600 });
-    say(`Wrote ${envPath} with new POSTGRES_PASSWORD, LABH_PAYLOAD_KEY, PAYLOAD_SECRET and ALIQUOT_ACP_TOKEN (mode 600). Keep a copy of LABH_PAYLOAD_KEY offline.`);
+    say(`Wrote ${envPath} with new POSTGRES_PASSWORD, LABH_PAYLOAD_KEY, PAYLOAD_SECRET, ALIQUOT_ACP_TOKEN and ALIQUOT_STUDIO_TOKEN (mode 600). Keep a copy of LABH_PAYLOAD_KEY offline.`);
   } else {
     say(`Left ${envPath} as it is. It holds LABH_PAYLOAD_KEY, and a new key would make every stored payload unreadable.`);
-    const hint = acpTokenHint(readFileSync(envPath, "utf8"), envPath);
-    if (hint) say(hint);
+    for (const hint of surfaceTokenHints(readFileSync(envPath, "utf8"), envPath)) say(hint);
   }
   return 0;
 }
