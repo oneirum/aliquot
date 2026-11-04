@@ -13,7 +13,7 @@ import type { RecordView } from "../record-view.ts";
 import { APP_HEAD, THEME } from "./web-app.ts";
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(where)}</span>` : "");
+export const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(where)}</span>` : "");
 /** JSON inside a script element: `<` is escaped so no string in it can close the element. */
 const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
@@ -28,18 +28,18 @@ export const BASE_CSS = `
 :root {
   color-scheme: light dark;
   --bg: ${THEME.light}; --surface: #ffffff; --ink: #1c1b19; --ink-2: #4d4a45; --muted: #6a665f; --line: #e3e0d9; --rule: rgb(28 27 25 / 0.05);
-  --accent: #2f5d50; --accent-ink: #ffffff; --quiet: #f2f0eb;
+  --accent: #2f5d50; --accent-ink: #ffffff; --quiet: #f2f0eb; --side: #f4f3f0; --hover: rgb(28 27 25 / 0.06);
   --held: #004d37; --broken: #d55e00;
   --warn-bg: var(--quiet); --warn-line: var(--line); --warn-ink: var(--ink);
   --ok: var(--held); --bad: #9a3a00;
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --sans: "Recursive", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Recursive", ui-monospace, "SF Mono", Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: ${THEME.dark}; --surface: #1c1c1a; --ink: #ecebe6; --ink-2: #c2bfb7; --muted: #9a968e; --line: #2f2e2b; --rule: rgb(236 235 230 / 0.04);
-    --accent: #8cc5b0; --accent-ink: #10201b; --quiet: #22221f;
+    --accent: #8cc5b0; --accent-ink: #10201b; --quiet: #22221f; --side: #10100f; --hover: rgb(236 235 230 / 0.07);
     --held: #5ee0b0; --broken: #c75000; --bad: #f08c55;
   }
 }
@@ -49,8 +49,8 @@ body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); -w
 code, pre, kbd { font-variation-settings: "MONO" 1; }
 a { color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
-header nav { display: flex; align-items: baseline; gap: 16px; font-size: 14px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 52px; border-bottom: 1px solid var(--line); }
+header nav { display: flex; align-items: center; gap: 16px; font-size: 14px; }
 header nav a, header .where, header nav button { color: var(--muted); text-decoration: none; }
 header nav a[aria-current] { color: var(--ink); }
 header nav button { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
