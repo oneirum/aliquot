@@ -125,8 +125,11 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-/** bound is lab.toml's [surfaces.web] channel: when set, every message is in that channel and the body may not name another. */
-export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) => void = (line) => console.error(line), bound: string | null = null): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+/**
+ * bound is lab.toml's [surfaces.web] channel: when set, every message is in that channel and the body may not name another.
+ * where is what the pages show as the lab: its [lab] name, else the machine's hostname.
+ */
+export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) => void = (line) => console.error(line), bound: string | null = null, where = ""): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -151,12 +154,12 @@ export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) =
         if (!runId.success) throw new HttpError(400, "runId must be a uuid");
         return send(res, 200, await readReplies(db, runId.data as RunId));
       }
-      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(res, chatPage());
+      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(res, chatPage(where));
       const runPath = /^\/runs\/([^/]+)(?:\/(events|view))?$/.exec(url.pathname);
       if (req.method === "GET" && runPath) {
         const runId = uuid.safeParse(runPath[1]);
         if (!runId.success) throw new HttpError(404, "not found");
-        if (!runPath[2]) return sendHtml(res, recordPage(runId.data));
+        if (!runPath[2]) return sendHtml(res, recordPage(runId.data, where));
         const events = await loadEvents(db, runId.data as RunId);
         return send(res, 200, runPath[2] === "events" ? events : recordView(runId.data, events));
       }

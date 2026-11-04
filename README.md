@@ -28,7 +28,7 @@ Every answer leaves a record you can check. Open source, and it runs on a laptop
 </p>
 
 <p align="center">
-<img alt="The Aliquot chat page with Claude Code as the agent. A question about thawing samples is answered from the lab handbook with its sources named. A research question is answered by listing the datasets, running Python over a synthetic sleep diary in a container and searching OpenAlex. A question naming participant LAB0-0003 is refused before anything is sent, and the run record shows every step with its data class and a verified hash chain" src="docs/images/demo.gif" width="900">
+<img alt="The Aliquot chat page with Claude Code as the agent. A question about thawing samples is answered from the lab handbook with its sources named. A research question is answered by listing the datasets, running Python over a synthetic sleep diary in a container and searching OpenAlex. A question naming participant LAB0-0003 is refused before anything is sent. The first answer's run record opens with a summary of its model and tool calls, then a verified hash chain and every step with its data class" src="docs/images/demo.gif" width="900">
 </p>
 
 <p align="center"><sub>A scripted browser capture of <code>pnpm demo:agent --backend claude-code --research</code>: a live run of Claude Code (<code>claude-haiku-5-5</code>) on a developer's own login, in real time. <a href="docs/images/demo.mp4">Full-size MP4</a>, easier to read on a phone.</sub></p>

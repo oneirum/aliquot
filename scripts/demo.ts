@@ -75,6 +75,8 @@ writeFileSync(
     "[endpoints.hosted]",
     `base_url = "${agentModel.url}"`,
     'placement = "zdr"',
+    "[lab]",
+    'name = "lab0"',
     "[surfaces.web]",
     'placement = "lab"',
     `port = ${Number(values.port)}`,

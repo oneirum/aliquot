@@ -124,6 +124,8 @@ writeFileSync(
     'placement = "public"',
     ...(values.binary ? [`binary = "${values.binary}"`] : []),
     `dev_shared_login = "${login}"`,
+    "[lab]",
+    'name = "lab0"',
     "[surfaces.web]",
     'placement = "lab"',
     `port = ${Number(values.port)}`,

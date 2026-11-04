@@ -29,6 +29,12 @@ test("without those tables nothing mounts and no contact is sent", () => {
   assert.deepEqual({ datasets: c.datasets, sandbox: c.sandbox, contact: contactFromEnv(c, { LABH_CONTACT_EMAIL: "x@y" }) }, { datasets: [], sandbox: null, contact: null });
 });
 
+test("[lab] name is what the pages show as the lab; without it the web door shows the hostname", () => {
+  assert.equal(parseConfig(`${base}[lab]\nname = " Mettu Lab "\n`, "/l/lab.toml").labName, "Mettu Lab");
+  assert.equal(parseConfig(base, "/l/lab.toml").labName, null);
+  assert.throws(() => parseConfig(`${base}[lab]\nname = ""\n`, "/l/lab.toml"));
+});
+
 test("a [tools] table is refused, with or without a dir, because Aliquot loads no contributed tool folder", () => {
   const message = "lab.toml has a [tools] table, but Aliquot does not load contributed tools yet. Remove [tools]: Aliquot runs only its built-in tools.";
   assert.throws(() => parseConfig(`${base}[tools]\ndir = "tools"\n`, "/l/lab.toml"), { message });

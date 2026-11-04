@@ -97,6 +97,7 @@ const schema = z.object({
     .strict()
     .optional(),
   research: z.object({ contact_email_env: z.string().min(1).optional() }).strict().default({}),
+  lab: z.object({ name: z.string().trim().min(1).optional() }).strict().default({}),
 });
 
 export interface LabConfig {
@@ -119,6 +120,8 @@ export interface LabConfig {
   readonly sandbox: SandboxConfig | null;
   /** The env var whose value literature tools send as the polite-pool contact. */
   readonly contactEmailEnv: string | null;
+  /** [lab] name: what the web pages show as the lab's name, or null to show the machine's hostname. */
+  readonly labName: string | null;
 }
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
@@ -167,6 +170,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     datasets: Object.entries(c.datasets).map(([id, d]) => ({ id, path: resolve(d.path), cls: d.class, description: d.description })),
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
+    labName: c.lab.name ?? null,
   };
 }
 

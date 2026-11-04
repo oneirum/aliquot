@@ -3,7 +3,12 @@
  * run record. Static HTML with inline CSS and script, no build step and no
  * third-party code, so the page loads from 127.0.0.1 with nothing fetched
  * from anywhere else. Both read only the JSON routes in web.ts.
+ *
+ * where is the lab's name, or the machine's hostname, shown at the right of the header; empty shows nothing.
  */
+
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(where)}</span>` : "");
 
 const BASE_CSS = `
 :root {
@@ -32,7 +37,7 @@ a { color: var(--accent); text-underline-offset: 2px; }
 .pill.d3, .pill.r { background: var(--warn-bg); color: var(--warn-ink); }
 `;
 
-export function chatPage(): string {
+export function chatPage(where = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -45,7 +50,6 @@ header { display: flex; align-items: baseline; justify-content: space-between; p
 header .where { font-size: 13px; color: var(--muted); }
 .intro { padding: 44px 0 8px; }
 .intro h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; font-weight: 650; }
-.intro p { margin: 0; color: var(--muted); max-width: 52ch; }
 .tries { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 .try { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
 .try:active { transform: scale(0.97); }
@@ -87,16 +91,14 @@ textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent
 button.send { font: 600 14px/1 system-ui, sans-serif; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer; transition: transform 160ms var(--ease-out), opacity 160ms ease; }
 button.send:active { transform: scale(0.97); }
 button.send:disabled { opacity: 0.45; cursor: default; }
-.foot { text-align: center; font-size: 12px; color: var(--muted); margin-top: 8px; }
 @media (prefers-reduced-motion: reduce) { .turn { transition: opacity 200ms ease; } @starting-style { .turn { transform: none; } } .steps .dot { animation: none; } }
 </style>
 </head>
 <body>
 <div class="shell">
-  <header><a class="wordmark" href="/">Aliquot</a><span class="where">Runs on this machine</span></header>
+  <header><a class="wordmark" href="/">Aliquot</a>${whereSpan(where)}</header>
   <section class="intro" id="intro">
     <h1>Ask the lab</h1>
-    <p>Answers come from the lab's own documents and name the entry they used. A message with restricted data never goes to a hosted model.</p>
     <div class="tries" id="tries"></div>
   </section>
   <main id="thread" aria-live="polite"></main>
@@ -105,7 +107,6 @@ button.send:disabled { opacity: 0.45; cursor: default; }
       <textarea id="text" rows="1" placeholder="Ask a question about the lab" aria-label="Your question"></textarea>
       <button class="send" id="send" type="submit" disabled>Ask</button>
     </div>
-    <div class="foot">Every answer leaves a record you can check.</div>
   </form>
 </div>
 <script type="module">
@@ -269,7 +270,7 @@ $("text").focus();
 </html>`;
 }
 
-export function recordPage(runId: string): string {
+export function recordPage(runId: string, where = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -280,7 +281,7 @@ export function recordPage(runId: string): string {
 .shell { max-width: 960px; margin: 0 auto; padding: 0 20px 64px; }
 header { display: flex; align-items: baseline; justify-content: space-between; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
 header nav { display: flex; gap: 16px; font-size: 13px; }
-header nav a { color: var(--muted); text-decoration: none; }
+header nav a, header .where { color: var(--muted); text-decoration: none; }
 @media (hover: hover) and (pointer: fine) { header nav a:hover { color: var(--ink); } }
 .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 36px 0 18px; }
 h1 { font-size: 26px; letter-spacing: -0.02em; line-height: 1.15; margin: 0; font-weight: 650; }
@@ -360,7 +361,7 @@ th:first-child, td:first-child { padding-left: 12px; }
 </head>
 <body>
 <div class="shell">
-  <header><a class="wordmark" href="/">Aliquot</a><nav><a href="/">Ask the lab</a><span class="where" style="color:var(--muted)">Read only</span></nav></header>
+  <header><a class="wordmark" href="/">Aliquot</a><nav><a href="/">Ask the lab</a>${whereSpan(where)}</nav></header>
   <div class="top">
     <div><h1>Run record</h1><p class="when" id="when"></p></div>
     <a class="dl" id="download" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Download JSON</a>

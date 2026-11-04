@@ -83,6 +83,8 @@ export function parseDigest(text: string): string | null {
 const s = (v: string) => JSON.stringify(v);
 
 export function renderLabToml(a: InitAnswers): string {
+  // The default name is a placeholder, so it stays a comment and the pages show the hostname.
+  const [labTable, labName] = a.lab === DEFAULTS.lab ? ["# [lab]", '# name = "Your Lab"'] : ["[lab]", `name = ${s(a.lab)}`];
   const text = `# lab.toml for ${a.lab.replace(/[\r\n]/g, " ")}, written by aliquot init.
 # Every outbound destination has a placement, and the placement alone decides which data classes may go there.
 # D0 is public, D1 internal, D2 confidential, D3 restricted (participant data). lab.example.toml lists every option.
@@ -98,6 +100,9 @@ key_env = "LABH_PAYLOAD_KEY"        # the key in .env that encrypts every stored
 base_url = ${s(a.baseUrl)}
 placement = ${s(a.placement)}${" ".repeat(Math.max(1, 26 - a.placement.length))}# ${OFFERED_PLACEMENTS[a.placement]}
 # Add api_key_env = "NAME" when this endpoint needs a key; the key itself goes in the environment, never here.
+
+${labTable}
+${`${labName} `.padEnd(36)}# shown at the top of the chat and record pages; unset shows the hostname
 
 [surfaces.web]
 placement = "lab"
@@ -180,7 +185,7 @@ async function askLines(ask: Prompt, question: string): Promise<string[] | null>
 
 /** The whole interactive flow. Throws InitAborted when an answer never becomes valid; then nothing is written. */
 export async function askAnswers(ask: Prompt, out: (line: string) => void): Promise<InitAnswers> {
-  const lab = await askValid(ask, out, "Lab name (goes in a comment)", DEFAULTS.lab, (t) => t, "");
+  const lab = await askValid(ask, out, "Lab name (shown at the top of the chat and record pages)", DEFAULTS.lab, (t) => t, "");
   const baseUrl = await askValid(ask, out, "Where the local model runs (Ollama, vLLM or any OpenAI-compatible URL)", DEFAULTS.baseUrl, parseBaseUrl, "That is not an http or https URL.");
   out("Where that endpoint is placed decides the highest data class it may receive:");
   for (const [p, line] of Object.entries(OFFERED_PLACEMENTS)) out(`  ${p.padEnd(8)} ${line}`);

@@ -2,6 +2,11 @@
 
 Each release is tagged on `main`. Dates are in US Central time.
 
+## Unreleased
+
+- The chat and record pages show the lab's name at the top right, from a new `[lab] name` in `lab.toml` (`aliquot init` asks for it), or the machine's hostname when it is unset. The header labels "Runs on this machine" and "Read only", the chat page's footer line and its intro paragraph are gone.
+- The README demo is a new recording of the current pages, and the chat and record stills are retaken in light and dark.
+
 ## 0.5.0 (2026-11-03)
 
 - One `docker compose up` on Linux starts Postgres, the worker, the web door and a production build of the studio. The studio applies committed Payload migrations at start, and CI fails when the collections change without one. Ports are published on `127.0.0.1` unless `.env` sets `LABH_BIND`. [`docs/install.md`](docs/install.md) is the guide for research IT.

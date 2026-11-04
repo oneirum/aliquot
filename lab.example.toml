@@ -36,6 +36,9 @@ placement = "lab"                        # lab hardware: up to D3
 # protocol = "openai-responses"
 # api_key_env = "OPENAI_API_KEY"
 
+[lab]
+name = "Mettu Lab"                     # shown at the top of the chat and record pages; leave it out to show the hostname
+
 [surfaces.web]
 placement = "lab"
 port = 3000

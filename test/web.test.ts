@@ -82,6 +82,20 @@ test("the chat page and the record page are self-contained HTML that loads nothi
   }
 });
 
+test("both pages name the lab at the top, escaped, and carry no slogan or status label", async () => {
+  const { server: s, port: p } = await listenWeb(createWebHandler(db, deps, (line) => logged.push(line), null, "Lab <b>&</b>"), 0);
+  try {
+    for (const path of ["/", `/runs/${UUID}`]) {
+      const html = await (await fetch(`http://127.0.0.1:${p}${path}`)).text();
+      assert.ok(html.includes('<span class="where">Lab &#60;b&#62;&#38;&#60;/b&#62;</span>'), path);
+      for (const label of ["Runs on this machine", "Read only", "Every answer leaves a record", "never goes to a hosted model"]) assert.ok(!html.includes(label), `${path}: ${label}`);
+    }
+  } finally {
+    s.close();
+  }
+  assert.ok(!(await (await fetch(`${base}/`)).text()).includes('class="where"'), "no name, no label");
+});
+
 test("the record view of a run with no events yet is empty, running and intact", async () => {
   assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, startedAt: null, agent: null, outcome: "running", chain: { events: 0, firstBad: null }, summary: { ms: 0, modelCalls: 0, tokens: { input: 0, output: 0 }, toolCalls: [], entriesRetrieved: 0, refused: 0, withheld: 0 }, rows: [] } });
 });
