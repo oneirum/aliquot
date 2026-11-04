@@ -103,7 +103,7 @@ test("the service worker serves the page shell offline and never answers /runs o
       }
       return out;
     })()`)) as { path: string; body: string }[];
-    assert.deepEqual(cached.map((c) => c.path).sort(), ["/", "/icons/apple-touch-icon.png", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon.svg", "/icons/maskable-512.png", "/manifest.webmanifest"]);
+    assert.deepEqual(cached.map((c) => c.path).sort(), ["/", "/fonts/recursive.woff2", "/icons/apple-touch-icon.png", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon.svg", "/icons/maskable-512.png", "/manifest.webmanifest"]);
     for (const c of cached) assert.ok(!c.body.includes(ANSWER) && !c.body.includes("7f3a"), `${c.path} holds answer text`);
 
     own.server.closeAllConnections();

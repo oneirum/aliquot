@@ -1,9 +1,10 @@
 /**
- * The pages the web door serves: the member chat page, the list of runs and
- * each run's record. Static HTML with inline CSS and script, no build step
- * and no third-party code, so the page loads from 127.0.0.1 with nothing
- * fetched from anywhere else. The chat page reads only the JSON routes in
- * web.ts; the runs list and the record arrive with their data in the page.
+ * The pages the web door serves besides the chat page (web-chat.ts): the list
+ * of runs and each run's record, and the header and base styles all three
+ * share. Static HTML with inline CSS and script, no build step and no
+ * third-party code, so the page loads from 127.0.0.1 with nothing fetched
+ * from anywhere else. The runs list and the record arrive with their data in
+ * the page.
  *
  * where is the lab's name, or the machine's hostname, shown at the right of the header; empty shows nothing.
  */
@@ -17,331 +18,56 @@ const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(
 const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
 type Page = "ask" | "runs" | "record";
-function header(current: Page, where: string, extra = ""): string {
+export function header(current: Page, where: string, extra = ""): string {
   const link = (page: Page, href: string, text: string) => `<a href="${href}"${page === current ? ' aria-current="page"' : ""}>${text}</a>`;
   return `<header><a class="wordmark" href="/">Aliquot</a><nav>${extra}${link("ask", "/", "Ask")}${link("runs", "/runs", "Runs")}${whereSpan(where)}</nav></header>`;
 }
 
-const BASE_CSS = `
+export const BASE_CSS = `
+@font-face { font-family: "Recursive"; src: url("/fonts/recursive.woff2") format("woff2"); font-weight: 300 700; font-display: swap; }
 :root {
   color-scheme: light dark;
-  --bg: ${THEME.light}; --surface: #ffffff; --ink: #1d1c1a; --muted: #6b6862; --line: #e7e4de;
-  --accent: #2f5d50; --accent-ink: #ffffff; --quiet: #f3f1ec;
-  --warn-bg: #fdf3e1; --warn-line: #ecd3a4; --warn-ink: #6b4a12;
-  --ok: #2f6b45; --bad: #9b2c2c;
+  --bg: ${THEME.light}; --surface: #ffffff; --ink: #1c1b19; --ink-2: #4d4a45; --muted: #6a665f; --line: #e3e0d9; --rule: rgb(28 27 25 / 0.05);
+  --accent: #2f5d50; --accent-ink: #ffffff; --quiet: #f2f0eb;
+  --held: #0f5c45; --broken: #b3480f;
+  --warn-bg: var(--quiet); --warn-line: var(--line); --warn-ink: var(--ink);
+  --ok: var(--held); --bad: var(--broken);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "Recursive", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Recursive", ui-monospace, "SF Mono", Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: ${THEME.dark}; --surface: #1d1d1b; --ink: #ecebe7; --muted: #9c9991; --line: #2e2d2a;
-    --accent: #8cc5b0; --accent-ink: #10201b; --quiet: #242422;
-    --warn-bg: #352812; --warn-line: #6a5226; --warn-ink: #f0d7a6;
-    --ok: #8fd1a5; --bad: #f0a3a3;
+    --bg: ${THEME.dark}; --surface: #1c1c1a; --ink: #ecebe6; --ink-2: #c2bfb7; --muted: #9a968e; --line: #2f2e2b; --rule: rgb(236 235 230 / 0.04);
+    --accent: #8cc5b0; --accent-ink: #10201b; --quiet: #22221f;
+    --held: #74d1aa; --broken: #f08c55;
   }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
-body { background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
-a { color: var(--accent); text-underline-offset: 2px; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+code, pre, kbd, .pill, dd, td.seq, td.t, td.ev, td.agent, .stat .s { font-variation-settings: "MONO" 1; }
+a { color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
-header nav { display: flex; align-items: baseline; gap: 16px; font-size: 13.5px; }
+header nav { display: flex; align-items: baseline; gap: 16px; font-size: 14px; }
 header nav a, header .where, header nav button { color: var(--muted); text-decoration: none; }
 header nav a[aria-current] { color: var(--ink); }
 header nav button { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 header nav button[hidden] { display: none; }
 header .where { padding-left: 16px; border-left: 1px solid var(--line); }
 @media (hover: hover) and (pointer: fine) { header nav a:hover, header nav button:hover { color: var(--ink); } }
-.wordmark { font-weight: 650; letter-spacing: -0.01em; font-size: 15px; color: var(--ink); text-decoration: none; }
-.btn { display: inline-flex; align-items: center; gap: 7px; font: 600 13.5px/1 system-ui, sans-serif; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; text-decoration: none; cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
+.wordmark { font-weight: 600; letter-spacing: -0.01em; font-size: 16px; color: var(--ink); text-decoration: none; }
+.btn { display: inline-flex; align-items: center; gap: 7px; font: 500 13.5px/1 var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; text-decoration: none; cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
 .btn:active { transform: scale(0.97); }
 .btn svg { width: 14px; height: 14px; }
 .btn[hidden] { display: none; }
 @media (hover: hover) and (pointer: fine) { .btn:hover { border-color: var(--muted); } }
 .mark { font-size: 0.85em; margin-right: 6px; }
 @media print { header nav, .btn { display: none; } body { background: #fff; color: #000; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-.pill { display: inline-block; font: 600 11px/1 var(--mono); letter-spacing: 0.02em; padding: 4px 6px; border-radius: 5px; background: var(--quiet); color: var(--muted); vertical-align: 1px; }
-.pill.d3, .pill.r { background: var(--warn-bg); color: var(--warn-ink); }
+.pill { display: inline-block; font: 500 11px/1 var(--mono); letter-spacing: 0.02em; padding: 4px 6px; border-radius: 4px; background: var(--quiet); color: var(--ink-2); vertical-align: 1px; }
+.pill.d3, .pill.r { background: var(--ink); color: var(--bg); }
 `;
-
-export function chatPage(where = ""): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ask the lab · Aliquot</title>
-${APP_HEAD}
-<style>${BASE_CSS}
-.shell { max-width: 720px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; padding: 0 20px; }
-.intro { padding: 44px 0 8px; }
-.intro h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; font-weight: 650; }
-.tries { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
-.try { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
-.try:active { transform: scale(0.97); }
-@media (hover: hover) and (pointer: fine) { .try:hover { border-color: var(--muted); } }
-.install { margin: 20px 0 0; font-size: 13.5px; color: var(--muted); }
-@media (display-mode: standalone) { .install { display: none; } }
-#thread { flex: 1; padding: 20px 0 24px; display: flex; flex-direction: column; gap: 22px; }
-.turn { display: flex; flex-direction: column; gap: 10px; opacity: 1; transform: none; transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); }
-@starting-style { .turn { opacity: 0; transform: translateY(6px); } }
-.restoring .turn { transition: none; }
-.q { align-self: flex-end; max-width: 80%; background: var(--quiet); border-radius: 14px 14px 4px 14px; padding: 9px 14px; white-space: pre-wrap; }
-.a { max-width: 92%; }
-.a > * { margin: 0 0 10px; }
-.a > :last-child { margin-bottom: 0; }
-.a p { white-space: pre-line; }
-.a ul, .a ol { padding-left: 1.3em; }
-.a li { margin: 3px 0; padding-left: 2px; }
-.a li::marker { color: var(--muted); }
-.a .h { font-weight: 650; letter-spacing: -0.01em; margin-top: 16px; }
-.a > .h:first-child { margin-top: 0; }
-.a pre { font: 12.5px/1.5 var(--mono); background: var(--quiet); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
-.a strong { font-weight: 650; }
-.a code { font: 12.5px var(--mono); background: var(--quiet); padding: 1px 5px; border-radius: 4px; }
-.steps { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.steps .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.25; } }
-.steps code { font: 12px var(--mono); background: var(--quiet); padding: 2px 6px; border-radius: 4px; color: var(--ink); }
-.meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
-.source { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 4px 9px; color: var(--ink); }
-.source b { font-weight: 600; font-size: 12px; color: var(--muted); }
-.source code { font: 12.5px var(--mono); }
-.facts { font-variant-numeric: tabular-nums; }
-.banner { border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px; max-width: 92%; }
-.banner strong { display: block; font-weight: 650; margin-bottom: 2px; }
-.banner p { margin: 0; font-size: 14.5px; }
-.banner .pill { box-shadow: inset 0 0 0 1px var(--warn-line); }
-.err { color: var(--bad); font-size: 14px; }
-form { position: sticky; bottom: 0; padding: 12px 0 20px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
-.box { display: flex; gap: 8px; align-items: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 14px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.04); }
-.box:focus-within { border-color: var(--muted); }
-textarea:focus-visible { outline: none; }
-textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; padding: 6px 0; max-height: 160px; }
-button.send { font: 600 14px/1 system-ui, sans-serif; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer; transition: transform 160ms var(--ease-out), opacity 160ms ease; }
-button.send:active { transform: scale(0.97); }
-button.send:disabled { opacity: 0.45; cursor: default; }
-@media (prefers-reduced-motion: reduce) { .turn { transition: opacity 200ms ease; } @starting-style { .turn { transform: none; } } .steps .dot { animation: none; } }
-</style>
-</head>
-<body>
-<div class="shell">
-  ${header("ask", where, '<button type="button" id="fresh" hidden>New thread</button>')}
-  <section class="intro" id="intro">
-    <h1>Ask the lab</h1>
-    <div class="tries" id="tries"></div>
-    <p class="install" id="install">To open Aliquot like an app, choose Add to Home Screen or Install in the browser menu.</p>
-  </section>
-  <main id="thread" aria-live="polite"></main>
-  <form id="ask">
-    <div class="box">
-      <textarea id="text" rows="1" placeholder="Ask a question about the lab" aria-label="Your question"></textarea>
-      <button class="send" id="send" type="submit" disabled>Ask</button>
-    </div>
-  </form>
-</div>
-<script type="module">
-const $ = (id) => document.getElementById(id);
-const params = new URLSearchParams(location.search);
-const user = params.get("user") || "member-1";
-const channel = params.get("channel") || undefined;
-// The thread lives in this tab's sessionStorage, so a reload or a visit to a record and back keeps it.
-const KEY = "aliquot.thread." + (channel || "") + "." + user;
-const blank = () => ({ v: 1, thread: "web-" + crypto.randomUUID(), n: 0, turns: [] });
-let state = (() => { try { const s = JSON.parse(sessionStorage.getItem(KEY) || "null"); return s && s.v === 1 && Array.isArray(s.turns) ? s : blank(); } catch { return blank(); } })();
-const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(state)); } catch {} $("fresh").hidden = !state.turns.length; };
-
-for (const q of (params.get("try") || "").split("|").filter(Boolean)) {
-  const b = document.createElement("button");
-  b.type = "button"; b.className = "try"; b.textContent = q;
-  b.onclick = () => { $("text").value = q; sync(); $("ask").requestSubmit(); };
-  $("tries").append(b);
-}
-
-// Safari keeps Add to Home Screen behind Share; iPadOS reports itself as a Mac with a touch screen.
-if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) $("install").textContent = "To open Aliquot from your Home Screen, tap Share, then Add to Home Screen.";
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-
-const sync = () => {
-  const t = $("text");
-  t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px";
-  $("send").disabled = !t.value.trim();
-};
-$("text").addEventListener("input", sync);
-$("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("ask").requestSubmit(); } });
-
-const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text !== undefined) x.textContent = text; return x; };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// Models answer in Markdown. Paragraphs, lists, headings and code blocks become elements, and so do bold,
-// italic and inline code; every piece of text goes in as text, so nothing is parsed as HTML.
-function inline(parent, text) {
-  for (const part of text.split(/(\\*\\*[^*\\n]+\\*\\*|\\*[^*\\s][^*\\n]*\\*|\`[^\`\\n]+\`)/)) {
-    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) parent.append(el("strong", "", part.slice(2, -2)));
-    else if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) parent.append(el("em", "", part.slice(1, -1)));
-    else if (part.length > 2 && part.startsWith("\`") && part.endsWith("\`")) parent.append(el("code", "", part.slice(1, -1)));
-    else if (part) parent.append(part);
-  }
-  return parent;
-}
-function answer(text) {
-  const a = el("div", "a");
-  const lines = text.replace(/\\r\\n/g, "\\n").split("\\n");
-  let para = [], list = null;
-  const flush = () => { if (para.length) a.append(inline(el("p"), para.join("\\n"))); para = []; list = null; };
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^\\s*\`\`\`/.test(line)) {
-      flush();
-      const code = [];
-      while (++i < lines.length && !/^\\s*\`\`\`/.test(lines[i])) code.push(lines[i]);
-      a.append(el("pre", "", code.join("\\n")));
-      continue;
-    }
-    const h = /^\\s*#{1,6}\\s+(.*)$/.exec(line);
-    const li = /^\\s*(?:([-*•])|(\\d+)[.)])\\s+(.*)$/.exec(line);
-    if (h) { flush(); a.append(inline(el("div", "h"), h[1])); }
-    else if (li) {
-      if (para.length) { a.append(inline(el("p"), para.join("\\n"))); para = []; }
-      const tag = li[1] ? "ul" : "ol";
-      if (!list || list.tagName.toLowerCase() !== tag) { list = el(tag); if (li[2] && li[2] !== "1") list.start = Number(li[2]); a.append(list); }
-      list.append(inline(el("li"), li[3]));
-    }
-    else if (!line.trim()) { if (para.length) flush(); }
-    else if (list && /^\\s{2,}\\S/.test(line)) list.lastChild.append(" " + line.trim());
-    else { list = null; para.push(line); }
-  }
-  flush();
-  return a;
-}
-const REFUSAL = {
-  "class-above-ceiling": (r) => "This message is " + r.payload + ", and this agent's model may receive at most " + r.ceiling + ".",
-  "destination-receives-nothing": (r) => "This destination may not hold " + r.payload + " data at all.",
-  "review-confidential-refused": () => "Review-confidential content is refused by lab policy.",
-  "review-confidential-needs-lab": () => "Review-confidential content may only go to models on lab hardware.",
-  "host-not-declared": (r) => "Host " + r.host + " is not in the tool's egress list.",
-  "covered-model": (r) => r.modelId + " is kept by its vendor on every route, so it may not run on a " + r.placement + " endpoint.",
-};
-
-// One quiet line from the run's record: what it read and how long it took.
-async function facts(runId) {
-  try {
-    const v = await (await fetch("/runs/" + runId + "/view")).json();
-    const s = v.summary, parts = [];
-    if (s.entriesRetrieved) parts.push("read " + s.entriesRetrieved + (s.entriesRetrieved === 1 ? " entry" : " entries"));
-    const tools = s.toolCalls.reduce((n, t) => n + t.calls, 0);
-    if (tools) parts.push(tools + (tools === 1 ? " tool call" : " tool calls"));
-    parts.push(s.ms < 1000 ? s.ms + " ms" : (s.ms / 1000).toFixed(1) + " s");
-    const f = el("span", "facts", parts.join(" \u00b7 "));
-    return f;
-  } catch { return null; }
-}
-
-function recordLink(runId) { const a = el("a", "", "Record"); a.href = "/runs/" + runId; return a; }
-
-function turnOf(text) {
-  $("intro").hidden = true;
-  const turn = el("div", "turn");
-  turn.append(el("div", "q", text));
-  $("thread").append(turn);
-  return turn;
-}
-function stepsOf(turn) {
-  const steps = el("div", "steps"); steps.append(el("span", "dot"), el("span", "", "Reading the lab's documents"));
-  turn.append(steps);
-  return steps;
-}
-
-async function ask(text) {
-  const t = { q: text };
-  state.turns.push(t); save();
-  const turn = turnOf(text), steps = stepsOf(turn);
-  turn.scrollIntoView({ block: "end", behavior: "smooth" });
-  const fail = (msg) => { t.error = msg; save(); steps.replaceWith(el("div", "err", msg)); };
-  let body;
-  try {
-    const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: state.thread + "-" + (state.n++), text, user }) });
-    body = await res.json();
-  } catch { return fail("The web door did not answer. Check that it is running, then ask again."); }
-  if (body.t === "refused") { t.notice = body.userFacing; save(); steps.replaceWith(banner("Not sent", body.userFacing)); return; }
-  if (body.t !== "enqueued") return fail(body.error || "The message was not accepted.");
-  t.runId = body.runId; save();
-  await follow(turn, steps, body.runId, true);
-}
-
-async function follow(turn, steps, runId, scroll) {
-  const seen = new Set();
-  for (let i = 0; i < 600; i++) {
-    let events;
-    try { events = await (await fetch("/runs/" + runId + "/events")).json(); }
-    catch { steps.replaceWith(el("div", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); return; }
-    for (const e of events) {
-      if (e.event.t === "tool.requested" && !seen.has(e.seq)) { seen.add(e.seq); steps.append(el("code", "", e.event.tool)); }
-    }
-    const finished = events.find((e) => e.event.t === "run.finished");
-    if (finished) {
-      const replies = await (await fetch("/replies?runId=" + runId)).json();
-      steps.remove();
-      const refused = events.find((e) => e.event.t === "egress.refused");
-      const withheld = events.filter((e) => e.event.t === "tool.withheld").length;
-      if (refused) {
-        const r = refused.event.refusal;
-        const why = (REFUSAL[r.code] || (() => "The egress check refused it."))(r);
-        const b = banner("Refused: restricted data", why + " Nothing was sent. The refusal is in the record.");
-        b.append(el("div", "meta")); b.lastChild.append(pillOf(refused.event.payload), recordLink(runId));
-        turn.append(b);
-      } else {
-        const reply = replies.find((x) => x.kind === "reply") || replies[0];
-        const raw = reply ? reply.text : "(no reply)";
-        const m = /\\n\\s*Source:\\s*(.+)\\s*$/.exec(raw);
-        turn.append(answer(m ? raw.slice(0, m.index) : raw));
-        const meta = el("div", "meta");
-        if (m) { const s = el("span", "source"); s.append(el("b", "", "Source"), el("code", "", m[1].trim())); meta.append(s); }
-        if (withheld) meta.append(el("span", "", withheld + (withheld === 1 ? " tool result" : " tool results") + " withheld from the model"));
-        const sum = await facts(runId);
-        if (sum) meta.append(sum);
-        meta.append(recordLink(runId));
-        turn.append(meta);
-      }
-      if (scroll) turn.scrollIntoView({ block: "end", behavior: "smooth" });
-      return;
-    }
-    await sleep(300);
-  }
-  steps.replaceWith(el("div", "err", "No answer after three minutes. Check that the worker is running, then reload the page."));
-}
-
-function pillOf(cls) { return el("span", "pill " + String(cls).toLowerCase(), cls); }
-function banner(title, text) { const b = el("div", "banner"); b.setAttribute("role", "status"); b.append(el("strong", "", title), el("p", "", text)); return b; }
-
-$("ask").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const text = $("text").value.trim();
-  if (!text) return;
-  $("text").value = ""; sync();
-  ask(text);
-});
-$("fresh").addEventListener("click", () => {
-  state = blank(); save();
-  $("thread").replaceChildren();
-  $("intro").hidden = false;
-  $("text").focus();
-});
-
-document.documentElement.classList.add("restoring");
-for (const t of state.turns) {
-  const turn = turnOf(t.q);
-  if (t.notice) turn.append(banner("Not sent", t.notice));
-  else if (t.error) turn.append(el("div", "err", t.error));
-  else if (t.runId) follow(turn, stepsOf(turn), t.runId, false);
-}
-save();
-requestAnimationFrame(() => { document.documentElement.classList.remove("restoring"); if (state.turns.length) scrollTo(0, document.body.scrollHeight); });
-$("text").focus();
-</script>
-</body>
-</html>`;
-}
 
 const PAGE_CSS = `
 .shell { max-width: 960px; margin: 0 auto; padding: 0 20px 64px; }

@@ -13,19 +13,25 @@ import { fileURLToPath } from "node:url";
 /** The page background in each theme, which is also the colour of the bar an installed app sits under. */
 export const THEME = { light: "#fbfaf8", dark: "#151514" } as const;
 
-const ICON_TYPES: Record<string, string> = {
-  "icon.svg": "image/svg+xml",
-  "icon-192.png": "image/png",
-  "icon-512.png": "image/png",
-  "maskable-512.png": "image/png",
-  "apple-touch-icon.png": "image/png",
-};
+/** What /icons/ and /fonts/ serve, by file name. The typeface is Recursive (OFL, assets/fonts/OFL.txt), cut to its MONO and weight axes. */
+const ASSET_TYPES = {
+  icons: {
+    "icon.svg": "image/svg+xml",
+    "icon-192.png": "image/png",
+    "icon-512.png": "image/png",
+    "maskable-512.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+  },
+  fonts: { "recursive.woff2": "font/woff2" },
+} as const satisfies Record<string, Record<string, string>>;
+export type AssetDir = keyof typeof ASSET_TYPES;
 
 /** What the worker caches on install, and the only paths it ever answers from its cache. */
-export const APP_SHELL = ["/", "/manifest.webmanifest", ...Object.keys(ICON_TYPES).map((name) => `/icons/${name}`)];
+export const APP_SHELL = ["/", "/manifest.webmanifest", ...Object.entries(ASSET_TYPES).flatMap(([dir, types]) => Object.keys(types).map((name) => `/${dir}/${name}`))];
 
 /** Every page links these. The lab's name rides in the manifest, so the head is the same for every lab. */
 export const APP_HEAD = `<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preload" href="/fonts/recursive.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="Aliquot">
@@ -69,13 +75,14 @@ self.addEventListener("fetch", (e) => {
 
 /** A path, not new URL(..., import.meta.url), for the reason db.ts gives: the studio's bundler rewrites that form. */
 const assets = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets");
-const icons = new Map<string, Buffer>();
+const read = new Map<string, Buffer>();
 
-/** An icon by file name, read once; null for a name that is not one. */
-export function appIcon(name: string): { type: string; body: Buffer } | null {
-  if (!Object.hasOwn(ICON_TYPES, name)) return null;
-  const type = ICON_TYPES[name]!;
-  let body = icons.get(name);
-  if (!body) icons.set(name, (body = readFileSync(join(assets, name))));
-  return { type, body };
+/** An icon or font by file name, read once; null for a name that is not one. Icons live in assets/, fonts in assets/fonts/. */
+export function appAsset(dir: AssetDir, name: string): { type: string; body: Buffer } | null {
+  const types: Record<string, string> = ASSET_TYPES[dir];
+  if (!Object.hasOwn(types, name)) return null;
+  const path = dir === "icons" ? join(assets, name) : join(assets, dir, name);
+  let body = read.get(path);
+  if (!body) read.set(path, (body = readFileSync(path)));
+  return { type: types[name]!, body };
 }

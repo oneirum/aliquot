@@ -10,7 +10,7 @@
  *   GET  /runs/:id/events                                    -> the run record (events, no bodies)
  *   GET  /runs/:id/view                                      -> the record as the record page shows it, chain recomputed
  *   GET  /                                                   -> the member chat page
- *   GET  /manifest.webmanifest, /sw.js, /icons/:name         -> what installs the chat page as an app (web-app.ts)
+ *   GET  /manifest.webmanifest, /sw.js, /icons/:name, /fonts/:name -> what installs the chat page as an app, and its typeface (web-app.ts)
  *   GET  /runs?show=refusals|failed                          -> the newest runs, optionally only those with a refusal or that failed
  *   GET  /runs/:id                                           -> the read-only record page
  *   POST /studio/<op>  {actor, ...}                          -> the studio's reads and writes of core (studio-door.ts), studio token only
@@ -43,8 +43,9 @@ import { intake, type IntakeDeps, type Surface } from "../frontdoor.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
 import { recordView } from "../record-view.ts";
 import type { LabConfig, SurfaceConfig, SurfaceKind, TokenSurfaceConfig } from "../config.ts";
-import { chatPage, recordPage, runsPage, type RunFilter, type RunListRow } from "./web-pages.ts";
-import { appIcon, appManifest, SERVICE_WORKER } from "./web-app.ts";
+import { chatPage } from "./web-chat.ts";
+import { recordPage, runsPage, type RunFilter, type RunListRow } from "./web-pages.ts";
+import { appAsset, appManifest, SERVICE_WORKER, type AssetDir } from "./web-app.ts";
 
 export const WEB_SURFACE = "web" as SurfaceId;
 
@@ -256,11 +257,11 @@ export function createWebHandler(
       if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(req, res, chatPage(where));
       if (req.method === "GET" && url.pathname === "/manifest.webmanifest") return respond(req, res, 200, { "content-type": "application/manifest+json", "cache-control": "no-cache" }, JSON.stringify(appManifest(where)));
       if (req.method === "GET" && url.pathname === "/sw.js") return respond(req, res, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" }, SERVICE_WORKER);
-      const iconPath = /^\/icons\/([^/]+)$/.exec(url.pathname);
-      const icon = req.method === "GET" && iconPath ? appIcon(iconPath[1]!) : null;
-      if (icon) {
-        res.writeHead(200, { "content-type": icon.type, "content-length": String(icon.body.length), "cache-control": "public, max-age=86400" });
-        return void res.end(icon.body);
+      const assetPath = /^\/(icons|fonts)\/([^/]+)$/.exec(url.pathname);
+      const asset = req.method === "GET" && assetPath ? appAsset(assetPath[1] as AssetDir, assetPath[2]!) : null;
+      if (asset) {
+        res.writeHead(200, { "content-type": asset.type, "content-length": String(asset.body.length), "cache-control": "public, max-age=86400" });
+        return void res.end(asset.body);
       }
       if (req.method === "GET" && url.pathname === "/runs") {
         const show = url.searchParams.get("show");
