@@ -30,7 +30,7 @@ Exit codes: 0 answered, 1 refused or not answered, 2 a usage problem or a door t
 
 `--ceiling D0|D1|D2|D3` is for a caller that keeps its own copy of the answer. An answer whose class ranks above the ceiling comes back as `withheld: true` with no text, and the reader opens the record instead. The door has already applied its own surface's placement. The ceiling is a second, stricter limit, set by the caller.
 
-The web door has no sign-in yet. Until the sign-on release (0.8), it trusts the member id it is given, and it stays on `127.0.0.1` like the chat page. So `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`).
+The web door has no sign-in yet. Until the sign-on release (0.7), it trusts the member id it is given, and it stays on `127.0.0.1` like the chat page. So `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`).
 
 ## tmux
 
