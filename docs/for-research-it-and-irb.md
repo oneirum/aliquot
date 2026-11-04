@@ -130,7 +130,8 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 ## Not covered yet
 
 - **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A lab must add its
-  own participant id formats to `lab.toml`.
+  own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,
+  and refuses a pattern that matches ordinary text or no sample id.
 - **No sign-on.** Keep the web door on the machine until sign-on lands.
 - **No key rotation, no per-class keys, no retention sweep.**
 - **The version hash does not yet cover the system prompt text that the core builds around an agent's instructions.**

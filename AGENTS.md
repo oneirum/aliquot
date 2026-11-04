@@ -6,8 +6,9 @@ Instructions for a coding agent working in this repository.
 
 1. Check the tools: `node -v` must print v26 or later, `pnpm -v` must print 10, and `docker info` must succeed.
 2. Install dependencies: `pnpm install --frozen-lockfile`. Then `pnpm run doctor` repeats step 1 and checks the ports and the sandbox image; it prints `FAIL` lines with a fix and exits 1 if one is missing.
-3. Start Postgres: `docker compose up -d postgres`. If port 5432 is taken, export `LABH_PG_PORT=55433` (any free port) before this command and before every `pnpm` command below.
-4. Verify: `pnpm typecheck`, then `pnpm test`, then `pnpm lab0`. Each must pass before you change anything.
+3. For a lab install, not the checks: `pnpm aliquot:init` writes `config/lab.toml` from a few questions and `.env` with new secrets when it is missing. It never rewrites `.env`. `pnpm aliquot:init --yes --sample <id>` takes the defaults without asking. It is the one binary command with write access, and only to those two files.
+4. Start Postgres: `docker compose up -d postgres`. If port 5432 is taken, export `LABH_PG_PORT=55433` (any free port) before this command and before every `pnpm` command below.
+5. Verify: `pnpm typecheck`, then `pnpm test`, then `pnpm lab0`. Each must pass before you change anything.
 
 No API key is needed. The checks use scripted fake models. Only the last check of `pnpm slice1` and `pnpm unit3` calls Ollama; pass `--skip-ollama` when Ollama is not running.
 
