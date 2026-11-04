@@ -1,7 +1,7 @@
 /**
  * The web door's routes for the studio. The studio holds no payload key and
- * no handle on core's tables, so every read and write it makes of core's
- * state comes here: POST /studio/<op> with the [surfaces.studio] token, and a
+ * core gives it no database handle, so every read and write it makes of
+ * core's state comes here: POST /studio/<op> with the [surfaces.studio] token, and a
  * JSON body of the signed-in actor and the op's own fields. The studio's
  * accounts are the lab's roles until sign-on, so its token is the one
  * credential the door takes an actor and a role from. Every role and class
@@ -121,7 +121,7 @@ const OPS: Record<StudioOpName, Op> = {
     if (!mayEdit(actor.role)) return refuse(403, "Authors and above read knowledge base entries in the studio.");
     const manifest = await loadManifest(db, store.address, b.snapshot as SnapshotId);
     if (!manifest) return refuse(404, "No snapshot has that id.");
-    // A D3 body never reaches the studio's process: the studio runs outside the seal.
+    // No D3 entry text reaches the studio's process, which runs outside the seal.
     if (rank(manifest.cls) >= rank(RESTRICTED)) return refuse(403, `The studio does not show ${manifest.cls} entries.`);
     const entry = (await storedSnapshots(db, store).load(manifest.id))?.entries.find((e) => e.path === b.path);
     if (!entry) return refuse(404, `Snapshot ${manifest.id.slice(0, 12)} has no entry ${b.path}.`);

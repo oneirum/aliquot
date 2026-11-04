@@ -4,7 +4,8 @@
  * The studio is a Next app, and Next cannot run under the permission model
  * (it starts child processes and worker threads and loads native addons), so
  * nothing in its process is sealed. That process therefore holds no payload
- * key, no handle on core's tables, no model gateway and no tool runner. Its
+ * key, no model gateway and no tool runner, and core gives it no database
+ * handle (Payload's own connection reaches the same database). Its
  * reads and writes of core go to the web door's /studio routes with
  * [surfaces.studio]'s token (studioCall in door-client.ts), and the door runs
  * the same publish, intake, source-reading and KB publish code the kb

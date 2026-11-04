@@ -51,6 +51,7 @@ if [ -f "$root/.env" ]; then set -a; . "$root/.env"; set +a; fi
 env_args=(-e "DATABASE_URL=$DATABASE_URL" -e "LABH_CONFIG=$config" -e "NODE_NO_WARNINGS=1")
 [ -n "${LABH_PAYLOAD_KEY:-}" ] && env_args+=(-e "LABH_PAYLOAD_KEY=$LABH_PAYLOAD_KEY")
 [ -n "${PAYLOAD_SECRET:-}" ] && env_args+=(-e "PAYLOAD_SECRET=$PAYLOAD_SECRET")
+[ -n "${ALIQUOT_STUDIO_TOKEN:-}" ] && env_args+=(-e "ALIQUOT_STUDIO_TOKEN=$ALIQUOT_STUDIO_TOKEN")
 
 node_bin="node --disable-warning=ExperimentalWarning --permission '--allow-fs-read=*' --allow-net"
 web_port_arg=""
