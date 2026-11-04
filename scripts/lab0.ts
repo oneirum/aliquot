@@ -56,7 +56,8 @@ const agentModel = await startFakeModel("scripted-1", "search-then-answer");
 const hosted = await startFakeModel("hosted-2", "answer");
 
 const payloadKey = randomBytes(32).toString("hex");
-const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey };
+const acpToken = randomBytes(32).toString("hex");
+const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken };
 const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
@@ -77,6 +78,11 @@ function config(name: string, agentPath: string): string {
     "[surfaces.web]",
     'placement = "lab"',
     "port = 0",
+    // zdr shows D1 at most, and the handbook is D1, so check G's tokened ask still gets the cited answer.
+    "[surfaces.acp]",
+    'kind = "acp"',
+    'placement = "zdr"',
+    'token_env = "LAB0_ACP_TOKEN"',
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['${prereg.restricted.pattern}']`,
@@ -229,13 +235,14 @@ try {
     return `${rows.length}/${rows.length} answered, retrieved and named the pre-registered entry; ranked first in ${rank1}/${rows.length}`;
   });
 
-  await check("check G: aliquot ask --json, the contract T3 Code and tmux use, gets the same cited answer and a record whose chain verifies", async () => {
+  await check("check G: aliquot ask --json with the acp surface's token, the contract T3 Code and tmux use, gets the same cited answer and a record whose chain verifies", async () => {
     assert.ok(published, "check 1 published a snapshot");
     await ps.stopAll();
     const web = await ps.startWeb(cfgHandbook);
     ps.startWorker(cfgHandbook, "WG");
     const q = prereg.inDocument[0]!;
-    const cli = ps.start("ask-G", "aliquot.ts", ["ask", "--door", web.base, "--user", "member-1", "--json", q.question]);
+    const asker = processes(root, work, { PATH: childEnv.PATH!, HOME: childEnv.HOME!, ALIQUOT_SURFACE_TOKEN: acpToken });
+    const cli = asker.start("ask-G", "aliquot.ts", ["ask", "--door", web.base, "--user", "member-1", "--json", q.question]);
     const { code } = await cli.exit;
     assert.equal(code, 0, cli.out.join(""));
     // out holds stderr too (Node's warnings); the events are the JSON lines.
@@ -246,9 +253,11 @@ try {
     assert.equal(finished.recordUrl, `${web.base}/runs/${finished.runId}`);
     const recorded = await loadEvents(db, finished.runId as RunId);
     assert.equal(verifyChain(recorded), null);
+    const surface = recorded[0]?.event.t === "run.started" ? recorded[0].event.surface : null;
+    assert.equal(surface, "acp", "the door took the token for the acp surface");
     assert.ok(searchesOf(recorded).some((r) => r.entries.includes(published!.entries[q.expected]!)), "the run retrieved the pre-registered entry");
     await ps.stopAll();
-    return `${events.map((e) => e.t).join(", ")}; answer names ${q.expected}; record ${finished.runId.slice(0, 8)} chain verified`;
+    return `${events.map((e) => e.t).join(", ")}; surface ${surface}; answer names ${q.expected}; record ${finished.runId.slice(0, 8)} chain verified`;
   });
 
   await check("check B: questions outside the documents get the coverage-gap behaviour", async () => {
