@@ -6,10 +6,16 @@
  *
  *   node scripts/compose-ask.ts ask <base-url>          prints the run id
  *   node scripts/compose-ask.ts verify <base-url> <run-id>
+ *
+ * verify also decrypts the run's stored answer with LABH_PAYLOAD_KEY, so a
+ * restore that brought back the rows without the right key fails here.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
+import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
+import { connect } from "../packages/core/src/db.ts";
+import { createPayloadStore, loadEvents, type RunId } from "../packages/core/src/record.ts";
 
 const [mode, base, given] = process.argv.slice(2);
 assert.ok((mode === "ask" || (mode === "verify" && given)) && base, "usage: compose-ask.ts ask <base-url> | verify <base-url> <run-id>");
@@ -45,5 +51,15 @@ const events = (await json(`/runs/${runId}/events`)).body as { event: { t: strin
 const retrieved = events.flatMap((e) => (e.event.t === "tool.completed" ? (e.event.retrieved ?? []).flatMap((r) => r.entries) : []));
 assert.ok(retrieved.length > 0, "the run retrieved no knowledge base entry");
 
-if (mode === "ask") console.log(runId);
-else console.log(`run ${runId}: answer cites ${q.expected}, ${events.length} events, chain intact`);
+if (mode === "ask") {
+  console.log(runId);
+} else {
+  const db = connect(process.env.DATABASE_URL!);
+  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(process.env.LABH_PAYLOAD_KEY ?? "", "hex"), keyId: "k1" });
+  const finished = (await loadEvents(db, runId as RunId)).find((e) => e.event.t === "run.finished")?.event;
+  assert.ok(finished && finished.t === "run.finished" && finished.answer, "the run has no stored answer");
+  const body = await store.get(finished.answer);
+  await db.end();
+  assert.ok(!("redacted" in body) && String(body.value).includes(q.expected), "the stored answer does not decrypt to the cited answer with this payload key");
+  console.log(`run ${runId}: answer cites ${q.expected}, ${events.length} events, chain intact, stored answer decrypts`);
+}

@@ -1,0 +1,26 @@
+# The compose check's lab: the lab0 handbook agent on the scripted fakes (compose.check.yaml). Not a lab deployment.
+[database]
+url_env = "DATABASE_URL"
+
+[store]
+placement = "lab"
+key_env = "LABH_PAYLOAD_KEY"
+
+[endpoints.local]
+base_url = "http://fake-model:8101/v1"
+placement = "lab"
+
+[endpoints.agentlab]
+base_url = "http://fake-model:8102/v1"
+placement = "lab"
+
+[surfaces.web]
+placement = "lab"
+port = 3000
+
+[policy]
+review_confidential = "refuse"
+participant_id_patterns = ['\bP-\d{5}\b']
+
+[agents]
+fixtures = ["agent.json"]

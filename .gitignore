@@ -4,6 +4,9 @@ dist/
 .env
 .env.*
 lab.toml
+!deploy/check/lab.toml
+config/
+backups/
 !lab.example.toml
 .DS_Store
 .audit/
