@@ -82,6 +82,9 @@ export function parseDigest(text: string): string | null {
 
 const s = (v: string) => JSON.stringify(v);
 
+/** The env var init names as [surfaces.acp] token_env, and writes into a new .env. */
+export const ACP_TOKEN_ENV = "ALIQUOT_ACP_TOKEN";
+
 export function renderLabToml(a: InitAnswers): string {
   // The default name is a placeholder, so it stays a comment and the pages show the hostname.
   const [labTable, labName] = a.lab === DEFAULTS.lab ? ["# [lab]", '# name = "Your Lab"'] : ["[lab]", `name = ${s(a.lab)}`];
@@ -107,6 +110,13 @@ ${`${labName} `.padEnd(36)}# shown at the top of the chat and record pages; unse
 [surfaces.web]
 placement = "lab"
 port = ${a.port}                        # the web door, on this machine only until sign-on lands
+
+# aliquot acp for T3 Code and other ACP clients. They keep a copy of every thread, so the door shows them D1 at most
+# and withholds anything above it with the record link only. The client sets ALIQUOT_SURFACE_TOKEN to this token.
+[surfaces.acp]
+kind = "acp"
+placement = "zdr"
+token_env = "${ACP_TOKEN_ENV}"      # the token is in .env, never here
 
 [hosts]
 "api.openalex.org" = "public"        # the literature tools; each reaches only the hosts it names, and only with D0 text
@@ -149,6 +159,8 @@ export function renderEnv(sandbox: boolean, random: (n: number) => Buffer = rand
 POSTGRES_PASSWORD=${random(24).toString("hex")}
 LABH_PAYLOAD_KEY=${random(32).toString("hex")}
 PAYLOAD_SECRET=${random(32).toString("hex")}
+# ${ACP_TOKEN_ENV} is the bearer token aliquot acp sends as ALIQUOT_SURFACE_TOKEN; the door serves [surfaces.acp] to it.
+${ACP_TOKEN_ENV}=${random(32).toString("hex")}
 `;
   if (!sandbox) return secrets;
   return `${secrets}
@@ -234,4 +246,10 @@ export function defaultAnswers(patterns: readonly string[], sample: readonly str
   if (problems.length) return { lines: problems, answers: null };
   const report = sampleReport(tried, sample);
   return { lines: report.lines, answers: report.ok ? { ...DEFAULTS, patterns: tried, sandboxImage: null } : null };
+}
+
+/** For a .env init leaves as it is: the line that says how to add the acp token, or null when it has one. Never a secret. */
+export function acpTokenHint(envText: string, envPath: string): string | null {
+  if (new RegExp(`^${ACP_TOKEN_ENV}=.`, "m").test(envText)) return null;
+  return `${envPath} has no ${ACP_TOKEN_ENV}, so the door takes no token for [surfaces.acp]. Add one: echo "${ACP_TOKEN_ENV}=$(openssl rand -hex 32)" >> ${envPath}`;
 }
