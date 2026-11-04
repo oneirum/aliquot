@@ -42,7 +42,8 @@ svg { display: block; }
 
 .side { position: fixed; inset: 0 auto 0 0; z-index: 3; width: 260px; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--line); }
 .side-top { height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 16px; }
-.side-top .wordmark { font-weight: 500; letter-spacing: 0; }
+/* The wordmark and the lab name share one line: both bars are 52 px, both names 16/24 at 500, so their baselines meet. */
+.side-top .wordmark { font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0; }
 .side-top .close { display: none; }
 .side-nav { display: grid; padding: 0 8px; }
 .row { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: 14px/20px var(--sans); text-align: left; text-decoration: none; cursor: pointer; }
@@ -61,7 +62,8 @@ svg { display: block; }
 .pane { min-height: 100dvh; display: flex; flex-direction: column; padding-left: 260px; }
 body[data-side="closed"] .side { display: none; }
 body[data-side="closed"] .pane { padding-left: 0; }
-.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+/* 6 px of padding puts the toggle's icon 16 px from the pane's edge, the inset of the sidebar's own rows. */
+.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 6px; }
 /* The bar is a material the thread passes under: the page colour, translucent and blurred, running 16 px past the
    bar's edge and fading out there, so text softens as it goes under instead of meeting a ruled line. */
 .bar::before { content: ""; position: absolute; inset: 0 0 -16px; z-index: -1; background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%); mask-image: linear-gradient(#000 calc(100% - 16px), transparent); pointer-events: none; }
@@ -79,7 +81,8 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .try { min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 20px; background: none; color: var(--ink); font: 15px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
 .try:active { transform: scale(0.97); }
 @media (hover: hover) and (pointer: fine) { .try:hover { background: var(--hover); } }
-.install { flex: none; margin: 0; padding: 0 16px 8px; font-size: 13px; line-height: 20px; color: var(--muted); text-wrap: pretty; }
+/* A footnote on the rows' 16 px inset; the member row's avatar sits 16 px inside it, so the note ends 16 px above the chip. */
+.install { flex: none; margin: 0; padding: 0 16px; font-size: 13px; line-height: 20px; color: var(--muted); text-wrap: pretty; }
 @media (display-mode: standalone) { .install { display: none; } }
 
 #thread { order: 7; flex: 1; width: 100%; max-width: 768px; margin: 0 auto; padding: 24px 24px 32px; text-wrap: pretty; }
@@ -122,26 +125,30 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .margin p { margin: 0; }
 .cite { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .doc { color: var(--ink-2); font-weight: 500; overflow-wrap: anywhere; }
-.witness { display: grid; gap: 8px; font-size: 13px; line-height: 20px; }
-.status { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); }
+/* Two 32 px rows: the status and Check, then the hash and Open record. 6 px above and below each 20 px line centres it
+   on Check's pill, so the rows step 32 px baseline to baseline; a status that wraps grows downward with Check on its
+   first line. */
+.witness { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; font-size: 13px; line-height: 20px; }
+.status { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; color: var(--ink-2); }
 .glyph { display: grid; place-items: center; flex: none; width: 16px; height: 20px; color: var(--muted); }
 .glyph svg { grid-area: 1 / 1; width: 16px; height: 16px; }
 .glyph .ghost { color: var(--muted); }
 [data-chain="verified"] .status, [data-chain="verified"] .glyph { color: var(--held); font-weight: 500; }
 [data-chain="broken"] .status, [data-chain="broken"] .glyph { color: var(--broken); font-weight: 500; }
-.trail { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.trail { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; min-height: 32px; }
 .seal code { display: inline-block; font: 13px/20px var(--mono); color: var(--muted); }
-.acts { display: flex; align-items: center; gap: 16px; }
-/* Check is a pill, 32 px tall with a 44 px touch target; Open record is an underlined link with the same target. */
-button.verify { position: relative; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 16px; background: none; color: var(--ink); font: 500 13px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
+/* Check is the block's one control: a pill, 32 px tall with a 44 px touch target. Open record is quiet text with an
+   arrow, in the second ink, going full ink on hover; its touch target is 44 px tall too. */
+button.verify { position: relative; align-self: start; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 16px; background: none; color: var(--ink); font: 500 13px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
 button.verify::after { content: ""; position: absolute; inset: -7px -1px; }
 button.verify:active { transform: scale(0.97); }
 button.verify:disabled { cursor: default; color: var(--muted); transform: none; }
-.acts a { position: relative; color: var(--ink); font-size: 13px; line-height: 20px; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); transition: text-decoration-color 160ms ease; }
-.acts a::after { content: ""; position: absolute; inset: -12px -8px; }
-@media (hover: hover) and (pointer: fine) { button.verify:not(:disabled):hover { background: var(--hover); } .acts a:hover { text-decoration-color: currentColor; } }
+.trail a { position: relative; display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); text-decoration: none; transition: color 160ms ease; }
+.trail a svg { width: 12px; height: 12px; flex: none; }
+.trail a::after { content: ""; position: absolute; inset: -12px -8px; }
+@media (hover: hover) and (pointer: fine) { button.verify:not(:disabled):hover { background: var(--hover); } .trail a:hover { color: var(--ink); } }
 
-.compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px 24px calc(24px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 24px); }
+.compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px 24px calc(32px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 24px); }
 .box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 11px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
 .box:focus-within { border-color: var(--field-focus); }
 textarea { flex: 1; min-width: 0; max-height: 192px; resize: none; border: 0; outline: 0; padding: 6px 0; background: transparent; color: var(--ink); font: 16px/24px var(--sans); }
@@ -169,14 +176,14 @@ button.send:disabled { cursor: default; transform: none; }
   .bar .icon:active { background: var(--hover); }
   .bar .icon svg { width: 18px; height: 18px; }
   .bar .title { font-size: 17px; line-height: 24px; text-align: center; }
-  .intro h1 { margin-bottom: 24px; font-size: 24px; line-height: 32px; }
+  .intro h1 { font-size: 24px; line-height: 32px; }
   .intro h1, .tries { width: calc(100% - 32px); }
   #thread { padding: 16px 16px 24px; }
   .compose { padding: 16px 12px calc(16px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
-  .icon, .try, .row, button.verify, .acts a, button.send { transition: none; }
+  .icon, .try, .row, button.verify, .trail a, button.send { transition: none; }
 }
 </style>
 </head>
@@ -344,7 +351,9 @@ function cite(source) {
   return c;
 }
 
-// The record: its state in a word and a shape, the record's hash, Check and the link to the full record.
+// The record: its state in a word and a shape with Check beside it, then the record's hash and the link to the full
+// record.
+const OPEN = '<path d="M3.25 8h9.5M9 4.25L12.75 8 9 11.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>';
 const SEALS = {
   unverified: '<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.2 2.3"/>',
   verified: '<circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M4.9 8.2l2.1 2.1 4.1-4.4" fill="none" style="stroke: var(--bg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -360,12 +369,11 @@ function mark(w, chain, text, hash) {
 function witness(runId, events) {
   const w = el("div", "witness");
   const status = el("p", "status"); status.setAttribute("role", "status");
-  const seal = el("p", "seal"); seal.append(el("code"));
   const verify = el("button", "verify", "Check"); verify.type = "button";
-  const open = el("a", "", "Open record"); open.href = "/runs/" + runId;
-  const acts = el("p", "acts"); acts.append(verify, open);
-  const trail = el("div", "trail"); trail.append(seal, acts);
-  w.append(status, trail);
+  const seal = el("p", "seal"); seal.append(el("code"));
+  const open = el("a", "", "Open record"); open.href = "/runs/" + runId; open.append(svg(OPEN));
+  const trail = el("div", "trail"); trail.append(seal, open);
+  w.append(status, verify, trail);
   // What this page saw when the run finished. verifyChain cannot see events cut from the end, so a record that later
   // ends sooner, or on another hash, reads as changed.
   const seen = { n: events.length, head: events.at(-1).hash };
