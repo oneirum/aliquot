@@ -1,25 +1,23 @@
 /**
- * The member chat page, set as a lab notebook. The head names the notebook (aliquot, the lab) and the state of its
- * chain; the index lists the entries by number and day, with the records under them; the spine down the left edge is
- * the same index as a graduated scale you can scrub; each entry is a dated, numbered question and answer; and the
- * composer at the bottom shows the number of the entry it will become.
+ * The member chat page: a sidebar with this conversation's questions by day, a reading column of dated entries, and a
+ * composer pinned to the bottom. Under each answer sit its source and its record. Check reads the run's events
+ * (/runs/:id/events) and the door's own recomputation of the chain (/runs/:id/view, verifyChain in record.ts), steps
+ * the record's hash through each event it checked up to that verdict, then shows the verdict, so what the page shows is
+ * the door's check and the hashes it checked.
  *
- * Under each answer sit its source and its record. The record is drawn as a short graduated scale, one tick per event,
- * with the record's hash beside it, and the scale is what you press to check the chain. The check reads the run's
- * events (/runs/:id/events) and the door's own recomputation of the chain (/runs/:id/view, verifyChain in record.ts),
- * then fills each event's tick in order up to that verdict, so what the page shows is the door's check and the hashes
- * it checked.
- *
- * Static HTML with inline CSS and one module script, like the other pages: it reads only the JSON routes in web.ts and
- * imports the motion library from the door's own /vendor/ path.
+ * Static HTML with inline CSS and script, like the other pages: it reads only the JSON routes in web.ts, and imports
+ * the motion library the door serves at /vendor/motion.js.
  */
 
 import { APP_HEAD } from "./web-app.ts";
 import { BASE_CSS, whereSpan } from "./web-pages.ts";
 
 const icon = (paths: string) => `<svg viewBox="0 0 16 16" aria-hidden="true">${paths}</svg>`;
-const INDEX = icon('<path d="M2 3.5h12M2 6.5h6M2 9.5h6M2 12.5h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>');
-const NEW = icon('<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>');
+const SIDEBAR = icon('<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 3v10" stroke="currentColor" stroke-width="1.5"/>');
+const NEW = icon('<path d="M13.25 8.75v2.5a2 2 0 0 1-2 2h-6.5a2 2 0 0 1-2-2v-6.5a2 2 0 0 1 2-2h2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M11.5 2.5a1.41 1.41 0 0 1 2 2L8.25 9.75 6 10.25l.5-2.25z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>');
+const RUNS = icon('<path d="M6 4.25h7.25M6 8h7.25M6 11.75h7.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="3" cy="4.25" r="1" fill="currentColor"/><circle cx="3" cy="8" r="1" fill="currentColor"/><circle cx="3" cy="11.75" r="1" fill="currentColor"/>');
+const REFUSED = icon('<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 12l8-8" stroke="currentColor" stroke-width="1.5"/>');
+const FAILED = icon('<path d="M8 2.25l6 10.5H2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v2.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.1" r=".85" fill="currentColor"/>');
 const CLOSE = icon('<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>');
 const SEND = icon('<path d="M8 13V3.5M3.75 7.5L8 3.25l4.25 4.25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>');
 
@@ -31,83 +29,41 @@ export function chatPage(where = ""): string {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ask the lab · Aliquot</title>
 ${APP_HEAD}
-<link rel="modulepreload" href="/vendor/motion.js">
 <style>${BASE_CSS}
-:root {
-  --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.24); --accent: var(--ink); --accent-ink: var(--bg);
-  --held: #00664a; --held-fill: #009e73; --broken: #b34700; --tick: rgb(28 27 25 / 0.4); --grad: rgb(28 27 25 / 0.16);
-  --pl: 260px;
-}
-@media (prefers-color-scheme: dark) {
-  :root { --field: #1f1f1d; --field-line: #2c2b28; --field-focus: rgb(236 235 230 / 0.22); --held: #5ee0b0; --held-fill: #5ee0b0; --broken: #ff8a4c; --tick: rgb(236 235 230 / 0.42); --grad: rgb(236 235 230 / 0.16); }
-}
+:root { --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.22); --bar-btn: rgb(28 27 25 / 0.06); --accent: var(--ink); --accent-ink: var(--bg); --held: #00664a; --broken: #b34700; }
+@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: rgb(236 235 230 / 0.16); --bar-btn: rgb(236 235 230 / 0.1); --held: #5ee0b0; --broken: #ff8a4c; } }
 html { scroll-padding: 64px 0 120px; }
 body { min-height: 100dvh; }
-body[data-side="closed"] { --pl: 0px; }
 svg { display: block; }
-.wordmark { font-weight: 500; letter-spacing: -0.01em; }
 .icon { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border: 0; border-radius: 8px; background: none; color: var(--ink-2); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
 .icon svg { width: 16px; height: 16px; }
-.icon:active { transform: scale(0.97); }
+.icon:active { transform: scale(0.96); }
 @media (hover: hover) and (pointer: fine) { .icon:hover { background: var(--hover); color: var(--ink); } }
 
 .side { position: fixed; inset: 0 auto 0 0; z-index: 3; width: 260px; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--line); }
 .side-top { height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 16px; }
+.side-top .wordmark { font-weight: 500; letter-spacing: 0; }
 .side-top .close { display: none; }
 .side-nav { display: grid; padding: 0 8px; }
 .row { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: 14px/20px var(--sans); text-align: left; text-decoration: none; cursor: pointer; }
 .row svg { width: 16px; height: 16px; flex: none; color: var(--ink-2); }
-.row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (hover: hover) and (pointer: fine) { .row:hover { background: var(--hover); } }
-.index { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 16px; }
-.index .side-nav { padding: 0; }
-.history { list-style: none; margin: 0; padding: 0; }
+.history { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 0 8px 16px; }
 .side .label { margin: 24px 0 8px; padding: 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
-.history .row, .records .row { color: var(--ink-2); }
-.history .row[aria-current] { background: var(--hover); color: var(--ink); }
-.history .row .n { flex: none; min-width: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.history .row svg { width: 12px; height: 12px; margin: 0 2px; color: var(--muted); }
-.history [data-state="verified"] svg { color: var(--held); }
-.history [data-state="broken"] svg { color: var(--broken); }
-.me { flex: none; display: flex; align-items: center; gap: 8px; height: calc(64px + env(safe-area-inset-bottom)); padding: 0 16px env(safe-area-inset-bottom); border-top: 1px solid var(--line); font-size: 14px; line-height: 20px; }
+.history .row { color: var(--ink-2); }
+.me { flex: none; display: flex; align-items: center; gap: 8px; height: calc(64px + env(safe-area-inset-bottom)); padding: 0 16px env(safe-area-inset-bottom); font-size: 14px; line-height: 20px; }
 .me > span:last-child { display: grid; min-width: 0; }
 .me .where { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.avatar { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.avatar { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 500; }
 .scrim { display: none; }
 
 .pane { min-height: 100dvh; display: flex; flex-direction: column; padding-left: 260px; }
 body[data-side="closed"] .side { display: none; }
 body[data-side="closed"] .pane { padding-left: 0; }
-.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 8px; background: var(--bg); }
+.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--bg); }
 .bar[data-edge] { box-shadow: 0 1px 0 var(--line); }
-.head { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; margin: 0; white-space: nowrap; }
-.head .brand { flex: none; font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: -0.01em; }
-.head .where { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; line-height: 20px; color: var(--muted); }
-.head .brand + .where::before { content: ""; display: inline-block; width: 1px; height: 12px; margin-right: 8px; background: var(--line); vertical-align: -1px; }
-.state { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 8px; font-size: 13px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.state:empty { display: none; }
-.state svg { width: 12px; height: 12px; flex: none; }
-.state[data-state="verified"] { color: var(--held); }
-.state[data-state="broken"] { color: var(--broken); }
-@media (min-width: 900px) { body[data-side="open"] .head .brand { display: none; } body[data-side="open"] .head .where::before { content: none; } }
-
-.spine { position: fixed; z-index: 1; top: 52px; bottom: 104px; left: max(calc(var(--pl) + 8px), calc(var(--pl) + (100% - var(--pl) - 720px) / 2 - 56px)); width: 48px; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer; }
-.spine[data-drag] { cursor: ns-resize; }
-.rail { position: absolute; inset: 0; }
-.grads { position: absolute; top: 0; bottom: 0; left: 16px; width: 4px; background: repeating-linear-gradient(var(--grad) 0 1px, transparent 1px 8px); -webkit-mask-image: linear-gradient(transparent, #000 16px, #000 calc(100% - 96px), transparent); mask-image: linear-gradient(transparent, #000 16px, #000 calc(100% - 96px), transparent); }
-.grads.major { width: 8px; background: repeating-linear-gradient(var(--grad) 0 1px, transparent 1px var(--pitch, 40px)); background-position: 0 24px; }
-.pane:has(.intro:not([hidden])) .spine { bottom: 50%; }
-.mark { position: absolute; left: 0; width: 48px; height: 24px; margin-top: -12px; display: flex; align-items: center; padding-left: 16px; color: var(--muted); font: 500 12px/16px var(--sans); font-variant-numeric: tabular-nums; text-decoration: none; }
-.mark i { flex: none; width: 12px; height: 4px; margin-right: 4px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--tick); background: var(--bg); transform-origin: left center; transition: transform 200ms var(--ease-out); }
-.mark[data-state="verified"] i { box-shadow: none; background: var(--held-fill); }
-.mark[data-state="broken"] i { box-shadow: none; background: linear-gradient(90deg, var(--broken) 0 4px, transparent 4px 6px, var(--broken) 6px); }
-.mark[data-state="pending"] i, .mark[data-state="none"] i { box-shadow: none; background: var(--tick); }
-.mark.blank i { height: 1px; width: 8px; margin-right: 8px; box-shadow: none; background: var(--tick); }
-.mark.on { color: var(--ink); }
-.spine[data-tight] .mark:not(.fifth) span { display: none; }
-.level { position: absolute; top: 0; left: 6px; width: 6px; height: 8px; margin-top: -4px; background: var(--ink); clip-path: polygon(0 0, 100% 50%, 0 100%); }
-.spine:not([data-count]) .level { display: none; }
-@media (min-width: 900px) and (max-width: 1099px) { body[data-side="open"] .spine { display: none; } }
+.bar .title { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .intro { display: contents; }
 .intro[hidden] { display: none; }
@@ -118,24 +74,25 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .pane:has(.intro:not([hidden])) .compose { order: 5; position: static; padding-top: 0; padding-bottom: calc(8px + env(safe-area-inset-bottom)); background: none; }
 .tries { order: 4; align-self: center; width: min(720px, 100% - 48px); list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .tries:empty { display: none; }
-.try { min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 20px; background: none; color: var(--ink); font: 14px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
+.try { min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--field); color: var(--ink); font: 500 14px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
 .try:active { transform: scale(0.97); }
 @media (hover: hover) and (pointer: fine) { .try:hover { border-color: var(--muted); } }
-.install { order: 6; align-self: center; width: min(720px, 100% - 48px); margin: 0; padding: 0 0 16px; font-size: 13px; line-height: 20px; color: var(--muted); text-align: center; }
+.install { order: 6; align-self: center; width: min(720px, 100% - 48px); margin: 0; padding: 0 0 16px; font-size: 13px; line-height: 20px; color: var(--muted); text-align: center; text-wrap: balance; }
 @media (display-mode: standalone) { .install { display: none; } }
 
 #thread { order: 7; flex: 1; width: 100%; max-width: 768px; margin: 0 auto; padding: 24px 24px 32px; }
 #thread:empty { display: none; }
 .day { margin: 0 0 24px; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--muted); }
-.entry { margin: 0 0 48px; }
+.entry { margin: 0 0 48px; transition: opacity 200ms var(--ease-out); }
 .entry:last-child { margin-bottom: 0; }
+@starting-style { .entry { opacity: 0; } }
+.restoring .entry { transition: none; }
 .meta { display: flex; gap: 8px; margin: 0 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .meta > * + *::before { content: "\\00b7"; margin-right: 8px; }
-.meta .no { color: var(--ink); font-weight: 500; }
-.q { margin: 0 0 16px; font-size: 20px; line-height: 28px; font-weight: 500; letter-spacing: -0.01em; white-space: pre-wrap; overflow-wrap: anywhere; }
-.ghost { position: fixed; z-index: 2; margin: 0; pointer-events: none; transform-origin: 0 0; }
-.a { font-size: 16px; line-height: 26px; overflow-wrap: anywhere; transition: opacity 240ms ease; }
-@starting-style { .a, .refusal { opacity: 0; } }
+.q { margin: 0 0 16px; font-size: 18px; line-height: 26px; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; }
+.a { font-size: 16px; line-height: 26px; overflow-wrap: anywhere; text-wrap: pretty; }
+.a, .refusal, .cite, .witness, .withheld { transition: opacity 200ms var(--ease-out); }
+@starting-style { .a, .refusal, .cite, .witness, .withheld { opacity: 0; } }
 .a > * { margin: 0 0 16px; }
 .a > :last-child { margin-bottom: 0; }
 .a p { white-space: pre-line; }
@@ -148,66 +105,46 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .a pre { font: 13px/20px var(--mono); background: var(--quiet); border-radius: 8px; padding: 12px 16px; overflow-x: auto; white-space: pre; }
 .a strong { font-weight: 500; }
 .a code { font: 14px var(--mono); background: var(--quiet); padding: 2px 4px; border-radius: 4px; }
-.steps { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; font-size: 14px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.steps code { font: 13px var(--mono); color: var(--ink-2); }
-.err { margin: 0; }
-.facts { color: var(--muted); font-variant-numeric: tabular-nums; }
-.body > .facts { margin: 16px 0 0; font-size: 13px; line-height: 20px; }
-.refusal { margin: 0; transition: opacity 240ms ease; }
-.refusal .title { display: flex; gap: 8px; align-items: center; margin: 0 0 4px; font-weight: 500; }
+.steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; font-size: 16px; line-height: 26px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.steps > * + *::before { content: "\\00b7"; margin-right: 8px; }
+.err { margin: 0; color: var(--ink-2); }
+.withheld { margin: 16px 0 0; font-size: 13px; line-height: 20px; color: var(--muted); }
+.refusal { margin: 0; }
+.refusal .title { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; font-weight: 500; }
 .refusal .title svg { width: 16px; height: 16px; flex: none; }
-.refusal p:last-child { margin: 0; padding-left: 24px; font-size: 14px; line-height: 20px; color: var(--ink-2); }
+.refusal p { margin: 0; line-height: 26px; }
+.refusal p:last-child { color: var(--ink-2); }
 
 .margin { display: grid; gap: 16px; margin-top: 24px; }
 .margin:empty { display: none; }
 .margin p { margin: 0; }
 .cite { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .doc { color: var(--ink-2); font-weight: 500; overflow-wrap: anywhere; }
-.cite > * + .facts::before { content: "\\00b7"; margin-right: 8px; }
-
-.witness { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 8px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid transparent; }
-.status { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 14px; line-height: 20px; font-weight: 500; }
-.status svg { width: 16px; height: 16px; flex: none; color: var(--muted); }
-[data-chain="unverified"] .status, [data-chain="checking"] .status { font-weight: 400; color: var(--ink-2); }
-[data-chain="verified"] .status { color: var(--held); }
-[data-chain="broken"] .status { color: var(--broken); }
-[data-chain="verified"] .status svg, [data-chain="broken"] .status svg { color: inherit; }
-.trail { display: flex; min-width: 0; }
-button.verify { position: relative; display: flex; align-items: flex-start; gap: 16px; max-width: 100%; height: 32px; margin: 0; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--ink-2); font: 500 13px/20px var(--sans); text-align: left; cursor: pointer; transform-origin: left center; transition: transform 160ms var(--ease-out); -webkit-tap-highlight-color: transparent; }
-button.verify::before { content: ""; position: absolute; inset: -8px -12px; }
-button.verify:active { transform: scale(0.97); }
-button.verify:disabled { cursor: default; }
-button.verify:focus-visible { outline-offset: 6px; }
-.scale { position: relative; display: grid; min-width: 0; overflow: hidden; }
-.links { display: flex; gap: calc(var(--pitch, 12px) - var(--w, 4px)); height: 20px; }
-.links i { position: relative; flex: none; width: var(--w, 4px); height: 12px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--tick); transform-origin: top center; transition: opacity 160ms ease; }
-.links i:nth-child(5n + 1) { height: 20px; }
-.links i b { position: absolute; inset: 0; border-radius: inherit; background: var(--held-fill); clip-path: inset(100% 0 0 0); }
-.links i.held { box-shadow: none; }
-.links i.held b { clip-path: inset(0 0 0 0); }
-.links i.broken { height: 20px; box-shadow: none; }
-.links i.broken b { clip-path: inset(0 0 0 0); background: linear-gradient(var(--broken) 0 8px, transparent 8px 11px, var(--broken) 11px); }
-[data-chain="broken"] .links i:not(.held):not(.broken) { opacity: 0.4; }
-.ruler { position: relative; height: 12px; font: 11px/12px var(--mono); color: var(--muted); }
-.ruler span { position: absolute; top: 0; }
-.ruler .bad { color: var(--broken); }
-.verb { flex: none; }
-@media (hover: hover) and (pointer: fine) { button.verify:not(:disabled):hover .verb { color: var(--ink); } button.verify:not(:disabled):hover .links i:not(.held):not(.broken) { box-shadow: inset 0 0 0 1px var(--ink-2); } }
-.acts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0; font-size: 13px; line-height: 20px; }
-.seal code { font: 13px/20px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.acts a { color: var(--ink-2); text-decoration-color: var(--tick); }
-@media (hover: hover) and (pointer: fine) { .acts a:hover { color: var(--ink); text-decoration-color: currentColor; } }
+.witness { display: grid; gap: 8px; font-size: 13px; line-height: 20px; }
+.status { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); }
+.glyph { display: grid; place-items: center; flex: none; width: 16px; height: 20px; color: var(--muted); }
+.glyph svg { grid-area: 1 / 1; width: 16px; height: 16px; }
+.glyph .ghost { color: var(--muted); }
+[data-chain="verified"] .status, [data-chain="verified"] .glyph { color: var(--held); font-weight: 500; }
+[data-chain="broken"] .status, [data-chain="broken"] .glyph { color: var(--broken); font-weight: 500; }
+.trail { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.seal code { display: inline-block; font: 13px/20px var(--mono); color: var(--muted); }
+.acts { display: flex; }
+button.verify, .acts a { position: relative; display: inline-flex; align-items: center; height: 32px; margin: -6px 0; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: 500 13px/20px var(--sans); text-decoration: none; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
+button.verify::after, .acts a::after { content: ""; position: absolute; inset: -6px 0; }
+button.verify:active, .acts a:active { transform: scale(0.97); }
+button.verify:disabled { cursor: default; color: var(--muted); transform: none; }
+@media (hover: hover) and (pointer: fine) { button.verify:not(:disabled):hover, .acts a:hover { background: var(--hover); } }
 
 .compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px 24px calc(24px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 24px); }
-.box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 9px 9px 16px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
+.box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 9px 9px 20px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
 .box:focus-within { border-color: var(--field-focus); }
-.next { align-self: flex-start; flex: none; padding: 6px 0; font-size: 15px; line-height: 24px; font-weight: 500; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 textarea { flex: 1; min-width: 0; max-height: 192px; resize: none; border: 0; outline: 0; padding: 6px 0; background: transparent; color: var(--ink); font: 16px/24px var(--sans); }
 textarea::placeholder { color: var(--muted); }
 textarea:focus-visible { outline: none; }
-button.send { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border: 0; border-radius: 50%; background: var(--ink); color: var(--bg); cursor: pointer; transition: transform 160ms var(--ease-out), opacity 160ms ease; }
+button.send { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border: 0; border-radius: 50%; background: var(--ink); color: var(--bg); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease, color 160ms ease; }
 button.send svg { width: 18px; height: 18px; }
-button.send:active { transform: scale(0.97); }
+button.send:active { transform: scale(0.94); }
 button.send:disabled { cursor: default; transform: none; }
 
 @media (max-width: 899px) {
@@ -221,51 +158,44 @@ button.send:disabled { cursor: default; transform: none; }
   .scrim { display: block; position: fixed; inset: 0; z-index: 4; background: rgb(0 0 0 / 0.32); opacity: 0; pointer-events: none; transition: opacity 200ms ease; }
   body[data-side="open"] .scrim { opacity: 1; pointer-events: auto; }
   .pane { padding-left: 0; }
-  .bar { height: 56px; padding: 0 16px 0 calc(4px + env(safe-area-inset-left)); }
-  .bar .icon { width: 40px; height: 40px; border-radius: 50%; color: var(--ink); }
+  .bar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; height: 56px; padding: 0 12px; }
+  .bar .icon { width: 40px; height: 40px; border-radius: 50%; background: var(--bar-btn); color: var(--ink); }
   .bar .icon svg { width: 18px; height: 18px; }
-  .head .brand { font-size: 17px; }
-  .spine { top: 56px; bottom: calc(88px + env(safe-area-inset-bottom)); left: env(safe-area-inset-left); }
+  .bar .title { font-size: 17px; line-height: 24px; text-align: center; }
   .intro h1 { font-size: 24px; line-height: 32px; }
   .intro h1, .install { width: calc(100% - 32px); }
   #thread { padding: 16px 16px 24px; }
-  .entry, .day { padding-left: 32px; }
-  .cite .facts { flex-basis: 100%; }
-  .cite > * + .facts::before { content: none; }
   .compose { padding: 16px 12px calc(16px + env(safe-area-inset-bottom)); }
   .tries { width: calc(100% - 24px); flex-direction: column; }
   .try { width: 100%; text-align: left; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .side, .icon, .try, .row, button.verify, .acts a, button.send, .mark i, .links i, .a, .refusal { transition: none; }
-  .icon:active, .try:active, button.verify:active, button.send:active { transform: none; }
+  .side { transition: none; }
+  .icon, .try, .row, button.verify, .acts a, button.send { transition: none; }
 }
 </style>
 </head>
 <body>
-<aside class="side" id="side" aria-label="Notebook index">
-  <div class="side-top"><a class="wordmark" href="/">aliquot</a><button type="button" class="icon close" id="close" aria-label="Close index">${CLOSE}</button></div>
-  <nav class="side-nav" aria-label="Notebook">
-    <button type="button" class="row fresh" id="fresh">${NEW}<span>New notebook</span></button>
+<aside class="side" id="side" aria-label="Conversation">
+  <div class="side-top"><a class="wordmark" href="/">Aliquot</a><button type="button" class="icon close" id="close" aria-label="Close sidebar">${CLOSE}</button></div>
+  <nav class="side-nav">
+    <button type="button" class="row fresh" id="fresh">${NEW}<span>New question</span></button>
   </nav>
-  <div class="index">
-    <ol class="history" id="history" aria-label="Entries"></ol>
-    <nav class="side-nav records" aria-labelledby="records">
-      <p class="label" id="records">Records</p>
-      <a class="row" href="/runs"><span>All runs</span></a>
-      <a class="row" href="/runs?show=refusals"><span>Refusals</span></a>
-      <a class="row" href="/runs?show=failed"><span>Failed runs</span></a>
-    </nav>
-  </div>
+  <nav class="side-nav" aria-labelledby="records">
+    <p class="label" id="records">Records</p>
+    <a class="row" href="/runs">${RUNS}<span>All runs</span></a>
+    <a class="row" href="/runs?show=refusals">${REFUSED}<span>Refusals</span></a>
+    <a class="row" href="/runs?show=failed">${FAILED}<span>Failed runs</span></a>
+  </nav>
+  <ol class="history" id="history"></ol>
   <div class="me"><span class="avatar" id="initial" aria-hidden="true"></span><span><span id="who"></span>${whereSpan(where)}</span></div>
 </aside>
 <div class="scrim" id="scrim"></div>
 <div class="pane">
   <div class="bar">
-    <button type="button" class="icon" id="toggle" aria-controls="side" aria-expanded="false" aria-label="Index">${INDEX}</button>
-    <p class="head"><span class="brand">aliquot</span>${whereSpan(where)}<span class="state" id="state"></span></p>
+    <button type="button" class="icon" id="toggle" aria-controls="side" aria-expanded="false" aria-label="Sidebar">${SIDEBAR}</button>
+    <p class="title">${whereSpan(where)}</p>
   </div>
-  <nav class="spine" id="spine" aria-label="Entries by number"><div class="rail" id="rail"><span class="grads" aria-hidden="true"></span><span class="grads major" aria-hidden="true"></span><div class="marks" id="marks"></div></div><span class="level" id="level" aria-hidden="true"></span></nav>
   <section class="intro" id="intro">
     <h1>Ask the lab</h1>
     <ul class="tries" id="tries"></ul>
@@ -274,14 +204,12 @@ button.send:disabled { cursor: default; transform: none; }
   <main id="thread" aria-live="polite"></main>
   <form id="ask" class="compose">
     <div class="box">
-      <span class="next" id="next" aria-hidden="true">No. 1</span>
       <textarea id="text" rows="1" placeholder="Ask a question about the lab" aria-label="Your question"></textarea>
       <button class="send" id="send" type="submit" aria-label="Ask" disabled>${SEND}</button>
     </div>
   </form>
 </div>
 <script type="module">
-import { animate, spring, stagger } from "/vendor/motion.js";
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const user = params.get("user") || "member-1";
@@ -292,9 +220,8 @@ const blank = () => ({ v: 1, thread: "web-" + crypto.randomUUID(), n: 0, turns: 
 let state = (() => { try { const s = JSON.parse(sessionStorage.getItem(KEY) || "null"); return s && s.v === 1 && Array.isArray(s.turns) ? s : blank(); } catch { return blank(); } })();
 const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
 const reduce = matchMedia("(prefers-reduced-motion: reduce)");
-// One spring for everything that travels: critically damped, settled inside 350 ms.
-const SPRING = { type: spring, duration: 0.35, bounce: 0 };
-const EASE = [0.23, 1, 0.32, 1];
+// Loaded once, off the critical path; if it fails to load, a check still shows its verdict, without movement.
+const motion = import("/vendor/motion.js").catch(() => null);
 
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text !== undefined) x.textContent = text; return x; };
 const svg = (paths) => { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 16 16"); s.setAttribute("aria-hidden", "true"); s.innerHTML = paths; return s; };
@@ -306,10 +233,11 @@ const hex = (h) => h.slice(0, 16).replace(/(.{4})(?!$)/g, "$1 ");
 $("who").textContent = user;
 $("initial").textContent = user.slice(0, 1).toUpperCase();
 
-// The index sits beside the thread on a wide screen, where the toggle hides it and the choice is remembered, and
+// The sidebar sits beside the thread on a wide screen, where the toggle hides it and the choice is remembered, and
 // slides over it as a drawer on a phone, where it starts closed.
 const bar = document.querySelector(".bar");
 const edge = () => bar.toggleAttribute("data-edge", scrollY > 0);
+addEventListener("scroll", edge, { passive: true });
 
 const wide = matchMedia("(min-width: 900px)");
 const SIDE = "aliquot.sidebar";
@@ -320,7 +248,6 @@ const setSide = (open, focus) => {
   document.querySelector(".pane").inert = open && !wide.matches;
   if (wide.matches) { try { localStorage.setItem(SIDE, open ? "open" : "closed"); } catch {} }
   else if (focus) (open ? $("close") : $("toggle")).focus();
-  requestAnimationFrame(drawSpine);
 };
 const sideStart = () => { let kept = null; try { kept = localStorage.getItem(SIDE); } catch {} setSide(wide.matches && kept !== "closed", false); };
 sideStart();
@@ -350,140 +277,6 @@ const sync = () => {
 };
 $("text").addEventListener("input", sync);
 $("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("ask").requestSubmit(); } });
-
-// The shapes every chain state is drawn with, beside its word: an open dashed ring before a check, a filled disc with
-// a tick when the chain held, a cut square when it broke.
-const SEALS = {
-  unverified: '<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.2 2.3"/>',
-  checking: '<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2.25a5.75 5.75 0 0 1 0 11.5z" fill="currentColor"/>',
-  verified: '<circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M4.9 8.2l2.1 2.1 4.1-4.4" fill="none" style="stroke: var(--bg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
-  broken: '<rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="currentColor"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" style="stroke: var(--bg)" stroke-width="1.6" stroke-linecap="round"/>',
-  pending: '<circle cx="8" cy="8" r="2.5" fill="currentColor"/>',
-  none: '<path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
-};
-
-// The notebook's chain state, read off the page: each entry's record says unverified, checking, verified or broken;
-// an entry still waiting for its answer is pending, and one with no record (refused before a run, or failed) is none.
-const entries = () => [...$("thread").querySelectorAll(".entry")];
-const chainOf = (entry) => { const w = entry.querySelector(".witness"); return w ? w.dataset.chain : entry.querySelector(".steps") ? "pending" : "none"; };
-function tally() {
-  const states = entries().map(chainOf), n = states.length;
-  const held = states.filter((s) => s === "verified").length, broken = states.filter((s) => s === "broken").length;
-  const head = $("state");
-  const count = n + (n === 1 ? " entry, " : " entries, ");
-  const word = broken ? broken + " broken" : held === n ? (n === 1 ? "intact" : "all intact") : held ? held + " checked" : n === 1 ? "not checked yet" : "none checked yet";
-  head.dataset.state = broken ? "broken" : held === n ? "verified" : "open";
-  head.replaceChildren(...(n ? [...(broken || held === n ? [svg(SEALS[broken ? "broken" : "verified"])] : []), el("span", "", count + word)] : []));
-  const rows = $("history").querySelectorAll("a.row");
-  states.forEach((s, i) => {
-    const row = rows[i];
-    if (row && row.dataset.state !== s) { row.dataset.state = s; row.firstChild.replaceWith(svg(SEALS[s === "checking" ? "unverified" : s])); }
-    const m = $("marks").children[i];
-    if (m) m.dataset.state = s;
-  });
-}
-
-// The spine: one mark per entry down the left edge, on graduations every 8 px, and an open mark for the entry the
-// composer will become. A pointer shows where the reading is; drag along the spine and the entry under the finger
-// scrolls into view, with the pointer pulled past the first and last marks against a rubber band.
-const spine = $("spine"), rail = $("rail"), level = $("level");
-const TOP = 24;
-let pitch = 40, drag = null, settle = null, active = -1;
-function drawSpine() {
-  const n = entries().length, room = spine.clientHeight - TOP - 48;
-  pitch = [40, 32, 24, 16, 8].find((p) => p * n <= room) || 8;
-  spine.toggleAttribute("data-tight", pitch < 16);
-  spine.style.setProperty("--pitch", pitch + "px");
-  if (n) spine.dataset.count = String(n); else delete spine.dataset.count;
-  const have = $("marks").children;
-  while (have.length > n + 1) have[have.length - 1].remove();
-  for (let i = 0; i <= n; i++) {
-    let m = have[i];
-    const next = i === n;
-    if (!m || m.classList.contains("blank") !== next) {
-      const fresh = next ? el("span", "mark blank") : el("a", "mark");
-      fresh.append(el("i"), el("span", "", String(i + 1)));
-      if (!next) { fresh.href = "#e" + (i + 1); fresh.setAttribute("aria-label", "No. " + (i + 1)); }
-      else fresh.setAttribute("aria-hidden", "true");
-      if (m) m.replaceWith(fresh); else $("marks").append(fresh);
-      m = fresh;
-    }
-    m.classList.toggle("fifth", (i + 1) % 5 === 0 || i === 0);
-    m.style.top = TOP + i * pitch + "px";
-  }
-  track();
-}
-function progress() {
-  const es = entries();
-  if (es.length < 2) return 0;
-  const head = bar.offsetHeight, foot = $("ask").offsetHeight, max = document.documentElement.scrollHeight - innerHeight;
-  const line = head + 16 + (max > 0 ? Math.min(1, scrollY / max) * Math.max(0, innerHeight - head - foot - 32) : 0);
-  const tops = es.map((e) => e.getBoundingClientRect().top);
-  let i = 0;
-  while (i < tops.length - 1 && tops[i + 1] <= line) i++;
-  if (i === tops.length - 1) return i;
-  return i + Math.min(1, Math.max(0, (line - tops[i]) / (tops[i + 1] - tops[i])));
-}
-function activate(i) {
-  if (i === active) return;
-  active = i;
-  [...$("marks").children].forEach((m, k) => m.classList.toggle("on", k === i));
-  $("history").querySelectorAll("a.row").forEach((r, k) => { if (k === i) r.setAttribute("aria-current", "true"); else r.removeAttribute("aria-current"); });
-}
-const place = (p) => { level.style.transform = "translateY(" + (TOP + p * pitch) + "px)"; activate(Math.round(p)); };
-let queued = false;
-function track() {
-  if (queued) return;
-  queued = true;
-  requestAnimationFrame(() => { queued = false; if (!drag && !settle && entries().length) place(progress()); });
-}
-addEventListener("scroll", () => { edge(); track(); }, { passive: true });
-addEventListener("resize", () => requestAnimationFrame(drawSpine));
-
-const band = (x, d) => (x * d * 0.55) / (d + 0.55 * x);
-function scrub(y) {
-  const es = entries(), r = spine.getBoundingClientRect(), first = r.top + TOP, last = first + (es.length - 1) * pitch;
-  const at = Math.min(last, Math.max(first, y)), over = y - at;
-  const shift = Math.sign(over) * band(Math.abs(over), r.height);
-  rail.style.transform = "translateY(" + shift / 2 + "px)";
-  level.style.transform = "translateY(" + (at - r.top + shift) + "px)";
-  const i = Math.round((at - first) / pitch);
-  if (i !== drag.at) { drag.at = i; es[i].scrollIntoView({ block: "start" }); activate(i); }
-}
-spine.addEventListener("pointerdown", (e) => {
-  if (drag || !entries().length || (e.pointerType === "mouse" && e.button !== 0)) return;
-  e.preventDefault();
-  if (settle) { settle.forEach((a) => a.stop()); settle = null; }
-  spine.setPointerCapture(e.pointerId);
-  drag = { id: e.pointerId, at: -1 };
-  spine.dataset.drag = "";
-  scrub(e.clientY);
-});
-spine.addEventListener("pointermove", (e) => { if (drag && e.pointerId === drag.id) scrub(e.clientY); });
-const release = (e) => {
-  if (!drag || e.pointerId !== drag.id) return;
-  drag = null;
-  delete spine.dataset.drag;
-  const to = "translateY(" + (TOP + progress() * pitch) + "px)";
-  if (reduce.matches) { rail.style.transform = ""; level.style.transform = to; return; }
-  const mine = [
-    animate(level, { transform: [level.style.transform || to, to] }, SPRING),
-    animate(rail, { transform: [rail.style.transform || "translateY(0px)", "translateY(0px)"] }, SPRING),
-  ];
-  settle = mine;
-  Promise.all(mine).then(() => { if (settle === mine) { settle = null; track(); } });
-};
-spine.addEventListener("pointerup", release);
-spine.addEventListener("pointercancel", release);
-// A pointer already moved the thread on pointerdown; a keyboard Enter on a mark follows its link as usual.
-spine.addEventListener("click", (e) => { if (e.detail) e.preventDefault(); });
-
-// The composer shows the number of the entry it will become.
-const number = (roll) => {
-  const next = $("next");
-  next.textContent = "No. " + (state.turns.length + 1);
-  if (roll && !reduce.matches) animate(next, { opacity: [0, 1], transform: ["translateY(8px)", "translateY(0px)"] }, SPRING);
-};
 
 // Models answer in Markdown. Paragraphs, lists, headings and code blocks become elements, and so do bold,
 // italic and inline code; every piece of text goes in as text, so nothing is parsed as HTML.
@@ -542,121 +335,93 @@ function refusal(title, text) {
   return b;
 }
 
-// The entry's source and what the run read, from the answer's Source line and the record's summary.
-async function cite(runId, source) {
-  const c = el("div", "cite");
-  if (source) c.append(el("p", "k", "Source"), el("p", "doc", source));
-  try {
-    const s = (await (await fetch("/runs/" + runId + "/view")).json()).summary, parts = [];
-    if (s.entriesRetrieved) parts.push("Read " + s.entriesRetrieved + (s.entriesRetrieved === 1 ? " entry" : " entries"));
-    const tools = s.toolCalls.reduce((n, t) => n + t.calls, 0);
-    if (tools) parts.push(tools + (tools === 1 ? " tool call" : " tool calls"));
-    parts.push(s.ms < 1000 ? s.ms + " ms" : (s.ms / 1000).toFixed(1) + " s");
-    c.append(el("p", "facts", parts.join(" \\u00b7 ")));
-  } catch {}
-  return c.childNodes.length ? c : null;
+// The document the answer names on its Source line.
+function cite(source) {
+  if (!source) return null;
+  const c = el("p", "cite");
+  c.append(el("span", "k", "Source"), el("span", "doc", source));
+  return c;
 }
 
-// The witness: the chain's verdict in a word and a shape, the record as a graduated scale (one tick per event, a long
-// tick and its event number every fifth), which is the button that checks it, and the record's hash.
+// The record: its state in a word and a shape, the record's hash, Check and the link to the full record.
+const SEALS = {
+  unverified: '<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.2 2.3"/>',
+  verified: '<circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M4.9 8.2l2.1 2.1 4.1-4.4" fill="none" style="stroke: var(--bg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  broken: '<rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="currentColor"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" style="stroke: var(--bg)" stroke-width="1.6" stroke-linecap="round"/>',
+};
+SEALS.checking = SEALS.unverified;
 function mark(w, chain, text, hash) {
   w.dataset.chain = chain;
-  w.querySelector(".status").replaceChildren(svg(SEALS[chain]), el("span", "", text));
+  const glyph = el("span", "glyph"); glyph.append(svg(SEALS[chain]));
+  w.querySelector(".status").replaceChildren(glyph, el("span", "words", text));
   w.querySelector(".seal code").textContent = hex(hash);
-  tally();
-}
-function links(w, n) {
-  const strip = w.querySelector(".links"), ruler = w.querySelector(".ruler");
-  const step = n <= 16 ? 12 : Math.max(2, Math.floor(192 / n)), thick = step >= 8 ? 4 : Math.max(1, Math.round(step / 2));
-  strip.style.setProperty("--pitch", step + "px");
-  strip.style.setProperty("--w", thick + "px");
-  strip.replaceChildren(...Array.from({ length: n }, () => { const i = el("i"); i.append(el("b")); return i; }));
-  const every = step * 5 >= 24 ? 5 : step * 10 >= 24 ? 10 : 50, nums = [];
-  for (let k = 0; k < n; k += every) { const s = el("span", "", String(k)); s.style.left = k * step + "px"; nums.push(s); }
-  ruler.replaceChildren(...nums);
-  ruler.dataset.step = String(step);
-  return [...strip.children];
 }
 function witness(runId, events) {
   const w = el("div", "witness");
   const status = el("p", "status"); status.setAttribute("role", "status");
-  const scale = el("span", "scale"); scale.setAttribute("aria-hidden", "true");
-  scale.append(el("span", "links"), el("span", "ruler"));
-  const verify = el("button", "verify"); verify.type = "button";
-  verify.append(scale, el("span", "verb", "Check the chain"));
-  const trail = el("div", "trail"); trail.append(verify);
-  const seal = el("span", "seal"); seal.append(el("code"));
+  const seal = el("p", "seal"); seal.append(el("code"));
+  const verify = el("button", "verify", "Check"); verify.type = "button";
   const open = el("a", "", "Open record"); open.href = "/runs/" + runId;
-  const acts = el("p", "acts"); acts.append(seal, open);
-  w.append(status, trail, acts);
+  const acts = el("p", "acts"); acts.append(verify, open);
+  const trail = el("div", "trail"); trail.append(seal, acts);
+  w.append(status, trail);
   // What this page saw when the run finished. verifyChain cannot see events cut from the end, so a record that later
   // ends sooner, or on another hash, reads as changed.
   const seen = { n: events.length, head: events.at(-1).hash };
-  links(w, seen.n);
-  mark(w, "unverified", "Not checked yet", seen.head);
+  mark(w, "unverified", "Not checked", seen.head);
   verify.onclick = () => check(w, runId, verify, seen);
   return w;
 }
-// Sealing: the scale draws in tick by tick and the record's hash counts through digits until it settles on its value.
-// It starts once the smooth scroll that follows the answer has brought the record into view, from its first frame.
-function sealIn(w, hash) {
-  if (reduce.matches) return;
-  const WAIT = 0.3, ticks = w.querySelectorAll(".links i"), code = w.querySelector(".seal code"), real = hex(hash);
-  const digits = [...real].map((c, j) => ({ c, j, v: parseInt(c, 16) }));
-  const roll = (p) => digits.map(({ c, j, v }) => {
-    if (c === " ") return c;
-    const lock = 0.3 + (0.7 * j) / real.length;
-    return p >= lock ? c : ((v + Math.ceil((lock - p) * 48)) % 16).toString(16);
-  }).join("");
-  const later = w.querySelectorAll(".status, .ruler, .verb, .acts a");
-  for (const t of ticks) t.style.opacity = "0";
-  for (const x of later) x.style.opacity = "0";
-  code.textContent = roll(0);
-  animate(ticks, { opacity: [0, 1], transform: ["scaleY(0.4)", "scaleY(1)"] }, { ...SPRING, duration: 0.3, delay: stagger(0.016, { startDelay: WAIT }) });
-  animate(later, { opacity: [0, 1] }, { duration: 0.24, ease: EASE, delay: stagger(0.04, { startDelay: WAIT + 0.08 }) });
-  animate(0, 1, { delay: WAIT, duration: 0.42, ease: "linear", onUpdate: (p) => { code.textContent = roll(p); }, onComplete: () => { code.textContent = real; } });
+
+// The check moment, the page's one motion with character: the hash steps through each event the door checked, then
+// the verdict settles in one beat, the glyph filling its dashed ring, the hash landing, the words fading in. A spring
+// with no bounce, transform, opacity and clip-path only. Reduced motion skips the steps and shows the verdict at once.
+const STEP = [0.23, 1, 0.32, 1];
+const SETTLE = { type: "spring", bounce: 0, duration: 0.35 };
+const landHash = (m, code, options) => m.animate(code, { transform: ["translateY(4px)", "translateY(0px)"], opacity: [0.4, 1] }, options);
+function settle(m, w) {
+  const glyph = w.querySelector(".glyph svg"), ghost = svg(SEALS.unverified);
+  ghost.setAttribute("class", "ghost");
+  glyph.after(ghost);
+  // 60% of the glyph's 16 px box is just past the square's corners, so the fill lasts the whole spring.
+  m.animate(glyph, { clipPath: ["circle(0% at 50% 50%)", "circle(60% at 50% 50%)"], transform: ["scale(0.85)", "scale(1)"] }, SETTLE);
+  m.animate(ghost, { opacity: [1, 0] }, { duration: 0.2, ease: STEP }).finished.then(() => ghost.remove(), () => ghost.remove());
+  m.animate(w.querySelector(".words"), { opacity: [0, 1] }, { duration: 0.2, ease: STEP });
+  landHash(m, w.querySelector(".seal code"), SETTLE);
 }
-// One tick's fill rises through the graduation, like liquid in a cylinder.
-function fill(tick, cls) {
-  tick.className = cls;
-  if (!reduce.matches) animate(tick.firstChild, { clipPath: ["inset(100% 0% 0% 0%)", "inset(0% 0% 0% 0%)"] }, { duration: 0.22, ease: EASE });
-}
+
 const fetchJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(url + " answered " + r.status); return r.json(); });
 async function check(w, runId, verify, seen) {
   verify.disabled = true;
   w.setAttribute("aria-busy", "true");
-  const verb = verify.querySelector(".verb");
-  verb.textContent = "Checking";
   try {
-    const [events, view] = await Promise.all([fetchJson("/runs/" + runId + "/events"), fetchJson("/runs/" + runId + "/view")]);
-    const n = events.length, last = events.at(-1);
+    const [events, view, loaded] = await Promise.all([fetchJson("/runs/" + runId + "/events"), fetchJson("/runs/" + runId + "/view"), motion]);
+    const m = reduce.matches ? null : loaded;
+    const n = events.length, last = events.at(-1), head = last ? last.hash : seen.head;
     const changed = view.chain.events !== n ? "The record changed while it was checked. Check again."
       : view.chain.firstBad === null && (n < seen.n || !last || last.hash !== seen.head || last.event.t !== "run.finished") ? "Changed since this page loaded: the record had " + seen.n + " events and ended on " + hex(seen.head)
       : null;
     const bad = changed ? null : view.chain.firstBad;
-    const marks = links(w, n);
     const stop = bad === null ? n : bad;
-    // About 900 ms whatever the length: one event per step down to a frame, then several per frame.
-    const delay = Math.min(70, 900 / Math.max(stop, 1)), per = Math.max(1, Math.ceil(16 / delay));
-    for (let i = 0; i < stop; i += per) {
-      const k = Math.min(stop, i + per) - 1;
-      for (let j = i; j <= k; j++) fill(marks[j], "held");
-      if (!reduce.matches) { mark(w, "checking", "Checking " + (k + 1) + " of " + n + " events", events[k].hash); await sleep(delay * per); }
+    if (!reduce.matches) {
+      mark(w, "checking", "Checking 0 of " + n + " events", seen.head);
+      const words = w.querySelector(".words"), code = w.querySelector(".seal code");
+      // About 900 ms whatever the length: one event per step down to a frame, then several per frame.
+      const delay = Math.min(70, 900 / Math.max(stop, 1)), per = Math.max(1, Math.ceil(16 / delay));
+      for (let i = 0; i < stop; i += per) {
+        const k = Math.min(stop, i + per) - 1;
+        words.textContent = "Checking " + (k + 1) + " of " + n + " events";
+        code.textContent = hex(events[k].hash);
+        if (m) landHash(m, code, { duration: (delay * per) / 1000, ease: STEP });
+        await sleep(delay * per);
+      }
     }
-    if (changed) mark(w, "broken", changed, last ? last.hash : seen.head);
-    else if (bad !== null) {
-      fill(marks[bad], "broken");
-      const at = el("span", "bad", "#" + bad); at.style.left = bad * Number(w.querySelector(".ruler").dataset.step) + "px";
-      w.querySelector(".ruler").append(at);
-      mark(w, "broken", "Broken at #" + bad + ": an event was edited or removed", events[bad].hash);
-    }
-    else mark(w, "verified", "Verified: chain intact over " + n + " events", last.hash);
-    if (!reduce.matches) animate(w.querySelector(".status svg"), { opacity: [0, 1], transform: ["scale(0.6)", "scale(1)"] }, SPRING);
-    verb.textContent = "Check again";
+    if (changed) mark(w, "broken", changed, head);
+    else if (bad !== null) mark(w, "broken", "Broken at #" + bad + ": an event was edited or removed", head);
+    else mark(w, "verified", "Verified: chain intact over " + n + " events", head);
+    if (m) settle(m, w);
   } catch {
-    links(w, seen.n);
     mark(w, "unverified", "The web door did not answer. Try again.", seen.head);
-    verb.textContent = "Check the chain";
   } finally {
     w.removeAttribute("aria-busy");
     verify.disabled = false;
@@ -673,27 +438,24 @@ const shortDay = (iso) => {
 function turnOf(t, n) {
   $("intro").hidden = true;
   const at = t.at || new Date().toISOString();
-  let day = null;
   if (new Date(at).toDateString() !== lastDay) {
     lastDay = new Date(at).toDateString();
-    day = el("h2", "day");
-    const time = el("time", "", dayName(at)); time.dateTime = at.slice(0, 10); day.append(time);
-    $("thread").append(day);
+    const d = el("h2", "day"), time = el("time", "", dayName(at)); time.dateTime = at.slice(0, 10); d.append(time);
+    $("thread").append(d);
     $("history").append(el("li", "label", shortDay(at)));
   }
-  const link = el("a", "row"); link.href = "#e" + n;
-  link.append(svg(SEALS.pending), el("span", "n", String(n)), el("span", "", t.q));
+  const link = el("a", "row"); link.href = "#e" + n; link.append(el("span", "", t.q));
   const item = el("li"); item.append(link); $("history").append(item);
   const entry = el("article", "entry"); entry.id = "e" + n;
   const head = el("p", "meta");
   const time = el("time", "", clock(at)); time.dateTime = at;
-  head.append(el("span", "no", "No. " + n), time, el("span", "who", user));
+  head.append(time, el("span", "who", user));
   const body = el("div", "body");
   body.append(el("h3", "q", t.q));
   const margin = el("aside", "margin");
   entry.append(head, body, margin);
   $("thread").append(entry);
-  return { entry, head, body, margin, day };
+  return { entry, head, body, margin };
 }
 function stepsOf(turn) {
   const steps = el("p", "steps"), clockText = el("span", "", "0 s"), t0 = Date.now();
@@ -705,60 +467,30 @@ function stepsOf(turn) {
 }
 const done = (steps, node) => { clearInterval(steps.timer); steps.replaceWith(node); };
 
-// Asking: the question leaves the composer and settles as the new entry's question, the thread moves up to make room
-// for it, and the spine gains its next mark. The question travels as a copy above the composer, then hands over to the
-// entry's own heading in the same place.
-function arrive(turn, steps, from) {
-  if (reduce.matches || !from) { turn.entry.scrollIntoView({ block: "end" }); return; }
-  turn.entry.scrollIntoView({ block: "end" });
-  const lift = scrollY - from.y, q = turn.body.querySelector(".q"), to = q.getBoundingClientRect();
-  const box = document.querySelector(".box"), boxNow = box.getBoundingClientRect();
-  const ghost = q.cloneNode(true);
-  ghost.classList.add("ghost");
-  ghost.setAttribute("aria-hidden", "true");
-  Object.assign(ghost.style, { left: to.left + "px", top: to.top + "px", width: to.width + "px" });
-  document.body.append(ghost);
-  q.style.opacity = "0";
-  const dx = from.left - to.left, dy = from.top + 1 - to.top;
-  animate(ghost, { transform: ["translate(" + dx + "px, " + dy + "px) scale(0.8)", "translate(0px, 0px) scale(1)"] }, SPRING)
-    .then(() => { q.style.opacity = ""; ghost.remove(); });
-  if (lift) animate($("thread"), { transform: ["translateY(" + lift + "px)", "translateY(0px)"] }, SPRING);
-  if (Math.abs(from.box - boxNow.top) > 1) animate(box, { transform: ["translateY(" + (from.box - boxNow.top) + "px)", "translateY(0px)"] }, SPRING);
-  animate([turn.head, steps, ...(turn.day ? [turn.day] : [])], { opacity: [0, 1] }, { duration: 0.24, ease: EASE, delay: 0.14 });
-  const marks = $("marks").children, made = marks[marks.length - 2], next = marks[marks.length - 1];
-  if (made) animate(made.firstChild, { transform: ["scale(0.67, 0.25)", "scale(1, 1)"] }, SPRING);
-  if (next) animate(next, { opacity: [0, 1], transform: ["translateY(-8px)", "translateY(0px)"] }, { ...SPRING, delay: 0.08 });
-}
-
-async function ask(text, from) {
+async function ask(text) {
   const t = { q: text, at: new Date().toISOString() };
   state.turns.push(t); save();
   const turn = turnOf(t, state.turns.length), steps = stepsOf(turn);
-  drawSpine(); tally(); number(true);
-  arrive(turn, steps, from);
-  const fail = (msg) => { t.error = msg; save(); done(steps, el("p", "err", msg)); tally(); };
+  turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
+  const fail = (msg) => { t.error = msg; save(); done(steps, el("p", "err", msg)); };
   let body;
   try {
     const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: state.thread + "-" + (state.n++), text, user }) });
     body = await res.json();
   } catch { return fail("The web door did not answer. Check that it is running, then ask again."); }
-  if (body.t === "refused") { t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); tally(); return; }
-  if (body.t !== "enqueued") return fail(body.error || "The message was not accepted.");
+  if (body.t === "refused") { t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); return; }
+  if (body.t !== "enqueued") return fail(body.error || "The web door did not take the question, so ask it again.");
   t.runId = body.runId; save();
   await follow(turn, steps, body.runId, true);
 }
 
-async function follow(turn, steps, runId, live) {
-  try { await watch(turn, steps, runId, live); }
-  catch { done(steps, el("p", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); tally(); }
+async function follow(turn, steps, runId, scroll) {
+  try { await watch(turn, steps, runId, scroll); }
+  catch { done(steps, el("p", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); }
 }
-async function watch(turn, steps, runId, live) {
-  const seen = new Set();
+async function watch(turn, steps, runId, scroll) {
   for (let i = 0; i < 600; i++) {
     const events = await fetchJson("/runs/" + runId + "/events");
-    for (const e of events) {
-      if (e.event.t === "tool.requested" && !seen.has(e.seq)) { seen.add(e.seq); steps.append(el("code", "", e.event.tool)); }
-    }
     const finished = events.find((e) => e.event.t === "run.finished");
     if (finished) {
       const started = events.find((e) => e.event.t === "run.started");
@@ -777,41 +509,33 @@ async function watch(turn, steps, runId, live) {
         const m = /\\n\\s*Source:\\s*(.+)\\s*$/.exec(raw);
         source = m ? m[1].trim() : null;
         done(steps, answer(m ? raw.slice(0, m.index) : raw));
-        if (withheld) turn.body.append(el("p", "facts", withheld + (withheld === 1 ? " tool result" : " tool results") + " withheld from the model"));
+        if (withheld) turn.body.append(el("p", "withheld", withheld + (withheld === 1 ? " tool result was" : " tool results were") + " withheld from the model"));
       }
-      const c = await cite(runId, source);
+      const c = cite(source);
       if (c) turn.margin.append(c);
-      const w = witness(runId, events);
-      turn.margin.append(w);
+      turn.margin.append(witness(runId, events));
       turn.entry.dataset.entryDone = "";
-      tally();
-      if (live) { turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" }); sealIn(w, events.at(-1).hash); }
-      track();
+      if (scroll) turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
       return;
     }
     await sleep(300);
   }
   done(steps, el("p", "err", "No answer after three minutes. Check that the worker is running, then reload the page."));
-  tally();
 }
 
 $("ask").addEventListener("submit", (e) => {
   e.preventDefault();
   const text = $("text").value.trim();
   if (!text) return;
-  const r = $("text").getBoundingClientRect();
-  const from = { left: r.left, top: r.top + 6, y: scrollY, box: document.querySelector(".box").getBoundingClientRect().top };
   $("text").value = ""; sync();
-  ask(text, from);
+  ask(text);
 });
 for (const b of document.querySelectorAll(".fresh")) b.addEventListener("click", () => {
   state = blank(); save();
   lastDay = null;
-  active = -1;
   $("thread").replaceChildren();
   $("history").replaceChildren();
   $("intro").hidden = false;
-  drawSpine(); tally(); number(false);
   if (!wide.matches) setSide(false, false);
   $("text").focus();
 });
@@ -824,9 +548,6 @@ state.turns.forEach((t, i) => {
   else if (t.runId) follow(turn, stepsOf(turn), t.runId, false);
 });
 save();
-number(false);
-drawSpine();
-tally();
 requestAnimationFrame(() => { document.documentElement.classList.remove("restoring"); if (state.turns.length) scrollTo(0, document.body.scrollHeight); });
 $("text").focus();
 </script>
