@@ -135,7 +135,7 @@ async function insertRun(events: readonly RunEvent[], startMs: number): Promise<
   return runId;
 }
 
-test("the runs page lists the newest runs and shows only those with a refusal, or only the failed ones, when asked", async () => {
+test("the runs page lists the newest runs, counts each filter on its tab, and shows only those with a refusal or only the failed ones when asked", async () => {
   const finished = (outcome: "answered" | "refused" | "failed"): RunEvent => ({ t: "run.finished", outcome, answer: null, reason: null, flags: [] });
   const withheld: RunEvent = { t: "tool.withheld", callId: "c1", cls: "D3", refusal: { code: "class-above-ceiling", payload: "D3", ceiling: "D1" } };
   const answered = await insertRun([started(), finished("answered")], Date.parse("2026-02-01T10:00:00Z"));
@@ -147,6 +147,7 @@ test("the runs page lists the newest runs and shows only those with a refusal, o
   assert.deepEqual(await ids("/runs?show=failed"), [failed]);
   assert.deepEqual(await ids("/runs?show=anything-else"), [failed, refused, answered]);
   const html = await (await fetch(`${base}/runs`)).text();
+  for (const [tab, n] of [["All", 3], ["With a refusal", 1], ["Failed", 1]] as const) assert.ok(html.includes(`${tab} <span class="count">${n}</span>`), tab);
   assert.match(html, /<tr class="refused">.*?refused<\/td><td class="num"><span class="mark" aria-hidden="true">▲<\/span>1<\/td><td class="num">3<\/td>/);
 });
 

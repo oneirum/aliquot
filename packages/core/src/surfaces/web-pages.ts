@@ -362,13 +362,20 @@ export type RunFilter = "all" | "refusals" | "failed";
 const OUTCOME_MARK: Record<string, string> = { answered: "✓", running: "…" };
 const outcomeBad = (o: string) => o === "refused" || o === "failed" || o === "faulted";
 
+const SHOWS: Record<RunFilter, (r: RunListRow) => boolean> = {
+  all: () => true,
+  refusals: (r) => r.refusals > 0 || r.outcome === "refused",
+  failed: (r) => r.outcome === "failed" || r.outcome === "faulted",
+};
+
 /** The newest runs, server-rendered: a table needs no script, and the times are localized by a few lines if script runs. */
-export function runsPage(rows: readonly RunListRow[], filter: RunFilter, limit: number, where = ""): string {
-  const tab = (f: RunFilter, text: string) => `<a class="btn" href="/runs${f === "all" ? "" : `?show=${f}`}"${f === filter ? ' aria-current="true"' : ""}>${text}</a>`;
+export function runsPage(newest: readonly RunListRow[], filter: RunFilter, limit: number, where = ""): string {
+  const rows = newest.filter(SHOWS[filter]);
+  const tab = (f: RunFilter, text: string) => `<a class="btn" href="/runs${f === "all" ? "" : `?show=${f}`}"${f === filter ? ' aria-current="true"' : ""}>${text} <span class="count">${newest.filter(SHOWS[f]).length}</span></a>`;
   const row = (r: RunListRow) => {
     const bad = outcomeBad(r.outcome);
     const cls = r.refusals > 0 || bad ? ' class="refused"' : "";
-    return `<tr${cls}><td class="when"><a href="/runs/${escapeHtml(r.runId)}"><time datetime="${escapeHtml(r.startedAt)}">${escapeHtml(r.startedAt.slice(0, 16).replace("T", " "))} UTC</time></a></td><td class="outcome${bad ? " bad" : ""}"><span class="mark" aria-hidden="true">${bad ? "⊘" : (OUTCOME_MARK[r.outcome] ?? "–")}</span>${escapeHtml(r.outcome)}</td><td class="num${r.refusals ? "" : " zero"}">${r.refusals ? `<span class="mark" aria-hidden="true">▲</span>${r.refusals}` : "0"}</td><td class="num">${r.events}</td><td class="agent">${escapeHtml(r.agent?.slice(0, 12) ?? "-")}</td></tr>`;
+    return `<tr${cls}><td class="when"><a href="/runs/${escapeHtml(r.runId)}"><time datetime="${escapeHtml(r.startedAt)}">${escapeHtml(r.startedAt.slice(0, 19).replace("T", " "))} UTC</time></a></td><td class="outcome${bad ? " bad" : ""}"><span class="mark" aria-hidden="true">${bad ? "⊘" : (OUTCOME_MARK[r.outcome] ?? "–")}</span>${escapeHtml(r.outcome)}</td><td class="num${r.refusals ? "" : " zero"}">${r.refusals ? `<span class="mark" aria-hidden="true">▲</span>${r.refusals}` : "0"}</td><td class="num">${r.events}</td><td class="agent">${escapeHtml(r.agent?.slice(0, 12) ?? "-")}</td></tr>`;
   };
   const empty = filter === "all" ? "No runs yet. Ask the lab a question and its run shows here." : filter === "refusals" ? `No run among the newest ${limit} had a refusal.` : `No run among the newest ${limit} failed.`;
   return `<!doctype html>
@@ -381,6 +388,7 @@ export function runsPage(rows: readonly RunListRow[], filter: RunFilter, limit: 
 .tabs { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
 .tabs .btn { font-weight: 500; color: var(--muted); padding: 8px 12px; }
 .tabs .btn[aria-current] { color: var(--ink); border-color: var(--ink); }
+.tabs .count { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 400; }
 tbody tr { position: relative; }
 td.when a { font-variant-numeric: tabular-nums; }
 td.when a::after { content: ""; position: absolute; inset: 0; }
@@ -411,7 +419,7 @@ td.agent { font: 12.5px var(--mono); color: var(--muted); }
   ${rows.length ? `<table><thead><tr><th>Started</th><th>Outcome</th><th class="num">Refused</th><th class="num">Events</th><th>Agent</th></tr></thead><tbody>${rows.map(row).join("")}</tbody></table>` : `<p class="state">${empty}</p>`}
 </div>
 <script type="module">
-for (const t of document.querySelectorAll("time")) t.textContent = new Date(t.dateTime).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+for (const t of document.querySelectorAll("time")) t.textContent = new Date(t.dateTime).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
 </script>
 </body>
 </html>`;

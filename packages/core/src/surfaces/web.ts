@@ -91,17 +91,14 @@ export function testDraft(draft: AgentDocument, m: { readonly member: string; re
 export const RUNS_LISTED = 100;
 
 /** The newest runs, from their events alone: no bodies, and no chain check (each record page verifies its own chain). */
-export async function listRuns(db: Db, filter: RunFilter, limit = RUNS_LISTED): Promise<RunListRow[]> {
+export async function listRuns(db: Db, limit = RUNS_LISTED): Promise<RunListRow[]> {
   const rows = await db.query<{ run_id: string; at: Date; agent: string | null; outcome: string; events: number; refusals: number }>(
-    `select * from (
-       select s.run_id, s.at, s.event->>'agent' as agent,
+    `select s.run_id, s.at, s.event->>'agent' as agent,
          coalesce((select f.event->>'outcome' from run_events f where f.run_id = s.run_id and f.event->>'t' = 'run.finished' limit 1), 'running') as outcome,
          (select count(*) from run_events e where e.run_id = s.run_id)::int as events,
          (select count(*) from run_events e where e.run_id = s.run_id and e.event->>'t' in ('egress.refused', 'tool.withheld'))::int as refusals
-       from run_events s where s.seq = 0 order by s.at desc, s.run_id limit $1) r
-     where $2 = 'all' or ($2 = 'refusals' and (r.refusals > 0 or r.outcome = 'refused')) or ($2 = 'failed' and r.outcome in ('failed', 'faulted'))
-     order by r.at desc, r.run_id`,
-    [limit, filter],
+     from run_events s where s.seq = 0 order by s.at desc, s.run_id limit $1`,
+    [limit],
   );
   return rows.rows.map((r) => ({ runId: r.run_id, startedAt: r.at.toISOString(), agent: r.agent, outcome: r.outcome, events: r.events, refusals: r.refusals }));
 }
@@ -186,7 +183,7 @@ export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) =
       if (req.method === "GET" && url.pathname === "/runs") {
         const show = url.searchParams.get("show");
         const filter: RunFilter = show === "refusals" || show === "failed" ? show : "all";
-        return sendHtml(req, res, runsPage(await listRuns(db, filter), filter, RUNS_LISTED, where));
+        return sendHtml(req, res, runsPage(await listRuns(db), filter, RUNS_LISTED, where));
       }
       const runPath = /^\/runs\/([^/]+)(?:\/(events|view))?$/.exec(url.pathname);
       if (req.method === "GET" && runPath) {
