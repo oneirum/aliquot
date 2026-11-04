@@ -14,7 +14,8 @@ import { loadEvents, recentRunIds, type RunId } from "../src/record.ts";
 import { formatRecordView, formatRunList, recordView } from "../src/record-view.ts";
 import { DEFAULT_ALLOWANCE, PERMISSION_FLAGS, requireProcessPermission, sealNetwork } from "../src/seal.ts";
 import { acpAgent } from "../src/acp.ts";
-import { ask, DoorError, isDataClass, stop, type DoorEvent } from "../src/door-client.ts";
+import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
+import { rank } from "../src/dataclass.ts";
 
 const denied = requireProcessPermission();
 if (denied) {
@@ -35,6 +36,9 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
   acp [--door url] [--user id] [--ceiling D0..D3]
                       speak the Agent Client Protocol on stdin and stdout, for T3 Code, Zed and other ACP clients
                       --door defaults to $ALIQUOT_DOOR, else http://127.0.0.1:3000; --user to $ALIQUOT_USER
+                      $ALIQUOT_SURFACE_TOKEN names the surface ask and acp speak as, such as [surfaces.acp];
+                      without it they speak as the web surface. The door withholds any answer above that
+                      surface's placement. --ceiling is a stricter promise on this side, for a client that keeps a copy.
   init [--config config/lab.toml] [--env .env] [--force] [--yes --sample <id>... [--pattern <regex>...]]
                       write lab.toml from a few questions, testing the participant id patterns against
                       sample ids, and write .env with new secrets when it does not exist yet. --force
@@ -84,7 +88,7 @@ if (command === "init") {
   if (runId !== undefined || values.json || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
   process.exit(await init());
 }
-if (command === "ask" || command === "acp") process.exit(await door(command, positionals.slice(1)));
+if (command === "ask" || command === "acp") process.exit(await viaDoor(command, positionals.slice(1)));
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0;
 const valid =
@@ -93,8 +97,9 @@ const valid =
   ((command === "record" && !!runId && /^[0-9a-f-]{36}$/i.test(runId)) || (command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000));
 if (!valid) usage();
 
-async function door(command: "ask" | "acp", words: readonly string[]): Promise<number> {
-  const base = values.door ?? process.env.ALIQUOT_DOOR ?? "http://127.0.0.1:3000";
+async function viaDoor(command: "ask" | "acp", words: readonly string[]): Promise<number> {
+  // From the environment only, never a flag, so the token stays out of argv and ps.
+  const door: Door = { url: values.door ?? process.env.ALIQUOT_DOOR ?? "http://127.0.0.1:3000", token: process.env[SURFACE_TOKEN_ENV] || null };
   const user = values.user ?? process.env.ALIQUOT_USER;
   const ceiling = values.ceiling;
   const timeout = Number(values.timeout);
@@ -102,8 +107,8 @@ async function door(command: "ask" | "acp", words: readonly string[]): Promise<n
   if (command === "acp") {
     if (words.length || values.json) usage();
     const handle = acpAgent({
-      ask: (input, opts) => ask(base, input, { ...opts, timeoutMs: timeout * 1000 }),
-      stop: (runId) => stop(base, runId, user),
+      ask: (input, opts) => ask(door, input, { ...opts, timeoutMs: timeout * 1000 }),
+      stop: (runId) => stop(door, runId, user),
       write: (line) => process.stdout.write(`${line}\n`),
       user,
       ...(ceiling && isDataClass(ceiling) ? { ceiling } : {}),
@@ -121,12 +126,14 @@ async function door(command: "ask" | "acp", words: readonly string[]): Promise<n
     else if (e.t === "tool") process.stderr.write(`  ${e.tool}\n`);
     else if (e.t === "refused") process.stdout.write(`Not sent: ${e.message}\n`);
     else if (e.refusal) process.stdout.write(`${e.refusal}\nrecord  ${e.recordUrl}\n`);
-    else if (e.withheld) process.stdout.write(`The answer is ${e.cls ?? "unclassed"}, above --ceiling ${ceiling}. Read it in the record.\nrecord  ${e.recordUrl}\n`);
-    else process.stdout.write(`${e.answer ?? `(no answer; the run ended ${e.outcome})`}\n\nrecord  ${e.recordUrl}\n`);
+    else if (e.withheld) {
+      const byCeiling = ceiling !== undefined && isDataClass(ceiling) && (e.cls === null || rank(e.cls) > rank(ceiling));
+      process.stdout.write(`The answer is ${e.cls ?? "unclassed"}, above ${byCeiling ? `--ceiling ${ceiling}` : "what this surface may show"}. Read it in the record.\nrecord  ${e.recordUrl}\n`);
+    } else process.stdout.write(`${e.answer ?? `(no answer; the run ended ${e.outcome})`}\n\nrecord  ${e.recordUrl}\n`);
   };
   let last: DoorEvent | undefined;
   try {
-    for await (const e of ask(base, { thread, message: `${thread}-${Date.now()}`, text, user }, { ...(ceiling && isDataClass(ceiling) ? { ceiling } : {}), timeoutMs: timeout * 1000 })) {
+    for await (const e of ask(door, { thread, message: `${thread}-${Date.now()}`, text, user }, { ...(ceiling && isDataClass(ceiling) ? { ceiling } : {}), timeoutMs: timeout * 1000 })) {
       out(e);
       last = e;
     }

@@ -11,10 +11,12 @@
  *   finished  {runId, outcome, answer, cls, withheld, refusal, recordUrl}
  *   refused   {runId: null, message}                  the gate refused before any run
  *
- * ceiling is the caller's own placement: an answer whose class ranks above it
- * comes back as withheld, with the record link only. The door has already
- * applied its surface's placement; this is the stricter of the two for a
- * caller that keeps a copy, such as T3 Code's thread store.
+ * A Door's token names the surface the caller speaks as; without one the
+ * door takes the caller for the web surface. The door withholds an answer
+ * above its surface's placement and posts the record link only, and finished
+ * then says withheld. ceiling is the caller's own, stricter promise: an
+ * answer whose class ranks above it is withheld here too, for a caller that
+ * keeps a copy, such as T3 Code's thread store.
  */
 
 import { request as httpRequest } from "node:http";
@@ -52,6 +54,15 @@ export interface AskOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Where the caller reads its surface token, so the token stays out of argv and ps. */
+export const SURFACE_TOKEN_ENV = "ALIQUOT_SURFACE_TOKEN";
+
+export interface Door {
+  readonly url: string;
+  /** The surface's bearer token, or null to speak as the web surface. */
+  readonly token: string | null;
+}
+
 export class DoorError extends Error {
   constructor(message: string) {
     super(message);
@@ -63,23 +74,33 @@ export function isDataClass(s: string): s is DataClass {
   return (DATA_CLASSES as readonly string[]).includes(s);
 }
 
+const base = (door: Door) => (door.url.endsWith("/") ? door.url : `${door.url}/`);
+
 /** The door's JSON over http or https, by the URL's scheme. Any other scheme is refused before a socket opens. */
-function call(base: string, method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-  const url = new URL(path, base.endsWith("/") ? base : `${base}/`);
+function call(door: Door, method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
+  const url = new URL(path, base(door));
   const send = url.protocol === "https:" ? httpsRequest : url.protocol === "http:" ? httpRequest : null;
   if (!send) return Promise.reject(new DoorError(`the door URL must be http or https, not ${url.protocol}`));
   const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+  const headers = { ...(payload ? { "content-type": "application/json", "content-length": payload.length } : {}), ...(door.token ? { authorization: `Bearer ${door.token}` } : {}) };
   return new Promise((resolve, reject) => {
-    const req = send(url, { method, headers: payload ? { "content-type": "application/json", "content-length": payload.length } : {} }, (res) => {
+    const req = send(url, { method, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
+        let json: unknown;
         try {
-          resolve({ status: res.statusCode ?? 0, json: text ? JSON.parse(text) : null });
+          json = text ? JSON.parse(text) : null;
         } catch {
-          reject(new DoorError(`${method} ${url.pathname} answered ${res.statusCode} with a body that is not JSON`));
+          json = undefined;
         }
+        if (res.statusCode === 401) {
+          const why = (json as { error?: unknown } | null | undefined)?.error;
+          return reject(new DoorError(`the door refused ${SURFACE_TOKEN_ENV} (401${typeof why === "string" ? `: ${why}` : ""}). Set it to the token of a surface the door serves, or unset it to ask as the web surface.`));
+        }
+        if (json === undefined) return reject(new DoorError(`${method} ${url.pathname} answered ${res.statusCode} with a body that is not JSON`));
+        resolve({ status: res.statusCode ?? 0, json });
       });
       res.on("error", reject);
     });
@@ -90,10 +111,10 @@ function call(base: string, method: "GET" | "POST", path: string, body?: unknown
 
 interface StoredEventJson {
   readonly seq: number;
-  readonly event: { readonly t: string; readonly tool?: string; readonly outcome?: string; readonly answer?: { readonly cls: string } | null; readonly refusal?: { readonly code: string } };
+  readonly event: { readonly t: string; readonly tool?: string; readonly outcome?: string; readonly mode?: string; readonly answer?: { readonly cls: string } | null; readonly refusal?: { readonly code: string } };
 }
 
-export async function* ask(door: string, input: AskInput, opts: AskOptions = {}): AsyncGenerator<DoorEvent> {
+export async function* ask(door: Door, input: AskInput, opts: AskOptions = {}): AsyncGenerator<DoorEvent> {
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const pollMs = opts.pollMs ?? 300;
   const sent = await call(door, "POST", "message", input);
@@ -104,7 +125,7 @@ export async function* ask(door: string, input: AskInput, opts: AskOptions = {})
   }
   if (sent.status !== 202 || body?.t !== "enqueued" || !body.runId) throw new DoorError(`the door did not take the message (${sent.status}): ${body?.error ?? JSON.stringify(body)}`);
   const runId = body.runId;
-  const recordUrl = new URL(`runs/${runId}`, door.endsWith("/") ? door : `${door}/`).href;
+  const recordUrl = new URL(`runs/${runId}`, base(door)).href;
   yield { t: "started", runId, recordUrl };
 
   const seen = new Set<number>();
@@ -125,7 +146,8 @@ export async function* ask(door: string, input: AskInput, opts: AskOptions = {})
       const cls = raw !== null && isDataClass(raw) ? raw : null;
       const replies = (await call(door, "GET", `replies?runId=${runId}`)).json as { kind: string; text: string }[];
       const reply = replies.find((r) => r.kind === "reply")?.text ?? null;
-      const withheld = reply !== null && opts.ceiling !== undefined && (cls === null || rank(cls) > rank(opts.ceiling));
+      const linkOnly = events.some((e) => e.event.t === "reply.posted" && e.event.mode === "link-only");
+      const withheld = linkOnly || (reply !== null && opts.ceiling !== undefined && (cls === null || rank(cls) > rank(opts.ceiling)));
       yield {
         t: "finished",
         runId,
@@ -144,7 +166,7 @@ export async function* ask(door: string, input: AskInput, opts: AskOptions = {})
 }
 
 /** The second click of the chat page's stop: the run stops at its next step. */
-export async function stop(door: string, runId: string, user: string): Promise<void> {
+export async function stop(door: Door, runId: string, user: string): Promise<void> {
   const r = await call(door, "POST", "stop", { runId, user, confirmed: true });
   if (r.status !== 202) throw new DoorError(`the door did not stop run ${runId} (${r.status})`);
 }
