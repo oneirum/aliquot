@@ -5,6 +5,7 @@ Start with the [README](../README.md): what Aliquot does, the quickstart and the
 | If you are | Read |
 |---|---|
 | Trying it on a laptop | [Quickstart](../README.md#quickstart), then `pnpm run doctor` if a step fails |
+| Installing it on a lab machine | [`install.md`](install.md): one `docker compose up` on Linux, `aliquot init`, PDF sources, backup and restore |
 | Setting it up for a lab | [The studio](../README.md#the-studio), [`lab.example.toml`](../lab.example.toml) (every table, commented) and [Model providers](../README.md#model-providers) |
 | Research IT, a data steward or an IRB | [For research IT and the IRB](for-research-it-and-irb.md): where each data class may go, what runs where, what is stored and under which key, and what is not covered yet |
 | Changing the code | [`AGENTS.md`](../AGENTS.md) (setup and checks, for people and coding agents) and [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
@@ -24,6 +25,9 @@ What changed in each release is in [`CHANGELOG.md`](../CHANGELOG.md).
 | `pnpm aliquot runs` | Lists the newest runs: start time, agent version, outcome, event count, chain check. |
 | `pnpm aliquot record <run-id>` | Prints one run's record and checks its hash chain. Exit 3 means the chain is broken. |
 | `node … packages/core/bin/kb.ts` | The steward's knowledge base tool: `compile`, `coverage`, `diff`, `search`, `publish`. See [The studio](../README.md#the-studio). |
+| `pnpm aliquot:init` | Writes `config/lab.toml` and `.env` from a few questions, testing the participant id patterns. `docker compose run --rm init` without Node. |
+| `scripts/backup.sh`, `scripts/restore.sh` | Back up and restore the compose stack's database and payload key. See [`install.md`](install.md). |
+| `scripts/compose-check.sh` | The whole install on a machine with only Docker, with PASS or FAIL per step. CI runs it on Ubuntu. |
 | `pnpm typecheck`, `pnpm test`, `pnpm lab0` | The checks every change must pass. CI also runs `pnpm slice1` and `pnpm unit3`. |
 
 `aliquot` and `kb` take `--config lab.toml` and read the database from the env var `lab.toml` names (`DATABASE_URL` by default).

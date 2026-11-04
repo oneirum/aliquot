@@ -16,6 +16,7 @@ Every answer leaves a record you can check. Open source, and it runs on a laptop
 
 <p align="center">
 <a href="#quickstart">Quickstart</a> ·
+<a href="#install-on-a-lab-machine">Install</a> ·
 <a href="#what-it-does-for-a-lab">What it does</a> ·
 <a href="#the-chat-page-and-the-record">Chat and record</a> ·
 <a href="#agents-on-claude-code-or-codex">Agent CLIs</a> ·
@@ -49,8 +50,6 @@ You need Node 26 or later, pnpm 10 and Docker. The demo and the checks use scrip
 
 Under each answer, **Record** opens the run's record: every model call, tool call and refusal, and a check that the hash chain is intact. `pnpm aliquot record <run-id>` prints the same record in a terminal, and `pnpm aliquot runs` lists the newest runs with their outcomes and chain checks, so you can find a run id without the browser. Both take `--json`. The demo prints the full commands, with its database.
 
-To set up a real lab, run `pnpm aliquot:init`. It asks where the lab's model runs, the web door port and the lab's participant id patterns, tests the patterns against ids you paste (a PASS or FAIL line for each), and writes `config/lab.toml`. It also writes `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values, but only when `.env` does not exist: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable.
-
 The demo's model is a scripted fake that searches, reads the top entry and quotes it. It shows the harness, not answer quality. Add `--studio` to start the authoring studio as well.
 
 To run the checks:
@@ -75,6 +74,28 @@ On a Mac where Claude Code or Codex is logged in, the same lab runs on the real 
 `--research` adds a third question that needs data, code and literature: how mean sleep time changed between two waves of a made-up sleep diary, and one paper comparing actigraphy with sleep diaries. The agent lists the datasets, runs Python over the CSV in the sandbox and searches OpenAlex.
 
 This uses your own CLI login (`dev_shared_login`), so it is for a developer's machine only, and the agent sees public (D0) data alone. A lab uses a dedicated service login; see [Agents on Claude Code or Codex](#agents-on-claude-code-or-codex).
+
+## Install on a lab machine
+
+A Linux machine needs only Docker. One `docker compose up` starts Postgres, the worker, the web door and a production build of the studio, which applies its committed migrations when it starts.
+
+	git clone https://github.com/oneirum/aliquot.git
+	cd aliquot
+	docker compose run --rm init
+	docker compose up -d --build
+
+`init` asks where the lab's model runs, the web door port and the lab's participant id patterns. It tests the patterns against ids you paste, with a PASS or FAIL line for each, and asks again on a FAIL. It writes `config/lab.toml`, and `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values. It never rewrites an existing `.env`: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable. On a machine with Node, `pnpm aliquot:init` does the same.
+
+The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. The web door has no sign-in yet, so keep it on the machine until sign-on lands in 0.8. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
+
+	docker compose exec worker aliquot-kb compile --definition /etc/aliquot/kb.json --wait
+	docker compose exec worker aliquot runs
+
+**PDF sources and `run_code`** need the sandbox image: `docker build -t aliquot-sandbox sandbox`, then answer yes to init's sandbox question with the id that `docker image inspect --format '{{.Id}}' aliquot-sandbox` prints. init then adds `compose.sandbox.yaml` to `.env`, which gives the Docker socket to the worker only. A PDF is read by poppler inside that container, with no network and a read-only root. A scanned page fails with a message, because Aliquot does no OCR. The studio gets no socket, so a PDF source compiles with the kb command.
+
+**Backup and restore.** `scripts/backup.sh` writes the database dump and a copy of the payload key, with checksums. Keep the key apart from the dump: the payloads in the dump are encrypted under it, and anyone with both can read them. `scripts/restore.sh <dir>` refuses a key the backup was not made with, replaces the database, restarts the stack and checks every run's hash chain. [`docs/install.md`](docs/install.md) has the details.
+
+`scripts/compose-check.sh` proves the whole path on a machine with only Docker, and CI runs it on a clean Ubuntu runner. It brings the stack up, gets a cited answer from the lab0 handbook, reads a LaTeX PDF and a Word PDF in the sandbox, requires the scanned page to fail, then backs up, wipes the database, restores and requires the same run to verify again.
 
 ## What it does for a lab
 
@@ -306,11 +327,11 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - `pnpm run doctor`, a preflight that names what is missing on a machine and how to fix it.
 - Word (.docx) sources for knowledge bases, read to Markdown in core with no new dependency.
 - PDF sources for knowledge bases, read by poppler inside the no-network sandbox container, never in a Node process.
+- One `docker compose up` on Linux with a production studio build and committed migrations, `aliquot init`, and backup and restore, checked end to end on a clean Ubuntu runner.
 - A summary at the top of every record, in the page, the terminal and `--json`, and a JSON download from the record page.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
-- **0.5, install it on a lab machine:** one Docker Compose stack on Linux with a production studio build and committed migrations; PDF sources, parsed inside the no-network sandbox container; `aliquot init` to write `lab.toml`; backup and restore.
 - **0.6, ask where the lab already talks:** a Slack door (Teams after a lab asks), and a router across several agents. Today a channel is bound to one agent.
 - **0.7, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
 - **0.8, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
@@ -325,7 +346,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - The seal stops a mistake in Aliquot's code or a dependency from reaching the network. It is not a sandbox for hostile code in the process.
 - A built-in tool's version is the hash of its spec, not its code. A change to a tool's code alone moves no agent version.
 - Under `dev_shared_login`, Claude Code reads its credential from the developer's keychain. That is why the mode is for a developer's machine only.
-- The web door has no sign-in and does not check an agent's audience yet. It listens on `127.0.0.1` only. Do not expose it beyond the machine until sign-on lands.
+- The web door has no sign-in and does not check an agent's audience yet. The compose stack publishes it on `127.0.0.1` only. Do not expose it beyond the machine until sign-on lands.
 
 ## Repository layout
 

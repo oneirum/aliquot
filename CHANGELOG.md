@@ -2,6 +2,15 @@
 
 Each release is tagged on `main`. Dates are in US Central time.
 
+## 0.5.0 (2026-11-03)
+
+- One `docker compose up` on Linux starts Postgres, the worker, the web door and a production build of the studio. The studio applies committed Payload migrations at start, and CI fails when the collections change without one. Ports are published on `127.0.0.1` unless `.env` sets `LABH_BIND`. [`docs/install.md`](docs/install.md) is the guide for research IT.
+- PDF sources for knowledge bases, from the `kb` command. poppler reads them inside the sandbox container (no network, read-only root, uid 65534), never in a Node process. A page that is only an image fails the whole file with a message naming the page, because Aliquot does no OCR. `compose.sandbox.yaml` gives the Docker socket to the worker only. The studio gets no socket, so PDFs compile with the `kb` command.
+- `aliquot init` (`pnpm aliquot:init`, or `docker compose run --rm init` on a machine with only Docker) writes `config/lab.toml` and `.env`. It tests the lab's participant id patterns against ids you paste, with a PASS or FAIL line for each, refuses a pattern that matches ordinary words, and never rewrites an existing `.env`.
+- `scripts/backup.sh` and `scripts/restore.sh` back up and restore the database and the payload key. Restore refuses a key the backup was not made with, and ends by checking every run's hash chain.
+- `scripts/compose-check.sh` runs all of it on a machine with only Docker, and CI runs it on a clean Ubuntu runner: a cited answer from the lab0 handbook, a LaTeX PDF and a Word PDF read in the sandbox, a scanned page that must fail, then a backup, wipe and restore that ends with the same run verifying and decrypting again.
+- The web door takes `--host`, so it can listen inside a container. The `kb` command prints a source it cannot read as one line instead of a stack trace.
+
 ## 0.4.0 (2026-11-03)
 
 - Word (.docx) sources for knowledge bases, from the `kb` command and the studio. Core reads them to Markdown with no new dependency: headings by style name, list items, tables, tabs and line breaks; deleted tracked changes, images, comments, headers and footers are dropped. The lab's participant id patterns see the Word text. A `.pdf` or `.doc` source gets a message saying to save it as `.docx`.

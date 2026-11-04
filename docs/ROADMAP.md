@@ -18,12 +18,13 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 - Chat answers keep their lists, headings and code blocks, and say what each run read and how long it took.
 - `pnpm run doctor` in the docs, because pnpm's built-in `doctor` command shadows a bare `pnpm doctor`.
 
-## 0.5: install it on a lab machine
+## 0.5: install it on a lab machine (released)
 
-- **For:** research IT.
-- **After it:** one `docker compose up` starts Postgres, the worker, the web door and a production studio build with committed migrations, on Linux. PDF sources, parsed inside the no-network sandbox container, so an untrusted file never parses in the worker. `aliquot init` writes a `lab.toml` from a few questions and tests the lab's participant id pattern against a sample. Backup and restore of the database and the payload key, documented and checked.
-- **Done when:** a CI job brings the stack up on a clean Ubuntu runner and gets a cited answer from the lab0 handbook, and a PDF fixture set passes (a Word export, a LaTeX paper, and a scanned page that fails with a clear message).
-- **Leaves out:** Kubernetes, high availability, OCR.
+- One `docker compose up` on Linux starts Postgres, the worker, the web door and a production studio build that applies committed migrations. [`docs/install.md`](install.md) is the guide for research IT.
+- PDF sources, read by poppler inside the no-network sandbox container, never in a Node process. A scanned page fails with a clear message, since there is no OCR.
+- `aliquot init` (or `docker compose run --rm init`) writes `lab.toml` and `.env`, and tests the lab's participant id patterns against ids you paste.
+- `scripts/backup.sh` and `scripts/restore.sh` for the database and the payload key.
+- Checked by `scripts/compose-check.sh`, which CI runs on a clean Ubuntu runner: a cited answer from the lab0 handbook, the PDF fixtures (a Word PDF, a LaTeX PDF, a scanned page that must fail), and a backup, wipe and restore that ends with the same run verifying again.
 
 ## 0.6: ask where the lab already talks
 
