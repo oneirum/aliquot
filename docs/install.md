@@ -69,11 +69,12 @@ Both scripts honour `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` and `ALIQUOT_ENV` (th
 
 ## Upgrade
 
-	git pull
+	git fetch --tags
 	scripts/backup.sh
+	git checkout v0.5.1
 	docker compose up -d --build
 
-New core and studio migrations apply on start, each once, under a lock.
+Each release is a tag; this builds `aliquot-app:0.5.1`. New core and studio migrations apply on start, each once, under a lock.
 
 ## Check an install
 

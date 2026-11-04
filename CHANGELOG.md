@@ -2,8 +2,12 @@
 
 Each release is tagged on `main`. Dates are in US Central time.
 
-## Unreleased
+## 0.5.1 (2026-11-04)
 
+- Security: `next` 16.4.5 fixes the 11 Next.js advisories open against 16.3.3 (GHSA-vcvr-r3jv-pc5j, GHSA-2464-fhr4-w9xw and GHSA-673q-mjm6-r5xr critical; GHSA-cjq9-62q9-8jv4 and GHSA-p3m5-59mp-jv5r high; six medium or low). Overrides lift `dompurify` (from monaco-editor) to 3.4.17 and drizzle-kit's old `esbuild` to 0.25. `deepmerge` has no fixed release, so `vendor/deepmerge` is 4.3.1 with the GHSA-gcqx-w48m-w2h4 fix and a test. `.github/dependabot.yml` turns on weekly grouped npm updates.
+- Agent backends take a key the lab owns: `api_key_env` reaches Claude Code as `ANTHROPIC_API_KEY` and Codex as `CODEX_API_KEY`. `auth_env`, a personal subscription's OAuth token, now parses only at `placement = "public"` and runs only under `agent-worker --dev-shared-login`; a `lab.toml` with `auth_env` at `approved` or `zdr` fails to start. The README and the IRB doc no longer suggest `claude setup-token`; the install guide says which model accounts Aliquot may use, and the IRB doc gains a "Model accounts" section.
+- `lab.example.toml`'s OpenRouter example routes Claude to `amazon-bedrock` and `google-vertex`, the providers with zero-retention Claude endpoints; `only = ["anthropic"]` with `zdr = true` matched none.
+- The roadmap puts sign-on, keys and retention (now 0.7) before studies an IRB can cite (now 0.8).
 - `aliquot ask` asks a question through the web door from a terminal or a script. `--json` prints one line per step (`started`, `tool`, `finished`, `refused`), each with the run's record link, and the exit code says whether it was answered. `--ceiling` withholds an answer above a class from a caller that keeps its own copy. `pnpm lab0` gains check G: `aliquot ask --json` gets the same cited answer as the chat page, and a record whose chain verifies.
 - `aliquot acp` speaks the Agent Client Protocol on stdin and stdout, so T3 Code (as a local ACP command), Zed and other ACP clients run Aliquot agents as threads. One session is one Aliquot thread. The tools the run used appear as steps, a refusal ends the turn as `refusal`, and cancelling stops the run.
 - `scripts/tmux.sh` (`pnpm up:tmux`) lays out the worker, the web door, the studio and an `ask` shell as one tmux session. A window whose process exits keeps its last lines. [`docs/harnesses.md`](docs/harnesses.md) covers all three.

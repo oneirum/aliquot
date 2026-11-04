@@ -26,7 +26,7 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 - `scripts/backup.sh` and `scripts/restore.sh` for the database and the payload key.
 - Checked by `scripts/compose-check.sh`, which CI runs on a clean Ubuntu runner: a cited answer from the lab0 handbook, the PDF fixtures (a Word PDF, a LaTeX PDF, a scanned page that must fail), and a backup, wipe and restore that ends with the same run verifying again.
 
-## 0.5.1: reach it from other harnesses
+## 0.5.1: reach it from other harnesses (released)
 
 - **For:** whoever already works in a terminal, tmux, T3 Code, an editor, or a lab's own orchestrator.
 - **After it:** one contract with no adapter per tool. `aliquot ask --json` prints a JSON line per step, each with the record link. `aliquot acp` speaks the Agent Client Protocol, so T3 Code, Zed and JetBrains run Aliquot agents as threads. `scripts/tmux.sh` lays the processes out in one tmux session. `--ceiling` keeps an answer above a class out of a client that stores its own copy. [`docs/harnesses.md`](harnesses.md) is the guide.

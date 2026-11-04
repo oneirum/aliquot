@@ -7,7 +7,7 @@
 # Ollama is the optional local model (--profile ollama); drop it when lab.toml points at the lab's own vLLM box.
 x-app: &app
   build: .
-  image: aliquot-app:0.5.0
+  image: aliquot-app:0.5.1
   restart: unless-stopped
   depends_on:
     postgres: { condition: service_healthy }
@@ -61,7 +61,7 @@ services:
   # docker compose run --rm init: aliquot init on a machine with only Docker. It writes config/lab.toml and .env
   # here, owned by whoever owns this folder, and never rewrites an existing .env.
   init:
-    image: aliquot-app:0.5.0
+    image: aliquot-app:0.5.1
     build: .
     profiles: [init]
     user: root
