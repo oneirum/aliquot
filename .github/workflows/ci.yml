@@ -33,6 +33,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - name: Chromium for the service worker test
+        run: pnpm exec playwright install --with-deps --only-shell chromium
       - run: pnpm test
       - run: pnpm lab0
       - run: pnpm slice1 --skip-ollama
