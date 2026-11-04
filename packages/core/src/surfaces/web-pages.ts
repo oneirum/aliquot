@@ -1,14 +1,25 @@
 /**
- * The two pages the web door serves: the member chat page and the read-only
- * run record. Static HTML with inline CSS and script, no build step and no
- * third-party code, so the page loads from 127.0.0.1 with nothing fetched
- * from anywhere else. Both read only the JSON routes in web.ts.
+ * The pages the web door serves: the member chat page, the list of runs and
+ * each run's record. Static HTML with inline CSS and script, no build step
+ * and no third-party code, so the page loads from 127.0.0.1 with nothing
+ * fetched from anywhere else. The chat page reads only the JSON routes in
+ * web.ts; the runs list and the record arrive with their data in the page.
  *
  * where is the lab's name, or the machine's hostname, shown at the right of the header; empty shows nothing.
  */
 
+import type { RecordView } from "../record-view.ts";
+
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(where)}</span>` : "");
+/** JSON inside a script element: `<` is escaped so no string in it can close the element. */
+const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
+
+type Page = "ask" | "runs" | "record";
+function header(current: Page, where: string, extra = ""): string {
+  const link = (page: Page, href: string, text: string) => `<a href="${href}"${page === current ? ' aria-current="page"' : ""}>${text}</a>`;
+  return `<header><a class="wordmark" href="/">Aliquot</a><nav>${extra}${link("ask", "/", "Ask")}${link("runs", "/runs", "Runs")}${whereSpan(where)}</nav></header>`;
+}
 
 const BASE_CSS = `
 :root {
@@ -32,7 +43,23 @@ const BASE_CSS = `
 html, body { margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
+header nav { display: flex; align-items: baseline; gap: 16px; font-size: 13.5px; }
+header nav a, header .where, header nav button { color: var(--muted); text-decoration: none; }
+header nav a[aria-current] { color: var(--ink); }
+header nav button { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+header nav button[hidden] { display: none; }
+header .where { padding-left: 16px; border-left: 1px solid var(--line); }
+@media (hover: hover) and (pointer: fine) { header nav a:hover, header nav button:hover { color: var(--ink); } }
 .wordmark { font-weight: 650; letter-spacing: -0.01em; font-size: 15px; color: var(--ink); text-decoration: none; }
+.btn { display: inline-flex; align-items: center; gap: 7px; font: 600 13.5px/1 system-ui, sans-serif; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; text-decoration: none; cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
+.btn:active { transform: scale(0.97); }
+.btn svg { width: 14px; height: 14px; }
+.btn[hidden] { display: none; }
+@media (hover: hover) and (pointer: fine) { .btn:hover { border-color: var(--muted); } }
+.mark { font-size: 0.85em; margin-right: 6px; }
+@media print { header nav, .btn { display: none; } body { background: #fff; color: #000; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 .pill { display: inline-block; font: 600 11px/1 var(--mono); letter-spacing: 0.02em; padding: 4px 6px; border-radius: 5px; background: var(--quiet); color: var(--muted); vertical-align: 1px; }
 .pill.d3, .pill.r { background: var(--warn-bg); color: var(--warn-ink); }
 `;
@@ -46,8 +73,6 @@ export function chatPage(where = ""): string {
 <title>Ask the lab · Aliquot</title>
 <style>${BASE_CSS}
 .shell { max-width: 720px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; padding: 0 20px; }
-header { display: flex; align-items: baseline; justify-content: space-between; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
-header .where { font-size: 13px; color: var(--muted); }
 .intro { padding: 44px 0 8px; }
 .intro h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; font-weight: 650; }
 .tries { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
@@ -57,6 +82,7 @@ header .where { font-size: 13px; color: var(--muted); }
 #thread { flex: 1; padding: 20px 0 24px; display: flex; flex-direction: column; gap: 22px; }
 .turn { display: flex; flex-direction: column; gap: 10px; opacity: 1; transform: none; transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); }
 @starting-style { .turn { opacity: 0; transform: translateY(6px); } }
+.restoring .turn { transition: none; }
 .q { align-self: flex-end; max-width: 80%; background: var(--quiet); border-radius: 14px 14px 4px 14px; padding: 9px 14px; white-space: pre-wrap; }
 .a { max-width: 92%; }
 .a > * { margin: 0 0 10px; }
@@ -87,6 +113,7 @@ header .where { font-size: 13px; color: var(--muted); }
 form { position: sticky; bottom: 0; padding: 12px 0 20px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
 .box { display: flex; gap: 8px; align-items: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 14px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.04); }
 .box:focus-within { border-color: var(--muted); }
+textarea:focus-visible { outline: none; }
 textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; padding: 6px 0; max-height: 160px; }
 button.send { font: 600 14px/1 system-ui, sans-serif; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer; transition: transform 160ms var(--ease-out), opacity 160ms ease; }
 button.send:active { transform: scale(0.97); }
@@ -96,7 +123,7 @@ button.send:disabled { opacity: 0.45; cursor: default; }
 </head>
 <body>
 <div class="shell">
-  <header><a class="wordmark" href="/">Aliquot</a>${whereSpan(where)}</header>
+  ${header("ask", where, '<button type="button" id="fresh" hidden>New thread</button>')}
   <section class="intro" id="intro">
     <h1>Ask the lab</h1>
     <div class="tries" id="tries"></div>
@@ -114,8 +141,11 @@ const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const user = params.get("user") || "member-1";
 const channel = params.get("channel") || undefined;
-const thread = "web-" + crypto.randomUUID();
-let n = 0;
+// The thread lives in this tab's sessionStorage, so a reload or a visit to a record and back keeps it.
+const KEY = "aliquot.thread." + (channel || "") + "." + user;
+const blank = () => ({ v: 1, thread: "web-" + crypto.randomUUID(), n: 0, turns: [] });
+let state = (() => { try { const s = JSON.parse(sessionStorage.getItem(KEY) || "null"); return s && s.v === 1 && Array.isArray(s.turns) ? s : blank(); } catch { return blank(); } })();
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(state)); } catch {} $("fresh").hidden = !state.turns.length; };
 
 for (const q of (params.get("try") || "").split("|").filter(Boolean)) {
   const b = document.createElement("button");
@@ -199,25 +229,42 @@ async function facts(runId) {
 
 function recordLink(runId) { const a = el("a", "", "Record"); a.href = "/runs/" + runId; return a; }
 
-async function ask(text) {
+function turnOf(text) {
   $("intro").hidden = true;
   const turn = el("div", "turn");
   turn.append(el("div", "q", text));
+  $("thread").append(turn);
+  return turn;
+}
+function stepsOf(turn) {
   const steps = el("div", "steps"); steps.append(el("span", "dot"), el("span", "", "Reading the lab's documents"));
   turn.append(steps);
-  $("thread").append(turn);
+  return steps;
+}
+
+async function ask(text) {
+  const t = { q: text };
+  state.turns.push(t); save();
+  const turn = turnOf(text), steps = stepsOf(turn);
   turn.scrollIntoView({ block: "end", behavior: "smooth" });
-  let res, body;
+  const fail = (msg) => { t.error = msg; save(); steps.replaceWith(el("div", "err", msg)); };
+  let body;
   try {
-    res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread, message: thread + "-" + (n++), text, user }) });
+    const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: state.thread + "-" + (state.n++), text, user }) });
     body = await res.json();
-  } catch { steps.replaceWith(el("div", "err", "The web door did not answer. Is it running?")); return; }
-  if (body.t === "refused") { steps.replaceWith(banner("Not sent", body.userFacing)); return; }
-  if (body.t !== "enqueued") { steps.replaceWith(el("div", "err", body.error || "The message was not accepted.")); return; }
-  const runId = body.runId;
+  } catch { return fail("The web door did not answer. Check that it is running, then ask again."); }
+  if (body.t === "refused") { t.notice = body.userFacing; save(); steps.replaceWith(banner("Not sent", body.userFacing)); return; }
+  if (body.t !== "enqueued") return fail(body.error || "The message was not accepted.");
+  t.runId = body.runId; save();
+  await follow(turn, steps, body.runId, true);
+}
+
+async function follow(turn, steps, runId, scroll) {
   const seen = new Set();
   for (let i = 0; i < 600; i++) {
-    const events = await (await fetch("/runs/" + runId + "/events")).json();
+    let events;
+    try { events = await (await fetch("/runs/" + runId + "/events")).json(); }
+    catch { steps.replaceWith(el("div", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); return; }
     for (const e of events) {
       if (e.event.t === "tool.requested" && !seen.has(e.seq)) { seen.add(e.seq); steps.append(el("code", "", e.event.tool)); }
     }
@@ -246,12 +293,12 @@ async function ask(text) {
         meta.append(recordLink(runId));
         turn.append(meta);
       }
-      turn.scrollIntoView({ block: "end", behavior: "smooth" });
+      if (scroll) turn.scrollIntoView({ block: "end", behavior: "smooth" });
       return;
     }
     await sleep(300);
   }
-  steps.replaceWith(el("div", "err", "No answer after three minutes. Check that the worker is running."));
+  steps.replaceWith(el("div", "err", "No answer after three minutes. Check that the worker is running, then reload the page."));
 }
 
 function pillOf(cls) { return el("span", "pill " + String(cls).toLowerCase(), cls); }
@@ -264,51 +311,134 @@ $("ask").addEventListener("submit", (e) => {
   $("text").value = ""; sync();
   ask(text);
 });
+$("fresh").addEventListener("click", () => {
+  state = blank(); save();
+  $("thread").replaceChildren();
+  $("intro").hidden = false;
+  $("text").focus();
+});
+
+document.documentElement.classList.add("restoring");
+for (const t of state.turns) {
+  const turn = turnOf(t.q);
+  if (t.notice) turn.append(banner("Not sent", t.notice));
+  else if (t.error) turn.append(el("div", "err", t.error));
+  else if (t.runId) follow(turn, stepsOf(turn), t.runId, false);
+}
+save();
+requestAnimationFrame(() => { document.documentElement.classList.remove("restoring"); if (state.turns.length) scrollTo(0, document.body.scrollHeight); });
 $("text").focus();
 </script>
 </body>
 </html>`;
 }
 
-export function recordPage(runId: string, where = ""): string {
+const PAGE_CSS = `
+.shell { max-width: 960px; margin: 0 auto; padding: 0 20px 64px; }
+.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 36px 0 18px; }
+.top .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+h1 { font-size: 26px; letter-spacing: -0.02em; line-height: 1.15; margin: 0; font-weight: 650; }
+.when { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 0 10px 8px 0; border-bottom: 1px solid var(--line); }
+td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+th:first-child, td:first-child { padding-left: 12px; }
+tr.refused { background: var(--warn-bg); box-shadow: inset 3px 0 var(--warn-ink); }
+.state { color: var(--muted); font-size: 14.5px; padding: 18px 0; }
+.state[hidden], table[hidden] { display: none; }
+@media (max-width: 640px) { h1 { font-size: 23px; } .top { margin-top: 28px; } }
+`;
+
+export interface RunListRow {
+  readonly runId: string;
+  readonly startedAt: string;
+  readonly agent: string | null;
+  readonly outcome: string;
+  readonly events: number;
+  readonly refusals: number;
+}
+export type RunFilter = "all" | "refusals" | "failed";
+
+const OUTCOME_MARK: Record<string, string> = { answered: "✓", running: "…" };
+const outcomeBad = (o: string) => o === "refused" || o === "failed" || o === "faulted";
+
+/** The newest runs, server-rendered: a table needs no script, and the times are localized by a few lines if script runs. */
+export function runsPage(rows: readonly RunListRow[], filter: RunFilter, limit: number, where = ""): string {
+  const tab = (f: RunFilter, text: string) => `<a class="btn" href="/runs${f === "all" ? "" : `?show=${f}`}"${f === filter ? ' aria-current="true"' : ""}>${text}</a>`;
+  const row = (r: RunListRow) => {
+    const bad = outcomeBad(r.outcome);
+    const cls = r.refusals > 0 || bad ? ' class="refused"' : "";
+    return `<tr${cls}><td class="when"><a href="/runs/${escapeHtml(r.runId)}"><time datetime="${escapeHtml(r.startedAt)}">${escapeHtml(r.startedAt.slice(0, 16).replace("T", " "))} UTC</time></a></td><td class="outcome${bad ? " bad" : ""}"><span class="mark" aria-hidden="true">${bad ? "⊘" : (OUTCOME_MARK[r.outcome] ?? "–")}</span>${escapeHtml(r.outcome)}</td><td class="num${r.refusals ? "" : " zero"}">${r.refusals ? `<span class="mark" aria-hidden="true">▲</span>${r.refusals}` : "0"}</td><td class="num">${r.events}</td><td class="agent">${escapeHtml(r.agent?.slice(0, 12) ?? "-")}</td></tr>`;
+  };
+  const empty = filter === "all" ? "No runs yet. Ask the lab a question and its run shows here." : filter === "refusals" ? `No run among the newest ${limit} had a refusal.` : `No run among the newest ${limit} failed.`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runs · Aliquot</title>
+<style>${BASE_CSS}${PAGE_CSS}
+.tabs { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
+.tabs .btn { font-weight: 500; color: var(--muted); padding: 8px 12px; }
+.tabs .btn[aria-current] { color: var(--ink); border-color: var(--ink); }
+tbody tr { position: relative; }
+td.when a { font-variant-numeric: tabular-nums; }
+td.when a::after { content: ""; position: absolute; inset: 0; }
+@media (hover: hover) and (pointer: fine) { tbody tr:hover { background: var(--quiet); } tbody tr.refused:hover { background: var(--warn-bg); } tbody tr:hover td.when a { text-decoration-thickness: 2px; } }
+td.outcome { white-space: nowrap; }
+td.outcome.bad { color: var(--warn-ink); font-weight: 600; }
+tr.refused td { color: var(--warn-ink); }
+td.num { font-variant-numeric: tabular-nums; text-align: right; padding-right: 24px; }
+th.num { text-align: right; padding-right: 24px; }
+td.agent { font: 12.5px var(--mono); color: var(--muted); }
+@media (max-width: 640px) {
+  thead { display: none; }
+  table, tbody { display: block; }
+  tr { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "when outcome" "agent num"; gap: 4px 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  tr.refused { margin: 0 -20px; padding: 11px 20px; }
+  td, td:first-child { display: block; padding: 0; border: 0; }
+  td.when { grid-area: when; } td.outcome { grid-area: outcome; justify-self: end; }
+  td.agent { grid-area: agent; } td.num:nth-of-type(3) { grid-area: num; justify-self: end; padding: 0; }
+  td.num:nth-of-type(3)::after { content: " refused"; } td.num.zero, td.num:nth-of-type(4) { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  ${header("runs", where)}
+  <div class="top"><div><h1>Runs</h1><p class="when">The newest ${limit}, newest first. Open one to read its record.</p></div></div>
+  <nav class="tabs" aria-label="Show">${tab("all", "All")}${tab("refusals", "With a refusal")}${tab("failed", "Failed")}</nav>
+  ${rows.length ? `<table><thead><tr><th>Started</th><th>Outcome</th><th class="num">Refused</th><th class="num">Events</th><th>Agent</th></tr></thead><tbody>${rows.map(row).join("")}</tbody></table>` : `<p class="state">${empty}</p>`}
+</div>
+<script type="module">
+for (const t of document.querySelectorAll("time")) t.textContent = new Date(t.dateTime).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+</script>
+</body>
+</html>`;
+}
+
+export function recordPage(view: RecordView, where = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Run record · Aliquot</title>
-<style>${BASE_CSS}
-.shell { max-width: 960px; margin: 0 auto; padding: 0 20px 64px; }
-header { display: flex; align-items: baseline; justify-content: space-between; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
-header nav { display: flex; gap: 16px; font-size: 13px; }
-header nav a, header .where { color: var(--muted); text-decoration: none; }
-@media (hover: hover) and (pointer: fine) { header nav a:hover { color: var(--ink); } }
-.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 36px 0 18px; }
-h1 { font-size: 26px; letter-spacing: -0.02em; line-height: 1.15; margin: 0; font-weight: 650; }
-.when { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
-.dl { display: inline-flex; align-items: center; gap: 7px; font: 600 13.5px/1 system-ui, sans-serif; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; text-decoration: none; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
-.dl:active { transform: scale(0.97); }
-.dl svg { width: 14px; height: 14px; }
-@media (hover: hover) and (pointer: fine) { .dl:hover { border-color: var(--muted); } }
-.dl[hidden] { display: none; }
+<style>${BASE_CSS}${PAGE_CSS}
 .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
 .summary[hidden] { display: none; }
 .stat { background: var(--surface); padding: 12px 14px 13px; min-width: 0; }
 .stat .k { font-size: 12.5px; color: var(--muted); }
-.stat .v { font-size: 19px; font-weight: 620; letter-spacing: -0.01em; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.stat .v small { font-size: 13px; font-weight: 450; color: var(--muted); letter-spacing: 0; }
+.stat .v { font-size: 19px; font-weight: 620; letter-spacing: -0.01em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat .v small { font-size: 13px; font-weight: 450; white-space: nowrap; color: var(--muted); letter-spacing: 0; }
 .stat .s { font: 12px/1.4 var(--mono); color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
 .stat.warn { background: var(--warn-bg); }
 .stat.warn .k, .stat.warn .v, .stat.warn .v small { color: var(--warn-ink); }
-.mark { font-size: 0.85em; margin-right: 6px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0 0 26px; font-size: 14px; }
 dt { color: var(--muted); }
 dd { margin: 0; font-family: var(--mono); font-size: 13px; word-break: break-all; }
 .chain { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; font-family: system-ui, sans-serif; font-size: 14px; }
 .chain.ok { color: var(--ok); } .chain.bad { color: var(--bad); }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 0 10px 8px 0; border-bottom: 1px solid var(--line); }
-td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
 td.seq, td.t { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 td.ev { font: 600 13px var(--mono); white-space: nowrap; }
 td.ev .kind { display: inline-block; width: 8px; height: 8px; margin: 0 9px 1px 0; background: var(--muted); vertical-align: middle; }
@@ -318,11 +448,6 @@ tr.run td.ev .kind { transform: rotate(45deg) scale(0.85); }
 tr.other td.ev .kind { height: 2px; margin-bottom: 3px; }
 tr.refused td.ev .kind { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--warn-ink); }
 tr.refused td.ev { color: var(--warn-ink); }
-tr.refused { background: var(--warn-bg); box-shadow: inset 3px 0 var(--warn-ink); }
-th:first-child, td:first-child { padding-left: 12px; }
-.outcome { font-family: system-ui, sans-serif; font-size: 14px; }
-.outcome.refused, .outcome.failed { color: var(--warn-ink); font-weight: 600; }
-.outcome.none { color: var(--muted); }
 .chain.none { color: var(--muted); font-weight: 400; }
 .legend { display: flex; gap: 6px 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
 .legend span { display: inline-flex; align-items: center; }
@@ -332,13 +457,10 @@ th:first-child, td:first-child { padding-left: 12px; }
 .legend .run .kind { transform: rotate(45deg) scale(0.85); }
 .legend .refused .kind { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--warn-ink); }
 .legend[hidden] { display: none; }
+.only-refused tr:not(.refused) { display: none; }
+@media print { .summary { border-color: #999; } .note { color: #333; } }
 .note { color: var(--muted); font-size: 13px; margin-top: 16px; max-width: 70ch; }
-.state { color: var(--muted); font-size: 14.5px; padding: 18px 0; }
-.state.err { color: var(--bad); }
-.state[hidden], table[hidden] { display: none; }
 @media (max-width: 640px) {
-  h1 { font-size: 23px; }
-  .top { margin-top: 28px; }
   .summary { grid-template-columns: 1fr 1fr; }
   .stat:last-child:nth-child(odd) { grid-column: span 2; }
   dl { grid-template-columns: 1fr; gap: 0; }
@@ -361,46 +483,44 @@ th:first-child, td:first-child { padding-left: 12px; }
 </head>
 <body>
 <div class="shell">
-  <header><a class="wordmark" href="/">Aliquot</a><nav><a href="/">Ask the lab</a>${whereSpan(where)}</nav></header>
+  ${header("record", where)}
   <div class="top">
     <div><h1>Run record</h1><p class="when" id="when"></p></div>
-    <a class="dl" id="download" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Download JSON</a>
+    <div class="actions"><button class="btn" id="only" type="button" aria-pressed="false" hidden></button><a class="btn" id="download" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Download JSON</a></div>
   </div>
   <section class="summary" id="summary" aria-label="Summary" hidden></section>
   <dl id="facts"></dl>
-  <p class="state" id="state" role="status">Loading the record…</p>
+  <p class="state" id="state" hidden></p>
   <p class="legend" id="legend" hidden><span class="run"><i class="kind"></i>Run</span><span class="model"><i class="kind"></i>Model call</span><span class="tool"><i class="kind"></i>Tool call</span><span class="refused"><i class="kind"></i>Refused or withheld</span><span>Labels: D0 public, D1 internal, D2 confidential, D3 restricted</span></p>
   <table id="table" hidden><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Label</th><th>Detail</th></tr></thead><tbody id="rows"></tbody></table>
   <p class="note">Bodies are encrypted in the payload store and never shown here. The label is the data class of the event row; a refusal names the class of what it refused. Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
 </div>
+<script type="application/json" id="view">${scriptJson(view)}</script>
 <script type="module">
-const runId = ${JSON.stringify(runId)};
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text !== undefined) x.textContent = text; return x; };
-let v;
-try {
-  const res = await fetch("/runs/" + runId + "/view");
-  if (!res.ok) throw new Error(res.status === 404 ? "No run has the id " + runId + "." : "The web door answered " + res.status + ".");
-  v = await res.json();
-} catch (err) {
-  $("state").className = "state err";
-  $("state").setAttribute("role", "alert");
-  $("state").textContent = err instanceof TypeError ? "The web door did not answer. Is it running?" : err.message;
-  throw err;
-}
+const v = JSON.parse($("view").textContent);
+const runId = v.runId;
 if (v.rows.length) {
-  $("state").hidden = true;
   $("table").hidden = false;
   $("legend").hidden = false;
   const dl = $("download");
   dl.href = "/runs/" + runId + "/view";
   dl.download = "aliquot-run-" + runId + ".json";
   dl.hidden = false;
+  const refused = v.rows.filter((r) => r.refused).length;
+  if (refused) {
+    const only = $("only");
+    const label = () => { only.textContent = only.getAttribute("aria-pressed") === "true" ? "Show all events" : "Only refusals (" + refused + ")"; };
+    only.onclick = () => { const on = $("rows").classList.toggle("only-refused"); only.setAttribute("aria-pressed", String(on)); label(); };
+    label(); only.hidden = false;
+  }
 } else {
-  $("state").textContent = "No run with the id " + runId + " has recorded any events. A run sent a moment ago shows its first event within a second; otherwise check the Record link. ";
-  const back = el("a", "", "Back to the chat");
-  back.href = "/";
-  $("state").append(back);
+  $("state").hidden = false;
+  $("state").textContent = "No run with the id " + runId + " has recorded any events. A run sent a moment ago shows its first event within a second, so reload; otherwise find it in ";
+  const runs = el("a", "", "Runs");
+  runs.href = "/runs";
+  $("state").append(runs, ".");
 }
 if (v.startedAt) $("when").textContent = "Started " + new Date(v.startedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
 const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");

@@ -10,7 +10,10 @@
  *   GET  /runs/:id/events                                    -> the run record (events, no bodies)
  *   GET  /runs/:id/view                                      -> the record as the record page shows it, chain recomputed
  *   GET  /                                                   -> the member chat page
+ *   GET  /runs?show=refusals|failed                          -> the newest runs, optionally only those with a refusal or that failed
  *   GET  /runs/:id                                           -> the read-only record page
+ *
+ * Pages and JSON go out gzipped when the browser accepts it.
  *
  * Bodies are capped at MAX_BODY_BYTES, ids are validated before any query,
  * and an unexpected error is logged here and answered as "internal error".
@@ -21,6 +24,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import { gzipSync } from "node:zlib";
 import { z } from "zod";
 import type { SurfaceId } from "../dataclass.ts";
 import type { Db } from "../db.ts";
@@ -29,7 +33,7 @@ import { intake, intakeTest, type IntakeDeps, type IntakeResult, type Surface } 
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
 import { recordView } from "../record-view.ts";
 import type { LabConfig } from "../config.ts";
-import { chatPage, recordPage } from "./web-pages.ts";
+import { chatPage, recordPage, runsPage, type RunFilter, type RunListRow } from "./web-pages.ts";
 
 export const WEB_SURFACE = "web" as SurfaceId;
 
@@ -83,6 +87,25 @@ export function testDraft(draft: AgentDocument, m: { readonly member: string; re
   );
 }
 
+/** How many runs the runs page lists. */
+export const RUNS_LISTED = 100;
+
+/** The newest runs, from their events alone: no bodies, and no chain check (each record page verifies its own chain). */
+export async function listRuns(db: Db, filter: RunFilter, limit = RUNS_LISTED): Promise<RunListRow[]> {
+  const rows = await db.query<{ run_id: string; at: Date; agent: string | null; outcome: string; events: number; refusals: number }>(
+    `select * from (
+       select s.run_id, s.at, s.event->>'agent' as agent,
+         coalesce((select f.event->>'outcome' from run_events f where f.run_id = s.run_id and f.event->>'t' = 'run.finished' limit 1), 'running') as outcome,
+         (select count(*) from run_events e where e.run_id = s.run_id)::int as events,
+         (select count(*) from run_events e where e.run_id = s.run_id and e.event->>'t' in ('egress.refused', 'tool.withheld'))::int as refusals
+       from run_events s where s.seq = 0 order by s.at desc, s.run_id limit $1) r
+     where $2 = 'all' or ($2 = 'refusals' and (r.refusals > 0 or r.outcome = 'refused')) or ($2 = 'failed' and r.outcome in ('failed', 'faulted'))
+     order by r.at desc, r.run_id`,
+    [limit, filter],
+  );
+  return rows.rows.map((r) => ({ runId: r.run_id, startedAt: r.at.toISOString(), agent: r.agent, outcome: r.outcome, events: r.events, refusals: r.refusals }));
+}
+
 /** A message is at most the router's 8,000 characters plus ids; anything near this is not a chat message. */
 export const MAX_BODY_BYTES = 64 * 1024;
 
@@ -115,14 +138,19 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function sendHtml(res: ServerResponse, html: string): void {
-  res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'", "x-content-type-options": "nosniff" });
-  res.end(html);
+/** Gzip anything over a kilobyte when the browser accepts it: a page then fits in the first round trip. */
+function respond(req: IncomingMessage, res: ServerResponse, status: number, headers: Record<string, string>, text: string): void {
+  const gzip = text.length > 1024 && /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+  res.writeHead(status, { ...headers, vary: "accept-encoding", ...(gzip ? { "content-encoding": "gzip" } : {}) });
+  res.end(gzip ? gzipSync(text) : text);
 }
 
-function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json" });
-  res.end(JSON.stringify(body));
+function sendHtml(req: IncomingMessage, res: ServerResponse, html: string): void {
+  respond(req, res, 200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'", "x-content-type-options": "nosniff" }, html);
+}
+
+function send(req: IncomingMessage, res: ServerResponse, status: number, body: unknown): void {
+  respond(req, res, status, { "content-type": "application/json" }, JSON.stringify(body));
 }
 
 /**
@@ -140,35 +168,40 @@ export function createWebHandler(db: Db, deps: IntakeDeps, log: (line: string) =
           { channel: { surface: WEB_SURFACE, channelId: bound ?? m.channel ?? "lab" }, threadId: m.thread, messageId: m.message, platformUserId: m.user, text: m.text, attachments: [], addressed: true, at: new Date().toISOString() },
           deps,
         );
-        return send(res, result.t === "refused" ? 403 : 202, result);
+        return send(req, res, result.t === "refused" ? 403 : 202, result);
       }
       if (req.method === "POST" && url.pathname === "/stop") {
         const s = stopSchema.parse(await readJson(req));
         const run = await db.query("select 1 from jobs where id = $1 and kind = 'run'", [s.runId]);
         if (!run.rowCount) throw new HttpError(404, "no such run");
         const inboxId = await sendToInbox(db, s.runId as RunId, { t: "stop", confirmed: s.confirmed, by: s.user });
-        return send(res, 202, { inboxId });
+        return send(req, res, 202, { inboxId });
       }
       if (req.method === "GET" && url.pathname === "/replies") {
         const runId = uuid.safeParse(url.searchParams.get(`runId`));
         if (!runId.success) throw new HttpError(400, "runId must be a uuid");
-        return send(res, 200, await readReplies(db, runId.data as RunId));
+        return send(req, res, 200, await readReplies(db, runId.data as RunId));
       }
-      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(res, chatPage(where));
+      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(req, res, chatPage(where));
+      if (req.method === "GET" && url.pathname === "/runs") {
+        const show = url.searchParams.get("show");
+        const filter: RunFilter = show === "refusals" || show === "failed" ? show : "all";
+        return sendHtml(req, res, runsPage(await listRuns(db, filter), filter, RUNS_LISTED, where));
+      }
       const runPath = /^\/runs\/([^/]+)(?:\/(events|view))?$/.exec(url.pathname);
       if (req.method === "GET" && runPath) {
         const runId = uuid.safeParse(runPath[1]);
         if (!runId.success) throw new HttpError(404, "not found");
-        if (!runPath[2]) return sendHtml(res, recordPage(runId.data, where));
         const events = await loadEvents(db, runId.data as RunId);
-        return send(res, 200, runPath[2] === "events" ? events : recordView(runId.data, events));
+        if (!runPath[2]) return sendHtml(req, res, recordPage(recordView(runId.data, events), where));
+        return send(req, res, 200, runPath[2] === "events" ? events : recordView(runId.data, events));
       }
-      send(res, 404, { error: "not found" });
+      send(req, res, 404, { error: "not found" });
     } catch (err) {
-      if (err instanceof HttpError) return send(res, err.status, { error: err.message });
-      if (err instanceof z.ZodError) return send(res, 400, { error: "invalid request", issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
+      if (err instanceof HttpError) return send(req, res, err.status, { error: err.message });
+      if (err instanceof z.ZodError) return send(req, res, 400, { error: "invalid request", issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
       log(`[web] ${req.method} ${req.url}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
-      send(res, 500, { error: "internal error" });
+      send(req, res, 500, { error: "internal error" });
     }
   };
 }

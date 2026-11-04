@@ -3,9 +3,15 @@ import assert from "node:assert/strict";
 import type { Db } from "../packages/core/src/db.ts";
 import type { IntakeDeps } from "../packages/core/src/frontdoor.ts";
 import type { LabConfig } from "../packages/core/src/config.ts";
-import type { RunId } from "../packages/core/src/record.ts";
+import { request } from "node:http";
+import { gunzipSync } from "node:zlib";
+import type { ToolHash } from "../packages/core/src/hash.ts";
+import type { RunEvent, RunId } from "../packages/core/src/record.ts";
+import { recordView } from "../packages/core/src/record-view.ts";
 import { createWebHandler, createWebSurface, listenWeb, MAX_BODY_BYTES } from "../packages/core/src/surfaces/web.ts";
+import { recordPage } from "../packages/core/src/surfaces/web-pages.ts";
 import { freshDatabase } from "./db.ts";
+import { RUN, chain, ref, started } from "./events.ts";
 
 const { db } = await freshDatabase("labh_test_web");
 const logged: string[] = [];
@@ -121,4 +127,53 @@ test("a web surface bound to a channel puts every message there and refuses a bo
       s.close();
     }
   }
+});
+
+async function insertRun(events: readonly RunEvent[], startMs: number): Promise<string> {
+  const runId = (await db.query<{ id: string }>("insert into jobs (kind, key, payload) values ('run', $1, '{}') returning id", [`k:web:list:${startMs}`])).rows[0]!.id as RunId;
+  for (const e of chain(events, startMs, runId)) await db.query("insert into run_events (run_id, seq, at, cls, prev_hash, hash, event) values ($1, $2, $3, $4, $5, $6, $7)", [e.runId, e.seq, e.at, e.cls, e.prevHash, e.hash, e.event]);
+  return runId;
+}
+
+test("the runs page lists the newest runs and shows only those with a refusal, or only the failed ones, when asked", async () => {
+  const finished = (outcome: "answered" | "refused" | "failed"): RunEvent => ({ t: "run.finished", outcome, answer: null, reason: null, flags: [] });
+  const withheld: RunEvent = { t: "tool.withheld", callId: "c1", cls: "D3", refusal: { code: "class-above-ceiling", payload: "D3", ceiling: "D1" } };
+  const answered = await insertRun([started(), finished("answered")], Date.parse("2026-02-01T10:00:00Z"));
+  const refused = await insertRun([started(), withheld, finished("refused")], Date.parse("2026-02-01T11:00:00Z"));
+  const failed = await insertRun([started(), finished("failed")], Date.parse("2026-02-01T12:00:00Z"));
+  const ids = async (path: string) => [...(await (await fetch(`${base}${path}`)).text()).matchAll(/href="\/runs\/([0-9a-f-]{36})"/g)].map((m) => m[1]);
+  assert.deepEqual(await ids("/runs"), [failed, refused, answered]);
+  assert.deepEqual(await ids("/runs?show=refusals"), [refused]);
+  assert.deepEqual(await ids("/runs?show=failed"), [failed]);
+  assert.deepEqual(await ids("/runs?show=anything-else"), [failed, refused, answered]);
+  const html = await (await fetch(`${base}/runs`)).text();
+  assert.match(html, /<tr class="refused">.*?refused<\/td><td class="num"><span class="mark" aria-hidden="true">▲<\/span>1<\/td><td class="num">3<\/td>/);
+});
+
+test("the record page carries its view in the page, and no string in it can close the script element", () => {
+  const view = recordView(RUN, chain([started(), { t: "tool.requested", callId: "c1", attempt: 1, tool: "</script><b>x", hash: "b".repeat(64) as ToolHash, input: ref("a") }]));
+  const html = recordPage(view);
+  const json = /<script type="application\/json" id="view">(.*?)<\/script>/s.exec(html)![1]!;
+  assert.ok(!json.includes("<"), "every < in the JSON is escaped");
+  assert.deepEqual(JSON.parse(json), JSON.parse(JSON.stringify(view)));
+});
+
+test("a page is gzipped for a browser that accepts it, and plain for one that does not or when it is under a kilobyte", async () => {
+  const get = (path: string, encoding: string) => new Promise<{ encoding: string | undefined; vary: string | undefined; body: string }>((resolve, reject) => {
+    request(`${base}${path}`, { headers: { "accept-encoding": encoding } }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("end", () => {
+        const raw = Buffer.concat(chunks);
+        resolve({ encoding: res.headers["content-encoding"], vary: res.headers.vary, body: (res.headers["content-encoding"] === "gzip" ? gunzipSync(raw) : raw).toString("utf8") });
+      });
+    }).on("error", reject).end();
+  });
+  const zipped = await get("/", "gzip, deflate, br");
+  const plain = await get("/", "identity");
+  assert.equal(zipped.encoding, "gzip");
+  assert.equal(plain.encoding, undefined);
+  assert.equal(zipped.vary, "accept-encoding");
+  assert.equal(zipped.body, plain.body);
+  assert.equal((await get(`/runs/${UUID}/view`, "gzip")).encoding, undefined, "under a kilobyte goes out plain");
 });

@@ -5,6 +5,7 @@ export const short = (hash: string) => hash.slice(0, 12);
 
 // One stylesheet for every sidebar panel, on Payload's theme variables so both themes follow the admin's setting.
 // Inline styles cannot express focus, reduced motion or the busy dot, so the panels use these classes instead.
+// A status line's kind shows in its mark's shape as well as its colour: a check, a triangle, a square, a dot.
 const CSS = `
 [data-theme="dark"] .aq-panel { --aq-ok: #4cb36d; }
 .aq-panel { --aq-ok: #2f8f4e; border-top: 1px solid var(--theme-elevation-100); padding-top: 20px; margin-bottom: 28px; }
@@ -19,11 +20,11 @@ const CSS = `
 .aq-status { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; line-height: 1.45; margin: 12px 0 0; padding: 9px 12px; border-radius: var(--style-radius-m, 6px); background: var(--theme-elevation-50); color: var(--theme-text); }
 .aq-status::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; background: var(--theme-elevation-400); }
 .aq-status[data-kind="ok"] { background: color-mix(in srgb, var(--aq-ok) 10%, transparent); }
-.aq-status[data-kind="ok"]::before { background: var(--aq-ok); }
+.aq-status[data-kind="ok"]::before { width: 4px; height: 8px; margin: 3px 2px 0; background: none; border: solid var(--aq-ok); border-width: 0 2px 2px 0; border-radius: 0; transform: rotate(45deg); }
 .aq-status[data-kind="error"] { background: color-mix(in srgb, var(--theme-error-500) 10%, transparent); }
-.aq-status[data-kind="error"]::before { background: var(--theme-error-500); }
+.aq-status[data-kind="error"]::before { background: var(--theme-error-500); border-radius: 1px; }
 .aq-status[data-kind="warn"] { background: color-mix(in srgb, var(--theme-warning-500) 12%, transparent); }
-.aq-status[data-kind="warn"]::before { background: var(--theme-warning-500); }
+.aq-status[data-kind="warn"]::before { width: 0; height: 0; margin-top: 5px; background: none; border-radius: 0; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--theme-warning-500); }
 .aq-status[data-kind="busy"]::before { animation: aq-pulse 1s ease-in-out infinite; }
 .aq-status > div { min-width: 0; overflow-wrap: anywhere; }
 .aq-issues { padding-left: 18px; margin: 6px 0 0; }
@@ -50,9 +51,7 @@ const CSS = `
 .aq-on { margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--aq-ok) 18%, transparent); border: 1px solid color-mix(in srgb, var(--aq-ok) 40%, transparent); color: var(--theme-text); }
 @media (max-width: 768px) { .aq-panel .btn { min-height: 40px; padding-inline: 14px; } .aq-a { max-height: none; } }
 @keyframes aq-pulse { 50% { opacity: 0.25; } }
-@media (prefers-reduced-motion: reduce) { .aq-status[data-kind="warn"] { background: color-mix(in srgb, var(--theme-warning-500) 12%, transparent); }
-.aq-status[data-kind="warn"]::before { background: var(--theme-warning-500); }
-.aq-status[data-kind="busy"]::before { animation: none; } .aq-field { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .aq-status[data-kind="busy"]::before { animation: none; } .aq-field { transition: none; } }
 `;
 
 /** React 19 hoists a <style> with href and precedence into <head> once, however many panels render it. */
