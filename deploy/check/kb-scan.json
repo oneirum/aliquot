@@ -1,0 +1,29 @@
+{
+  "kbId": "check-scan",
+  "title": "A scanned page",
+  "purpose": "The compose check requires a scanned page to fail with the no-OCR message.",
+  "coverageQuestions": [
+    "What does the scanned page say?",
+    "At what temperature are samples stored?",
+    "Which label is read first?",
+    "What does the second page say?",
+    "Which value is checked?"
+  ],
+  "sources": [
+    {
+      "sourceId": "scan",
+      "kind": "file",
+      "location": "scanned.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    }
+  ],
+  "compiler": {
+    "endpointId": "local",
+    "modelId": "scripted-1",
+    "params": {
+      "temperature": 0,
+      "maxOutputTokens": 8192
+    }
+  }
+}

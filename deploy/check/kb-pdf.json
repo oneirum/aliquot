@@ -1,0 +1,36 @@
+{
+  "kbId": "check-pdf",
+  "title": "PDF sources",
+  "purpose": "The compose check reads a LaTeX PDF and a PDF written by Microsoft Word through the sandbox container.",
+  "coverageQuestions": [
+    "At what temperature are samples stored?",
+    "Which label is read first?",
+    "What does the second page say?",
+    "What is the hybrid satellite network profile for?",
+    "Who published the annotated outline?"
+  ],
+  "sources": [
+    {
+      "sourceId": "latex",
+      "kind": "file",
+      "location": "latex.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "word",
+      "kind": "file",
+      "location": "nist-cswp-27.pdf",
+      "cls": "D0",
+      "licence": "open"
+    }
+  ],
+  "compiler": {
+    "endpointId": "local",
+    "modelId": "scripted-1",
+    "params": {
+      "temperature": 0,
+      "maxOutputTokens": 8192
+    }
+  }
+}

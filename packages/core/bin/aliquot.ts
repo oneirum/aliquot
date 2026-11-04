@@ -127,7 +127,7 @@ async function init(): Promise<number> {
   writeFileSync(labPath, renderLabToml(answers), { flag: values.force ? "w" : "wx" });
   say(`Wrote ${labPath}`);
   if (writeEnv) {
-    writeFileSync(envPath, renderEnv(), { flag: "wx", mode: 0o600 });
+    writeFileSync(envPath, renderEnv(answers.sandboxImage !== null), { flag: "wx", mode: 0o600 });
     say(`Wrote ${envPath} with new POSTGRES_PASSWORD, LABH_PAYLOAD_KEY and PAYLOAD_SECRET (mode 600). Keep a copy of LABH_PAYLOAD_KEY offline.`);
   } else {
     say(`Left ${envPath} as it is. It holds LABH_PAYLOAD_KEY, and a new key would make every stored payload unreadable.`);

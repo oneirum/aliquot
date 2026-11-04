@@ -175,7 +175,8 @@ function compileReply(messages: WireRequest["messages"]): string {
   if (system.startsWith("You compile one source document")) {
     const sourceId = /Source id: (\S+)/.exec(user)?.[1] ?? "source";
     const text = /<source>\n([\s\S]*)\n<\/source>/.exec(user)?.[1] ?? "";
-    const sections = text.split(/^## /m).slice(1);
+    // A source with no "## " heading (a PDF's text, say) becomes one entry titled by its first line.
+    const sections = /^## /m.test(text) ? text.split(/^## /m).slice(1) : [text.trim()];
     const entries = sections.map((section) => {
       const [heading = "", ...lines] = section.split("\n");
       const body = lines.join("\n").trim();

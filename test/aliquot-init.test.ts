@@ -46,7 +46,9 @@ test("init on defaults writes a lab.toml that loads and a .env with three fresh 
   assert.ok(readFileSync(l.cfg, "utf8").startsWith("# lab.toml for Mettu Lab, written by aliquot init.\n"));
 
   const secrets = readFileSync(l.env, "utf8").split("\n").filter((s) => s && !s.startsWith("#"));
-  assert.deepEqual(secrets.map((s) => s.split("=")[0]), ["POSTGRES_PASSWORD", "LABH_PAYLOAD_KEY", "PAYLOAD_SECRET"]);
+  // The sandbox is on in this lab.toml, so the env also gives the worker the Docker socket.
+  assert.deepEqual(secrets.map((s) => s.split("=")[0]), ["POSTGRES_PASSWORD", "LABH_PAYLOAD_KEY", "PAYLOAD_SECRET", "COMPOSE_FILE", "DOCKER_GID"]);
+  assert.equal(secrets[3], "COMPOSE_FILE=compose.yaml:compose.sandbox.yaml");
   assert.match(secrets[0]!, /^POSTGRES_PASSWORD=[0-9a-f]{48}$/);
   assert.match(secrets[1]!, /^LABH_PAYLOAD_KEY=[0-9a-f]{64}$/);
   assert.match(secrets[2]!, /^PAYLOAD_SECRET=[0-9a-f]{64}$/);

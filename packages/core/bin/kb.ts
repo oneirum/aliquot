@@ -105,6 +105,10 @@ try {
     default:
       throw new Error(`unknown command ${command ?? "(none)"}: compile, coverage, publish, diff or search`);
   }
+} catch (err) {
+  // A source that cannot be read (a scanned PDF, a missing file) is the operator's to fix: the message, not a stack.
+  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  process.exitCode = 1;
 } finally {
   await core.close();
 }

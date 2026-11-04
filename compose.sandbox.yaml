@@ -1,0 +1,10 @@
+# Opt in to the sandbox (run_code and PDF sources): the worker gets the Docker socket, so the worker and the kb
+# command run inside it can start the no-network sandbox containers beside the stack. Only the worker gets it;
+# the web door and the studio never do. Add it with COMPOSE_FILE=compose.yaml:compose.sandbox.yaml in .env.
+# DOCKER_GID is the socket's group on this host (aliquot init writes it): docker run --rm -v
+# /var/run/docker.sock:/s busybox stat -c %g /s
+services:
+  worker:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ["${DOCKER_GID:-0}"]

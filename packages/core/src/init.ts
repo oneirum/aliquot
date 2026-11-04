@@ -138,12 +138,20 @@ image = ${s(a.sandboxImage)}
   return text;
 }
 
-export function renderEnv(random: (n: number) => Buffer = randomBytes): string {
-  return `# Secrets for docker compose, written by aliquot init. Never commit this file or rewrite it.
+export function renderEnv(sandbox: boolean, random: (n: number) => Buffer = randomBytes): string {
+  const secrets = `# Secrets for docker compose, written by aliquot init. Never commit this file or rewrite it.
 # LABH_PAYLOAD_KEY encrypts every stored payload: without it they cannot be read, so keep a copy offline.
 POSTGRES_PASSWORD=${random(24).toString("hex")}
 LABH_PAYLOAD_KEY=${random(32).toString("hex")}
 PAYLOAD_SECRET=${random(32).toString("hex")}
+`;
+  if (!sandbox) return secrets;
+  return `${secrets}
+# lab.toml turns the sandbox on, so the worker gets the Docker socket through compose.sandbox.yaml.
+COMPOSE_FILE=compose.yaml:compose.sandbox.yaml
+# The socket's group on this host. 0 suits Docker Desktop; on Linux set the number this prints:
+#   docker run --rm -v /var/run/docker.sock:/s busybox stat -c %g /s
+DOCKER_GID=0
 `;
 }
 
