@@ -196,3 +196,13 @@ export function checker(ps: Processes, opts: { only?: RegExp | null; counter?: (
     },
   };
 }
+
+/** Runs one binary under the permission model with input on stdin, for a stdio protocol check, and resolves when it exits. */
+export async function runWithInput(root: string, bin: string, args: readonly string[], env: Record<string, string>, input: string): Promise<{ code: number | null; stdout: string }> {
+  const child = spawn(process.execPath, [...PERMISSION_FLAGS, join(root, "packages/core/bin", bin), ...args], { env, cwd: root, stdio: ["pipe", "pipe", "ignore"] });
+  let stdout = "";
+  child.stdout!.on("data", (c: Buffer) => (stdout += c.toString("utf8")));
+  child.stdin!.end(input);
+  const code = await new Promise<number | null>((res) => child.on("close", (c) => res(c)));
+  return { code, stdout };
+}

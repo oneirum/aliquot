@@ -201,6 +201,7 @@ A terminal, tmux, T3 Code or a lab's own orchestrator can reach Aliquot's agents
 | A terminal or a script | `pnpm aliquot ask --user member-1 --json "question"`: one JSON line per step (`started`, `tool`, `finished` or `refused`), each with the record link |
 | tmux | `pnpm up:tmux --config lab.toml`: the worker, the web door and an `ask` shell as windows of one session |
 | T3 Code, Zed or another ACP client | `aliquot acp`, added as a local ACP command: each question a thread, ending with the record link |
+| A member's own Claude Code, Codex or Cursor | `aliquot mcp`, added as a stdio MCP server: one tool, `ask`, on the member's own subscription ([docs/harnesses.md](docs/harnesses.md)) |
 
 `--ceiling D1` keeps an answer above D1 out of a client that stores its own copy, such as T3 Code's thread history. The client gets the record link instead.
 

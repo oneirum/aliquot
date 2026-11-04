@@ -7,6 +7,7 @@ Aliquot runs a lab's agents. Some people want to reach those agents from the too
 | A terminal or a script | `aliquot ask --json` | One JSON line per step, and a record link. Exit 0 means answered. |
 | tmux | `scripts/tmux.sh` (`pnpm up:tmux`) | The worker, the web door and a shell for asking, as windows of one session you can attach to. |
 | T3 Code, Zed, JetBrains or another ACP client | `aliquot acp` as a local ACP command | Each question is a thread, the tools the run used appear as steps, and the answer ends with the record link. |
+| A member's own Claude Code, Codex or Cursor | `aliquot mcp` as a stdio MCP server | One tool, `ask`. The answer and the record link, or the record link only when the answer is above what that tool may keep. |
 | A lab's own orchestrator, Claude Code or Codex | `aliquot ask --json` from a shell step | The same JSON lines. Read `recordUrl` to cite the run. |
 
 Every route goes through the web door's own routes (`POST /message`, `GET /runs/:id/events`, `GET /replies`, `POST /stop`), the same ones the chat page uses. The gate, the data-class checks and the run record apply unchanged. Nothing on this page decides egress. `packages/core/src/door-client.ts` is the only file involved that opens a socket, and `scripts/boundaries.ts` allows it HTTP and HTTPS only.
@@ -40,8 +41,9 @@ Each way into the door is a surface, `[surfaces.<id>]` in `lab.toml`, with a kin
 
 | Surface | Kind | Placement | Ceiling | Reaches the door with |
 |---|---|---|---|---|
-| `web` | `web` | `lab` by default | D3 | No token. The chat page, and `aliquot ask` or `aliquot acp` without `ALIQUOT_SURFACE_TOKEN`. |
+| `web` | `web` | `lab` by default | D3 | No token. The chat page, and `aliquot ask`, `aliquot acp` or `aliquot mcp` without `ALIQUOT_SURFACE_TOKEN`. |
 | `acp` | `acp` | `zdr`, as `aliquot init` writes it | D1 | `ALIQUOT_SURFACE_TOKEN` set to the value of `ALIQUOT_ACP_TOKEN`. |
+| any id | `mcp` | `public` for members' personal subscriptions; `approved` for a seat the institution approved | D0 or D2 | `ALIQUOT_SURFACE_TOKEN` set to the value of its `token_env`. |
 | `slack` | `slack` | `approved` at most | D2 | Planned. Slack's servers keep a copy of every answer, so `lab.toml` refuses `lab` and `institution` for it. The door takes no Slack token. |
 | `phone` | `phone` | set by the lab | that placement's | Planned. A bearer token, like `acp`. |
 
@@ -86,6 +88,53 @@ T3 Code keeps every thread's text in its own database on the machine it runs on,
 T3 Code's phone app pairs straight to a T3 host over a LAN or Tailscale (`t3 serve --host <tailnet address>`, then `t3 pair`), with no T3 cloud in the path. Aliquot threads then show on the phone too. Push notifications are the exception, since they need T3 Connect. A T3 pairing grants a shell on the host (`terminal:operate`), so pair only your own devices to a T3 host, never a lab member's phone to the lab server. Members use the chat page.
 
 `test/door-client.test.ts` drives `aliquot acp` with ACP messages over stdio. The official ACP TypeScript SDK (`@agentclientprotocol/sdk` 2.4.0) also parsed every message from it as a client: initialize, session/new, session/prompt, and the `tool_call` and `agent_message_chunk` updates.
+
+## Claude Code, Codex and Cursor: `aliquot mcp`
+
+`aliquot mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdin and stdout with one tool, `ask`. It takes `question` and an optional `thread`. A member adds it to their own tool, which runs on their own subscription under their own terms. Aliquot holds no member's subscription. The vendors' terms keep a personal login off a shared server, and what the tool receives lands in its vendor's logs. So give these members a surface of their own, placed for the subscription they use:
+
+	[surfaces.personal]                 # members' own Claude Code, Codex or Cursor
+	kind = "mcp"
+	placement = "public"                # a personal subscription: D0 only; "approved" for a seat the institution approved
+	token_env = "ALIQUOT_MCP_TOKEN"
+
+Start the web door with `ALIQUOT_MCP_TOKEN` set (`openssl rand -hex 32`), and give each member the value. The member sets it as `ALIQUOT_MCP_TOKEN` in their own shell, and the snippets below pass it to the server as `ALIQUOT_SURFACE_TOKEN`, so it stays out of the config file. The result of `ask` is the answer, `Record: <url>` and `Thread: <id>`, with the same fields in `structuredContent`. Pass the thread back to continue it. An answer above the surface's ceiling, or above `--ceiling`, comes back as the record link only, and the member opens it in the browser. A gate refusal is the door's message. A door that cannot be reached is a tool error that says so. Cancelling the call in the tool stops the run through the door.
+
+Claude Code, `.mcp.json` in the project (or `claude mcp add` with the same command):
+
+	{
+	  "mcpServers": {
+	    "aliquot": {
+	      "command": "node",
+	      "args": ["--permission", "--allow-fs-read=*", "--allow-net", "/path/to/aliquot/packages/core/bin/aliquot.ts", "mcp", "--door", "http://127.0.0.1:3000", "--user", "member-1"],
+	      "env": { "ALIQUOT_SURFACE_TOKEN": "${ALIQUOT_MCP_TOKEN}" }
+	    }
+	  }
+	}
+
+Codex, `~/.codex/config.toml`. Codex passes a server only the variables it lists, so export `ALIQUOT_SURFACE_TOKEN` itself in the shell Codex starts from:
+
+	[mcp_servers.aliquot]
+	command = "node"
+	args = ["--permission", "--allow-fs-read=*", "--allow-net", "/path/to/aliquot/packages/core/bin/aliquot.ts", "mcp", "--door", "http://127.0.0.1:3000", "--user", "member-1"]
+	env_vars = ["ALIQUOT_SURFACE_TOKEN"]
+
+Cursor, `.cursor/mcp.json` in the project or `~/.cursor/mcp.json`:
+
+	{
+	  "mcpServers": {
+	    "aliquot": {
+	      "type": "stdio",
+	      "command": "node",
+	      "args": ["--permission", "--allow-fs-read=*", "--allow-net", "/path/to/aliquot/packages/core/bin/aliquot.ts", "mcp", "--door", "http://127.0.0.1:3000", "--user", "member-1"],
+	      "env": { "ALIQUOT_SURFACE_TOKEN": "${env:ALIQUOT_MCP_TOKEN}" }
+	    }
+	  }
+	}
+
+The door stays on `127.0.0.1` until sign-on, so a member's laptop reaches it through an SSH tunnel, as above. Every message from a surface other than web starts at D1, because the sender names its channel, and only the channel `[surfaces.web]` binds may start lower. So a `public` surface, whose ceiling is D0, gets the record link for every answer today, and its members read the answers on the chat page. A surface at `approved`, for a seat the institution approved, gets answers up to D2.
+
+`test/door-client.test.ts` drives `aliquot mcp` over stdio, and `pnpm lab0` check H runs it against the real door through a `zdr` and a `public` surface. The official MCP TypeScript SDK (`@modelcontextprotocol/sdk` 1.32.2) also ran as its client against lab0: it listed `ask`, validated the results against the tool's output schema, got the cited handbook answer through the `zdr` surface, and got the record link only through the `public` one.
 
 ## herdr and Orca
 

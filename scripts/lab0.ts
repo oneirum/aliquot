@@ -19,21 +19,18 @@
  */
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { once } from "node:events";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadAudit } from "../packages/core/src/audit.ts";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
-import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { loadManifest, tokenize, type KbSnapshot } from "../packages/core/src/kb.ts";
 import { createPayloadStore, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { freshDatabase } from "../test/db.ts";
-import { checker, ensurePostgres, post, processes, waitFor } from "./procs.ts";
+import { checker, ensurePostgres, post, processes, runWithInput, waitFor } from "./procs.ts";
 
 interface Prereg {
   readonly inDocument: readonly { readonly id: string; readonly question: string; readonly expected: string }[];
@@ -282,17 +279,14 @@ try {
     const q = prereg.inDocument[0]!;
     /** One MCP session over stdio: initialize, tools/list, one ask; stdin closes and the server exits once the ask answers. */
     const session = async (token: string) => {
-      const child = spawn(process.execPath, [...PERMISSION_FLAGS, join(root, "packages/core/bin/aliquot.ts"), "mcp", "--door", web.base, "--user", "member-1"], { cwd: root, env: { PATH: childEnv.PATH!, HOME: childEnv.HOME!, ALIQUOT_SURFACE_TOKEN: token } });
-      let out = "";
-      child.stdout.on("data", (c: Buffer) => (out += c));
       const msgs = [
         { id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "lab0", version: "1" } } },
         { method: "notifications/initialized" },
         { id: 2, method: "tools/list", params: {} },
         { id: 3, method: "tools/call", params: { name: "ask", arguments: { question: q.question } } },
       ];
-      child.stdin.end(msgs.map((m) => JSON.stringify({ jsonrpc: "2.0", ...m })).join("\n") + "\n");
-      const [code] = (await once(child, "close")) as [number | null];
+      const input = msgs.map((m) => JSON.stringify({ jsonrpc: "2.0", ...m })).join("\n") + "\n";
+      const { code, stdout: out } = await runWithInput(root, "aliquot.ts", ["mcp", "--door", web.base, "--user", "member-1"], { PATH: childEnv.PATH!, HOME: childEnv.HOME!, ALIQUOT_SURFACE_TOKEN: token }, input);
       assert.equal(code, 0);
       const byId = new Map(out.trim().split("\n").map((l) => JSON.parse(l) as { id: number; result: any }).map((m) => [m.id, m.result]));
       return { tools: byId.get(2).tools.map((t: { name: string }) => t.name), call: byId.get(3) };
