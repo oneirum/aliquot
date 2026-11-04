@@ -174,6 +174,23 @@ test("aliquot acp answers initialize as an ACP v1 agent with no sign-in step", a
   assert.equal(r.result.protocolVersion, 1);
   assert.deepEqual(r.result.authMethods, []);
   assert.equal(r.result.agentCapabilities.loadSession, false);
+  assert.equal(r.result.agentInfo.name, "aliquot");
+  assert.match(r.result.agentInfo.version, /^\d+\.\d+\.\d+$/);
+});
+
+test("a prompt T3 Code wrapped in its own instructions reaches the door as the person's words only", async () => {
+  script = answered("D0", "At -80 C.");
+  const before = posted.length;
+  const a = acp();
+  const sessionId = (await a.request("session/new", {})).result.sessionId;
+  const wrapped = "<t3_code_instructions>\nUse the T3 tools when asked.\n</t3_code_instructions>\n\n<user_request>\nWhere do samples go?\n</user_request>";
+  await a.request("session/prompt", { sessionId, prompt: [{ type: "text", text: wrapped }] });
+  await a.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "And after a week?" }] });
+  await a.close();
+  assert.deepEqual(
+    posted.slice(before).filter((p) => p.path === "/message").map((p) => p.body.text),
+    ["Where do samples go?", "And after a week?"],
+  );
 });
 
 test("two prompts in one ACP session are one Aliquot thread; each streams its tools and ends with the record link", async () => {

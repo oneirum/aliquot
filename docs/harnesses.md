@@ -58,7 +58,7 @@ The worker and the web door print one line per event, prefixed with their name (
 	--ceiling
 	D1
 
-Each T3 thread is one Aliquot thread, so a follow-up carries the earlier turns. The tools the run used appear as completed steps, then the answer, then `Record: <url>`. A refusal ends the turn with the stop reason `refusal` and the door's message. Stopping the turn in T3 stops the run through the door.
+Each T3 thread is one Aliquot thread, so a follow-up carries the earlier turns. T3 wraps a thread's first prompt in its own instructions, inside `<user_request>` tags. `aliquot acp` sends only the words inside those tags to the door. The tools the run used appear as completed steps, then the answer, then `Record: <url>`. A refusal ends the turn with the stop reason `refusal` and the door's message. Stopping the turn in T3 stops the run through the door.
 
 Set `--ceiling`. T3 Code keeps every thread's text in its own database on the machine it runs on, and with T3 Connect turned on, it sends thread titles to `relay.t3.codes` for notifications. That is a copy outside Aliquot's record and its payload key. With `--ceiling D1`, a D2 or D3 answer never enters T3: the thread gets the record link only.
 

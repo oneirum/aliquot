@@ -17,6 +17,12 @@ import type { AskInput, AskOptions, DoorEvent } from "./door-client.ts";
 
 export const ACP_PROTOCOL_VERSION = 1;
 
+/** T3 Code wraps a thread's first prompt in its own instructions; only the person's words go to the door. */
+function personText(text: string): string {
+  const wrapped = /<user_request>\n([\s\S]*)\n<\/user_request>/.exec(text);
+  return wrapped ? wrapped[1]!.trim() : text;
+}
+
 export interface AcpDeps {
   readonly ask: (input: AskInput, opts: AskOptions) => AsyncIterable<DoorEvent>;
   readonly stop: (runId: string) => Promise<void>;
@@ -54,11 +60,13 @@ export function acpAgent(deps: AcpDeps): (line: string) => Promise<void> {
     if (!session) return fail(id, ERR.params, `no session ${sessionId}`);
     if (session.running) return fail(id, ERR.invalid, "this session already has a prompt running");
     const blocks = Array.isArray(params.prompt) ? (params.prompt as { type?: string; text?: string }[]) : [];
-    const text = blocks
-      .filter((b) => b.type === "text" && typeof b.text === "string")
-      .map((b) => b.text)
-      .join("\n")
-      .trim();
+    const text = personText(
+      blocks
+        .filter((b) => b.type === "text" && typeof b.text === "string")
+        .map((b) => b.text)
+        .join("\n")
+        .trim(),
+    );
     if (!text) return fail(id, ERR.params, "Aliquot takes a text prompt; this one has no text block");
 
     const abort = new AbortController();
@@ -119,7 +127,7 @@ export function acpAgent(deps: AcpDeps): (line: string) => Promise<void> {
         return reply(id, {
           protocolVersion: ACP_PROTOCOL_VERSION,
           agentCapabilities: { loadSession: false, promptCapabilities: { image: false, audio: false, embeddedContext: false } },
-          agentInfo: { name: "aliquot", title: "Aliquot" },
+          agentInfo: { name: "aliquot", title: "Aliquot", version: "0.5.0" },
           authMethods: [],
         });
       case "authenticate":
