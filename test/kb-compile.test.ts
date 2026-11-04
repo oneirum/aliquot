@@ -296,5 +296,19 @@ test("a Word source reads to Markdown before compile, from the studio as base64,
   const withId = await readSources(def, attach(freezerSop("Pending: LAB0-0003")), { ...sourceDeps, labPatterns: [/LAB0-\d{4}/] });
   assert.equal(withId[0]!.ref.cls, "D3", "a participant id inside the Word file raises it to D3");
   const pdf = await definition("kb.json", (d) => ((d.sources as { location: string }[])[0]!.location = "handbook.pdf"));
-  await assert.rejects(readSources(pdf, attachedFiles([]), sourceDeps), /handbook\.pdf: \.pdf is not a source type; use \.md, \.markdown, \.txt, \.docx \(save it as \.docx from Word, or paste it into a \.md file\)/);
+  await assert.rejects(readSources(pdf, attachedFiles([]), sourceDeps), {
+    message: "handbook.pdf: PDFs are read in the sandbox container, and this compile has none. Set [sandbox] in lab.toml and compile with the kb command, or save the document as .docx",
+  });
+  const doc = await definition("kb.json", (d) => ((d.sources as { location: string }[])[0]!.location = "handbook.doc"));
+  await assert.rejects(readSources(doc, attachedFiles([]), sourceDeps), { message: "handbook.doc: .doc is not a source type; use .md, .markdown, .txt, .docx, .pdf (save it as .docx from Word)" });
+});
+
+test("a PDF source goes to the PDF reader with its bytes and name, and the lab's id patterns see what it returns", async () => {
+  const def = await definition("kb.json", (d) => ((d.sources as { location: string }[])[0]!.location = "handbook.pdf"));
+  const [first, ...rest] = def.sources.map((s) => s.location);
+  const files = attachedFiles([{ name: first!, base64: Buffer.from("%PDF-1.4 bytes").toString("base64") }, ...rest.map((name) => ({ name, text: `# ${name}` }))]);
+  const pdf = async (bytes: Uint8Array, name: string) => `${name} held ${new TextDecoder().decode(bytes)}; pending LAB0-0003\n`;
+  const read = await readSources(def, files, { ...sourceDeps, pdf, labPatterns: [/LAB0-\d{4}/] });
+  assert.equal(read[0]!.text, "handbook.pdf held %PDF-1.4 bytes; pending LAB0-0003\n");
+  assert.equal(read[0]!.ref.cls, "D3");
 });

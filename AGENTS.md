@@ -40,6 +40,10 @@ Aliquot runs eleven built-in tools. `packages/core/src/tools.ts` defines `kb_sea
 
 `run_code` needs the image: `docker build -t aliquot-sandbox sandbox`, then pin `docker image inspect --format '{{.Id}}' aliquot-sandbox` as `[sandbox] image`. `test/run-code.test.ts` skips when no daemon answers or the image is not built. A dataset directory must be readable by uid 65534, the container's user.
 
+## Sources
+
+A knowledge base file source is `.md`, `.markdown`, `.txt`, `.docx` or `.pdf` (`readSources` in `kb-compile.ts`). `docx.ts` reads Word files in core. A PDF is never parsed in a Node process: `Sandbox.readPdf` in `sandbox.ts` uploads it into a container from the same image (no network, read-only root, uid 65534, label `aliquot.read_pdf`), runs `pdftotext` and `pdfimages -list`, and `pdf.ts` turns their output into text. A page with an image and no text is a scanned page and fails the file, because Aliquot does not do OCR. Only the `kb` command passes a PDF reader, and only when `lab.toml` has `[sandbox]`; the studio gets none. `test/pdf.test.ts` runs the fixtures in `test/pdf-fixtures/` through the real container and skips like `test/run-code.test.ts`.
+
 ## Agent backends
 
 An agent may run on Claude Code or Codex instead of a model endpoint (`[agent_backends.<id>]` in `lab.toml`). The code is in `packages/core/src/agents/`. The CLI is one hosted model destination: its task prompt and every bridge reply pass `gateway.admit()`, so the egress call sites stay at five.

@@ -78,7 +78,7 @@ This uses your own CLI login (`dev_shared_login`), so it is for a developer's ma
 
 A lab answers the same questions every week. Where the freezer log is, how a variable is coded, what the SOP says about a sample that came in late, what the literature says about a measure. The answers live in documents, datasets and papers nobody has time to search. Aliquot turns them into agents the lab owns.
 
-- **Answers from your own documents.** A steward compiles SOPs, codebooks and onboarding notes into a knowledge base, from Markdown, text or the Word files the lab already keeps. Agents search it and cite the entry they used.
+- **Answers from your own documents.** A steward compiles SOPs, codebooks and onboarding notes into a knowledge base, from Markdown, text, the Word files the lab already keeps, or PDFs with real text. Agents search it and cite the entry they used.
 - **Research tools.** Agents can search OpenAlex, PubMed, arXiv and Europe PMC, read open-access papers in full, look up a DOI and where a legal open copy is, and walk citations. They can also list the lab's datasets and run R or Python over them in a container with no network.
 - **Claude Code or Codex as the agent.** An agent can run on one of these CLIs instead of a model endpoint. The CLI is confined: it has no tools of its own, and it reaches only Aliquot and its vendor's API.
 - **Restricted data does not leave.** Every piece of content carries a data class. Participant identifiers are restricted, and restricted content never reaches a hosted model or a hosted agent CLI: the harness refuses the call and records the refusal. One agent can send public questions to a hosted model (Anthropic, OpenAI) and restricted ones to a lab model (Ollama or any OpenAI-compatible server).
@@ -142,6 +142,8 @@ A steward with repository access can compile and publish without the studio. A d
 	node --permission '--allow-fs-read=*' --allow-net packages/core/bin/kb.ts publish --snapshot <id>
 
 The example definitions name the scripted test model, so for real use set the compiler to a model your `lab.toml` serves, and start the worker first: `--wait` waits for it to finish the compile. `kb` also has `coverage`, `diff` and `search`, and `publish --override-gaps "<note>" --actor <publisher>` to publish over gaps. The command checks no role: it is the steward's tool, for whoever holds the repository. A URL source is fetched only from a host that `[hosts]` in `lab.toml` allows for lab documents. Any other host is refused before a request is sent.
+
+A `.pdf` source is read only by this command, and only when `lab.toml` has `[sandbox]`: poppler's `pdftotext` runs in the run_code image, with no network and a read-only root. A PDF of scanned pages has no text to read, and Aliquot does not do OCR, so a file with a scanned page is refused, naming the pages. Export it again from the program that made it, or save it as `.docx`. The studio has no Docker socket, so it refuses a `.pdf` with the same advice.
 
 </details>
 
@@ -301,6 +303,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - The web door, the encrypted payload store and the hash-chained audit stream.
 - `pnpm run doctor`, a preflight that names what is missing on a machine and how to fix it.
 - Word (.docx) sources for knowledge bases, read to Markdown in core with no new dependency.
+- PDF sources for knowledge bases, read by poppler inside the no-network sandbox container, never in a Node process.
 - A summary at the top of every record, in the page, the terminal and `--json`, and a JSON download from the record page.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
