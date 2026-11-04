@@ -62,11 +62,11 @@ body { min-height: 100dvh; display: flex; flex-direction: column; background-ima
 .a li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
 .a .h { font-weight: 500; margin-top: 18px; }
 .a > .h:first-child { margin-top: 0; }
-.a pre { font: 13px/1.5 var(--mono); background: var(--quiet); border-radius: 6px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.a pre { font: 13px/1.5 var(--mono); background: var(--quiet); border-radius: 6px; padding: 10px 12px; overflow-x: auto; white-space: pre; font-variation-settings: "MONO" 1; }
 .a strong { font-weight: 600; }
-.a code { font: 13px var(--mono); background: var(--quiet); padding: 1px 5px; border-radius: 4px; }
+.a code { font: 13px var(--mono); background: var(--quiet); padding: 1px 5px; border-radius: 4px; font-variation-settings: "MONO" 1; }
 .steps { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; margin: 0; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.steps code { font: 12.5px var(--mono); color: var(--ink-2); }
+.steps code { font: 12.5px var(--mono); color: var(--ink-2); font-variation-settings: "MONO" 1; }
 .err { color: var(--ink); font-size: 15px; margin: 0; }
 .refusal { margin: 0; padding: 14px 16px 14px 28px; border: 1px solid var(--line); border-radius: 4px; background-color: var(--surface); background-image: repeating-linear-gradient(-45deg, var(--muted) 0 1px, transparent 1px 5px); background-size: 12px 100%; background-repeat: no-repeat; transition: opacity 200ms ease; }
 .refusal .title { display: flex; gap: 8px; align-items: center; font-weight: 500; margin: 0 0 4px; }
@@ -99,7 +99,7 @@ body { min-height: 100dvh; display: flex; flex-direction: column; background-ima
 [data-chain="verified"] .status svg { color: var(--held); }
 [data-chain="broken"] .status svg { color: var(--broken); }
 .seal { margin-top: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.seal code { font: 13px/1.5 var(--mono); color: var(--ink-2); }
+.seal code { font: 13px/1.5 var(--mono); color: var(--ink-2); font-variation-settings: "MONO" 1; }
 .acts { display: flex; gap: 16px; align-items: center; margin-top: 12px; }
 button.verify { font: 500 13.5px/1 var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
 button.verify:active { transform: scale(0.97); }
@@ -289,27 +289,45 @@ function witness(runId, events) {
   const open = el("a", "", "Open record"); open.href = "/runs/" + runId;
   const acts = el("p", "acts"); acts.append(verify, open);
   w.append(el("p", "k", "Witnessed by the chain"), strip, status, el("p", "seal"), acts);
-  links(w, events.length);
-  mark(w, "unverified", "Not verified yet", "Record", events.at(-1).hash);
-  verify.onclick = () => check(w, runId, verify);
+  // What this page saw when the run finished. verifyChain cannot see events cut from the end, so a record that later
+  // ends sooner, or on another hash, reads as changed.
+  const seen = { n: events.length, head: events.at(-1).hash };
+  links(w, seen.n);
+  mark(w, "unverified", "Not verified yet", "Record", seen.head);
+  verify.onclick = () => check(w, runId, verify, seen);
   return w;
 }
-async function check(w, runId, verify) {
+const fetchJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(url + " answered " + r.status); return r.json(); });
+async function check(w, runId, verify, seen) {
   verify.disabled = true;
-  let events, view;
-  try { [events, view] = await Promise.all([fetch("/runs/" + runId + "/events").then((r) => r.json()), fetch("/runs/" + runId + "/view").then((r) => r.json())]); }
-  catch { w.querySelector(".status span").textContent = "The web door did not answer. Try again."; verify.disabled = false; return; }
-  const n = events.length, bad = view.chain.firstBad;
-  const marks = links(w, n);
-  const step = reduce.matches ? 0 : Math.max(24, Math.min(70, 900 / n));
-  for (let i = 0; i < (bad === null ? n : bad); i++) {
-    marks[i].className = "held";
-    if (step) { mark(w, "checking", "Checking event " + (i + 1) + " of " + n, "Event " + String(i).padStart(2, "0"), events[i].hash); await sleep(step); }
+  w.setAttribute("aria-busy", "true");
+  try {
+    const [events, view] = await Promise.all([fetchJson("/runs/" + runId + "/events"), fetchJson("/runs/" + runId + "/view")]);
+    const n = events.length, last = events.at(-1);
+    const changed = view.chain.events !== n ? "The record changed while it was checked. Verify again."
+      : view.chain.firstBad === null && (n < seen.n || !last || last.hash !== seen.head || last.event.t !== "run.finished") ? "Changed since this page loaded: the record had " + seen.n + " events and ended on " + hex(seen.head)
+      : null;
+    const bad = changed ? null : view.chain.firstBad;
+    const marks = links(w, n);
+    const stop = bad === null ? n : bad;
+    // About 900 ms whatever the length: one event per step down to a frame, then several per frame.
+    const delay = Math.min(70, 900 / Math.max(stop, 1)), per = Math.max(1, Math.ceil(16 / delay));
+    for (let i = 0; i < stop; i += per) {
+      const k = Math.min(stop, i + per) - 1;
+      for (let j = i; j <= k; j++) marks[j].className = "held";
+      if (!reduce.matches) { mark(w, "checking", "Checking " + (k + 1) + " of " + n + " events", "#" + k, events[k].hash); await sleep(delay * per); }
+    }
+    if (changed) mark(w, "broken", changed, "Record", last ? last.hash : seen.head);
+    else if (bad !== null) { marks[bad].className = "broken"; mark(w, "broken", "Broken at #" + bad + ": an event was edited or removed", "#" + bad, events[bad].hash); }
+    else mark(w, "verified", "Verified: chain intact over " + n + " events", "Record", last.hash);
+    verify.textContent = "Verify again";
+  } catch {
+    links(w, seen.n);
+    mark(w, "unverified", "The web door did not answer. Try again.", "Record", seen.head);
+  } finally {
+    w.removeAttribute("aria-busy");
+    verify.disabled = false;
   }
-  if (bad === null) mark(w, "verified", "Verified: chain intact over " + n + " events", "Record", events.at(-1).hash);
-  else { marks[bad].className = "broken"; mark(w, "broken", "Broken at event " + bad + ": an event was edited or removed", "Event " + String(bad).padStart(2, "0"), events[bad].hash); }
-  verify.textContent = "Verify again";
-  verify.disabled = false;
 }
 
 let lastDay = null;
@@ -334,6 +352,7 @@ function turnOf(t, n) {
 }
 function stepsOf(turn) {
   const steps = el("p", "steps"), clockText = el("span", "", "0 s"), t0 = Date.now();
+  clockText.setAttribute("aria-hidden", "true");
   steps.append(el("span", "", "Reading the lab's documents"), clockText);
   steps.timer = setInterval(() => { clockText.textContent = Math.round((Date.now() - t0) / 1000) + " s"; }, 1000);
   turn.body.append(steps);
@@ -359,11 +378,13 @@ async function ask(text) {
 }
 
 async function follow(turn, steps, runId, scroll) {
+  try { await watch(turn, steps, runId, scroll); }
+  catch { done(steps, el("p", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); }
+}
+async function watch(turn, steps, runId, scroll) {
   const seen = new Set();
   for (let i = 0; i < 600; i++) {
-    let events;
-    try { events = await (await fetch("/runs/" + runId + "/events")).json(); }
-    catch { done(steps, el("p", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); return; }
+    const events = await fetchJson("/runs/" + runId + "/events");
     for (const e of events) {
       if (e.event.t === "tool.requested" && !seen.has(e.seq)) { seen.add(e.seq); steps.append(el("code", "", e.event.tool)); }
     }
@@ -371,7 +392,7 @@ async function follow(turn, steps, runId, scroll) {
     if (finished) {
       const started = events.find((e) => e.event.t === "run.started");
       if (started) turn.head.lastChild.textContent = started.event.trigger.memberId || user;
-      const replies = await (await fetch("/replies?runId=" + runId)).json();
+      const replies = await fetchJson("/replies?runId=" + runId);
       const refused = events.find((e) => e.event.t === "egress.refused");
       const withheld = events.filter((e) => e.event.t === "tool.withheld").length;
       let source = null;

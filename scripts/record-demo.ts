@@ -29,7 +29,7 @@ const browser = await chromium.launch({ ...(process.env.LABH_CHROMIUM ? { execut
 const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1, colorScheme: values.scheme === "dark" ? "dark" : "light", recordVideo: { dir: raw, size } });
 const page = await context.newPage();
 page.setDefaultTimeout(180_000);
-const records = page.locator(".turn a", { hasText: "Record" });
+const records = page.locator(".entry .witness a", { hasText: "Open record" });
 
 await page.goto(url.href);
 await page.waitForTimeout(1500);
