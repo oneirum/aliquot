@@ -96,8 +96,22 @@ A lab may run Claude Code or Codex as a research agent. Aliquot treats the whole
 - Publishing a hosted agent with a D3 knowledge base or a D3 dataset is an error, not a warning.
 - `dev_shared_login` lets a developer try a CLI on their own logged-in account. It is a `public` placement, so the
   agent sees D0 only, and the agent worker refuses it unless started with `--dev-shared-login`. Under it, Claude Code
-  reads its credential from the developer's keychain. It is not a deployment path. A lab uses a dedicated service
-  login.
+  reads its credential from the developer's keychain. It is not a deployment path. A lab uses a key it owns
+  (`api_key_env`).
+
+### Model accounts
+
+Every model Aliquot calls is reached with a credential the lab or institution holds, named in `lab.toml` with a
+placement. The placement alone sets the most sensitive data that may reach it. No personal or seat subscription is
+used by the server: the config parser accepts a subscription's OAuth token (`auth_env`) only at a `public` placement,
+and the agent worker refuses it unless started with `--dev-shared-login`. When a lab runs Claude Code or Codex, the
+task prompt and every tool result pass Aliquot's gateway like any other call, and the CLI reaches only its vendor's
+API hosts, with the lab's key. Routing each of the CLI's own model calls through the gateway, so that each one is
+recorded, is planned. A member's own AI tool connected to Aliquot (`aliquot ask` or `aliquot acp`) gets answers only
+up to the web door's placement, or a stricter `--ceiling`, and the rest is withheld behind a record link. D0 is the
+ceiling for a personal subscription. What a member types into their own tool before it reaches Aliquot is under that
+tool's terms, not Aliquot's. The lab's data-handling rules have to cover it. Aliquot cannot prevent a member from
+copying text by hand from a page they are allowed to read.
 
 ### Tools
 

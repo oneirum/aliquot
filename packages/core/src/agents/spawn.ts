@@ -75,6 +75,7 @@ async function fileSha256(path: string): Promise<Sha256> {
  */
 export async function installedCli(backend: AgentBackend, env: NodeJS.ProcessEnv, devSharedLogin = false): Promise<InstalledCli> {
   if (backend.auth.t === "dev-shared" && !devSharedLogin) throw new Error(`agent backend ${backend.id}: dev_shared_login runs only under agent-worker ${DEV_SHARED_LOGIN_FLAG}, never in a lab deployment`);
+  if (backend.auth.t === "oauth-env" && !devSharedLogin) throw new Error(`agent backend ${backend.id}: auth_env runs only under agent-worker ${DEV_SHARED_LOGIN_FLAG}, never in a lab deployment`);
   if (backend.kind === "codex") refuseManagedCodexConfig(backend.id);
   const configured = backend.binary ?? DEFAULT_NAMES[backend.kind];
   const found = configured.includes("/") ? configured : onPath(configured, env.PATH ?? "");
@@ -112,7 +113,7 @@ export interface SessionSpec {
   readonly bridge: { readonly port: number; readonly url: string };
   readonly proxyPort: number;
   readonly token: string;
-  /** The worker's environment, read only for the one variable auth_env names. */
+  /** The worker's environment, read only for the one variable api_key_env or auth_env names. */
   readonly env: NodeJS.ProcessEnv;
   /** The agent's wall limit: a codex dev login must not need a refresh within it. */
   readonly maxWallMs: number;
@@ -167,10 +168,10 @@ export class Confined {
     if (auth.t === "dev-shared") {
       // codex cannot start without writing its home, so its login is copied in; claude's is a keychain item
       if (s.cli.backend.kind === "codex") copyCodexDevLogin(join(auth.dir, "auth.json"), join(dirs.config, "auth.json"), Date.now(), s.maxWallMs);
-    } else if (auth.t === "env") {
+    } else if (auth.t === "api-key-env" || auth.t === "oauth-env") {
       const secret = s.env[auth.env];
       if (!secret) throw new Error(`agent backend ${s.cli.backend.id}: ${auth.env} is not set`);
-      env.CLAUDE_CODE_OAUTH_TOKEN = secret;
+      env[auth.t === "api-key-env" ? kind.apiKeyEnv : "CLAUDE_CODE_OAUTH_TOKEN"] = secret;
     } else {
       copyFileSync(auth.path, join(dirs.config, "auth.json"));
       chmodSync(join(dirs.config, "auth.json"), 0o600);

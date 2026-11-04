@@ -17,7 +17,10 @@ placement = "lab"                        # lab hardware: up to D3
 # base_url = "https://openrouter.ai/api/v1"
 # placement = "zdr"                      # up to D1
 # api_key_env = "OPENROUTER_API_KEY"
-# provider = { zdr = true, data_collection = "deny", allow_fallbacks = false, only = ["anthropic"] }
+# Claude has zero-retention endpoints on OpenRouter only through Bedrock and Vertex, so only names those. zdr = true
+# also needs the account's ZDR-only privacy setting turned on, or OpenRouter may still route
+# a request elsewhere.
+# provider = { zdr = true, data_collection = "deny", allow_fallbacks = false, only = ["amazon-bedrock", "google-vertex"] }
 
 # Native providers. protocol is "openai-chat" (the default), "anthropic-messages" or "openai-responses".
 # sampling says whether temperature and top_p are sent. openai-chat sends them unless sampling = false.

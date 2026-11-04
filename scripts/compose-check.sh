@@ -47,7 +47,7 @@ sandbox_image="$(docker build -q -t aliquot-sandbox sandbox)"
 mkdir -p "$work/config"
 cp deploy/check/* test/pdf-fixtures/latex.pdf test/pdf-fixtures/nist-cswp-27.pdf test/pdf-fixtures/scanned.pdf "$work/config/"
 printf '\n[sandbox]\nimage = "%s"\n' "$sandbox_image" >> "$work/config/lab.toml"
-echo "DOCKER_GID=$(docker run --rm -v /var/run/docker.sock:/s --entrypoint stat aliquot-app:0.5.0 -c %g /s)" >> "$ALIQUOT_ENV"
+echo "DOCKER_GID=$(docker run --rm -v /var/run/docker.sock:/s --entrypoint stat aliquot-app:0.5.1 -c %g /s)" >> "$ALIQUOT_ENV"
 "${compose[@]}" up -d --no-build --wait || fail "the stack did not come up healthy"
 pass "stack up: $("${compose[@]}" ps --format '{{.Service}}={{.Health}}{{if not .Health}}{{.State}}{{end}}' | sort | tr '\n' ' ')"
 

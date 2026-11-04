@@ -15,5 +15,5 @@ services:
   studio: *check-app
   fake-model:
     build: .
-    image: aliquot-app:0.5.0
+    image: aliquot-app:0.5.1
     command: ["node", "test/fake-model-server.ts"]

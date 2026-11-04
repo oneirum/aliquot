@@ -86,7 +86,7 @@ A Linux machine needs only Docker. One `docker compose up` starts Postgres, the 
 
 `init` asks where the lab's model runs, the web door port and the lab's participant id patterns. It tests the patterns against ids you paste, with a PASS or FAIL line for each, and asks again on a FAIL. It writes `config/lab.toml`, and `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values. It never rewrites an existing `.env`: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable. On a machine with Node, `pnpm aliquot:init` does the same.
 
-The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. The web door has no sign-in yet, so keep it on the machine until sign-on lands in 0.8. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
+The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. The web door has no sign-in yet, so keep it on the machine until sign-on lands in 0.7. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
 
 	docker compose exec worker aliquot-kb compile --definition /etc/aliquot/kb.json --wait
 	docker compose exec worker aliquot runs
@@ -179,6 +179,7 @@ An agent can use Claude Code or Codex as its engine, declared in `lab.toml`:
 	[agent_backends.claude]
 	kind = "claude-code"        # or "codex"
 	placement = "approved"      # what the institution approved this account for: approved, zdr or public
+	api_key_env = "LAB_ANTHROPIC_KEY"   # a key the lab owns, never a personal subscription
 
 Aliquot treats the CLI as one hosted model. Its task prompt, and every tool result sent back to it, pass the same egress check as any model call, so a CLI with placement `approved` never sees D3. The CLI runs under a macOS sandbox profile that denies by default:
 
@@ -189,7 +190,7 @@ Aliquot treats the CLI as one hosted model. Its task prompt, and every tool resu
 
 Each run records an `agent.session` event: the CLI version, exit code, tool calls and tunnels. A tool result above the agent's ceiling is withheld from the CLI and recorded as `tool.withheld`. The confinement test runs a probe under the real profile and checks one denial per gap. Confinement exists on macOS only for now. On any other platform a run on a CLI agent is refused before the CLI starts, as `agent-confinement-missing`.
 
-A lab gives each CLI a dedicated service login: a token from `claude setup-token`, or a dedicated Codex `auth.json`. Use a placement your institution actually approved for that account. A personal subscription is `public`.
+A lab gives each CLI a key the lab or the institution owns, in the variable `api_key_env` names: an Anthropic organization key reaches Claude Code as `ANTHROPIC_API_KEY`, an OpenAI organization key reaches Codex as `CODEX_API_KEY`. Codex also takes a dedicated `auth.json` holding the lab's key (`auth_file`). Use a placement your institution actually approved for that account. A personal Claude or ChatGPT subscription cannot power a lab deployment, because the vendors' terms do not allow a shared server to use one. Its OAuth token (`auth_env`) parses only at `public` and runs only under `agent-worker --dev-shared-login`, for a developer's own smoke test.
 
 ## From other harnesses
 
@@ -348,8 +349,8 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
 - **0.6, ask where the lab already talks:** a Slack door (Teams after a lab asks), and a router across several agents. Today a channel is bound to one agent.
-- **0.7, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
-- **0.8, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
+- **0.7, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
+- **0.8, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.
 
 **Known limits**

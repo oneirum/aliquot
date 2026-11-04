@@ -1,0 +1,16 @@
+# Weekly npm updates: patch and minor bumps arrive as one grouped PR. Security update PRs also need the
+# repository's "Dependabot security updates" setting. `deepmerge` resolves to vendor/deepmerge through a root
+# override (see vendor/README.md).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch

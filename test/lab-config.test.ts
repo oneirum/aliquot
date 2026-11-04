@@ -110,3 +110,14 @@ test("lab.example.toml serves acp at zdr, and its commented slack surface parses
   const slack = `${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(end)}`;
   assert.deepEqual(parseConfig(slack, path).surfaces.find((s) => s.id === "slack"), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "ALIQUOT_SLACK_TOKEN" });
 });
+
+test("lab.example.toml's OpenRouter block parses once uncommented and routes Claude only to the providers with zero-retention Claude endpoints", () => {
+  const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
+  const text = readFileSync(path, "utf8");
+  const start = text.indexOf("# [endpoints.openrouter]");
+  const end = text.indexOf("\n\n", start);
+  const block = text.slice(start, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1");
+  const openrouter = parseConfig(`${text.slice(0, start)}${block}${text.slice(end)}`, path).endpoints.find((e) => e.id === "openrouter");
+  assert.equal(openrouter?.placement, "zdr");
+  assert.deepEqual(openrouter?.providerRouting, { zdr: true, data_collection: "deny", allow_fallbacks: false, only: ["amazon-bedrock", "google-vertex"] });
+});

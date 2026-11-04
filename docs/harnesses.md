@@ -32,7 +32,7 @@ Exit codes: 0 answered, 1 refused or not answered, 2 a usage problem or a door t
 
 `--ceiling D0|D1|D2|D3` is a stricter promise on the caller's side, for a caller that keeps its own copy of the answer. The door already withholds anything above its surface's placement. An answer above the ceiling is withheld the same way.
 
-The web door has no member sign-in yet. Until the sign-on release, it trusts the member id it is given, and it stays on `127.0.0.1` like the chat page. So `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`).
+The web door has no member sign-in yet. Until the sign-on release (0.7), it trusts the member id it is given, and it stays on `127.0.0.1` like the chat page. So `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`).
 
 ## Surfaces
 
