@@ -80,7 +80,13 @@ body { min-height: 100dvh; display: flex; flex-direction: column; background-ima
 .doc { font-weight: 500; overflow-wrap: anywhere; }
 .facts { color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
 @media (min-width: 900px) { .margin { border-left: 1px solid var(--line); padding-left: 24px; } }
-@media (max-width: 899px) { .margin { margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--line); } }
+@media (max-width: 899px) {
+  .margin { gap: 18px; margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--line); }
+  .cite, .witness { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; }
+  .margin .k, .witness .links { margin: 0; }
+  .facts, .witness .status, .witness .seal, .witness .acts { flex-basis: 100%; }
+  .witness .status { margin-top: 10px; }
+}
 
 .links { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0 12px; }
 .links i { width: 6px; height: 16px; border-radius: 1.5px; box-shadow: inset 0 0 0 1px var(--line); transition: background-color 120ms ease, box-shadow 120ms ease, opacity 160ms ease; }
