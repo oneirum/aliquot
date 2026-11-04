@@ -113,9 +113,9 @@ button.verify:disabled { cursor: default; color: var(--muted); }
 textarea { flex: 1; resize: none; border: 0; border-bottom: 1px solid var(--muted); border-radius: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 17px; padding: 8px 0; max-height: 160px; transition: border-color 160ms ease; }
 textarea::placeholder { color: var(--muted); }
 textarea:focus-visible { outline: none; border-bottom-color: var(--ink); box-shadow: 0 1px 0 var(--ink); }
-button.send { font: 500 15px/1 var(--sans); background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 11px 18px; cursor: pointer; transition: transform 160ms var(--ease-out), opacity 160ms ease; }
+button.send { font: 500 15px/1 var(--sans); background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 11px 18px; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease, color 160ms ease, box-shadow 160ms ease; }
 button.send:active { transform: scale(0.97); }
-button.send:disabled { opacity: 0.45; cursor: default; }
+button.send:disabled { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); cursor: default; transform: none; }
 @media (min-width: 900px) { .compose .row { padding: 14px 48px 18px; } .compose .next { display: block; padding-top: 12px; } }
 @media (prefers-reduced-motion: reduce) {
   .entry { transition: opacity 200ms ease; }
