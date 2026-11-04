@@ -5,8 +5,8 @@
  * the record's hash through each event it checked up to that verdict, then shows the verdict, so what the page shows is
  * the door's check and the hashes it checked.
  *
- * Static HTML with inline CSS and script, like the other pages: it reads only the JSON routes in web.ts, and imports
- * the motion library the door serves at /vendor/motion.js.
+ * Static HTML with inline CSS and script, like the other pages: it reads only the JSON routes in web.ts, and animates
+ * with the browser's own Web Animations API.
  */
 
 import { APP_HEAD } from "./web-app.ts";
@@ -30,8 +30,8 @@ export function chatPage(where = ""): string {
 <title>Ask the lab · Aliquot</title>
 ${APP_HEAD}
 <style>${BASE_CSS}
-:root { --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.22); --edge: rgb(28 27 25 / 0.16); --accent: var(--ink); --accent-ink: var(--bg); --held: #00664a; --broken: #b34700; }
-@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: rgb(236 235 230 / 0.16); --edge: rgb(236 235 230 / 0.2); --held: #5ee0b0; --broken: #ff8a4c; } }
+:root { --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.22); --edge: rgb(28 27 25 / 0.16); --accent: var(--ink); --accent-ink: var(--bg); }
+@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: rgb(236 235 230 / 0.16); --edge: rgb(236 235 230 / 0.2); } }
 html { scroll-padding: 64px 0 120px; }
 body { min-height: 100dvh; }
 svg { display: block; }
@@ -40,7 +40,7 @@ svg { display: block; }
 .icon:active { transform: scale(0.96); }
 @media (hover: hover) and (pointer: fine) { .icon:hover { background: var(--hover); color: var(--ink); } }
 
-.side { position: fixed; inset: 0 auto 0 0; z-index: 3; width: 260px; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--line); }
+.side { position: fixed; inset: 0 auto 0 0; z-index: 3; width: calc(260px + env(safe-area-inset-left)); padding-left: env(safe-area-inset-left); display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--line); }
 .side-top { height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 16px; }
 /* The wordmark and the lab name share one line: both bars are 52 px, both names 16/24 at 500, so their baselines meet. */
 .side-top .wordmark { font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0; }
@@ -53,17 +53,18 @@ svg { display: block; }
 .history { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 0 8px 16px; }
 .side .label { margin: 24px 0 8px; padding: 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .history .row { color: var(--ink-2); }
-.me { flex: none; display: flex; align-items: center; gap: 8px; height: calc(64px + env(safe-area-inset-bottom)); padding: 0 16px env(safe-area-inset-bottom); font-size: 14px; line-height: 20px; }
+.me { flex: none; display: flex; align-items: center; height: calc(72px + env(safe-area-inset-bottom)); padding: 0 16px env(safe-area-inset-bottom); font-size: 14px; line-height: 20px; }
 .me > span:last-child { display: grid; min-width: 0; }
+.me #who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me .where { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.avatar { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 500; }
 .scrim { display: none; }
 
-.pane { min-height: 100dvh; display: flex; flex-direction: column; padding-left: 260px; }
+/* --safe-l is the left inset the pane's own content needs: none while the sidebar sits beside it and covers the left edge. */
+.pane { min-height: 100dvh; display: flex; flex-direction: column; padding-left: calc(260px + env(safe-area-inset-left)); --safe-l: 0px; }
 body[data-side="closed"] .side { display: none; }
-body[data-side="closed"] .pane { padding-left: 0; }
+body[data-side="closed"] .pane { padding-left: 0; --safe-l: env(safe-area-inset-left); }
 /* 6 px of padding puts the toggle's icon 16 px from the pane's edge, the inset of the sidebar's own rows. */
-.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 6px; }
+.bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 max(8px, env(safe-area-inset-right)) 0 max(6px, var(--safe-l)); }
 /* The bar is a material the thread passes under: the page colour, translucent and blurred, running 16 px past the
    bar's edge and fading out there, so text softens as it goes under instead of meeting a ruled line. */
 .bar::before { content: ""; position: absolute; inset: 0 0 -16px; z-index: -1; background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%); mask-image: linear-gradient(#000 calc(100% - 16px), transparent); pointer-events: none; }
@@ -81,19 +82,21 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .try { min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 20px; background: none; color: var(--ink); font: 15px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
 .try:active { transform: scale(0.97); }
 @media (hover: hover) and (pointer: fine) { .try:hover { background: var(--hover); } }
-/* A footnote on the rows' 16 px inset; the member row's avatar sits 16 px inside it, so the note ends 16 px above the chip. */
+/* A footnote on the rows' 16 px inset; the member row's two lines sit 16 px inside it, so the note ends 16 px above them. */
 .install { flex: none; margin: 0; padding: 0 16px; font-size: 13px; line-height: 20px; color: var(--muted); text-wrap: pretty; }
 @media (display-mode: standalone) { .install { display: none; } }
 
-#thread { order: 7; flex: 1; width: 100%; max-width: 768px; margin: 0 auto; padding: 24px 24px 32px; text-wrap: pretty; }
+#thread { order: 7; flex: 1; width: 100%; max-width: 768px; margin: 0 auto; padding: 24px max(24px, env(safe-area-inset-right)) 32px max(24px, var(--safe-l)); text-wrap: pretty; }
 #thread:empty { display: none; }
 .day { margin: 0 0 24px; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--muted); }
 .entry { margin: 0 0 48px; transition: opacity 200ms var(--ease-out); }
 .entry:last-child { margin-bottom: 0; }
 @starting-style { .entry { opacity: 0; } }
 .restoring .entry { transition: none; }
-.meta { display: flex; gap: 8px; margin: 0 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.meta { display: flex; gap: 8px; min-width: 0; margin: 0 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .meta > * + *::before { content: "\\00b7"; margin-right: 8px; }
+.meta time { flex: none; }
+.meta .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .q { margin: 0 0 16px; font-size: 18px; line-height: 26px; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; }
 .a { font-size: 16px; line-height: 26px; overflow-wrap: anywhere; text-wrap: pretty; }
 .a, .refusal, .cite, .witness, .withheld { transition: opacity 200ms var(--ease-out); }
@@ -138,17 +141,19 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .trail { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; min-height: 32px; }
 .seal code { display: inline-block; font: 13px/20px var(--mono); color: var(--muted); }
 /* Check is the block's one control: a pill, 32 px tall with a 44 px touch target. Open record is quiet text with an
-   arrow, in the second ink, going full ink on hover; its touch target is 44 px tall too. */
+   arrow, in the second ink, going full ink on hover; its touch target is 44 px tall too. Each target grows away from
+   the other, Check's up and Open record's down, so neither reaches into the other's row and a tap just below Check
+   opens nothing. */
 button.verify { position: relative; align-self: start; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 16px; background: none; color: var(--ink); font: 500 13px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
-button.verify::after { content: ""; position: absolute; inset: -7px -1px; }
+button.verify::after { content: ""; position: absolute; inset: -12px -1px -1px; }
 button.verify:active { transform: scale(0.97); }
-button.verify:disabled { cursor: default; color: var(--muted); transform: none; }
+button.verify[aria-disabled="true"] { cursor: default; color: var(--muted); transform: none; }
 .trail a { position: relative; display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); text-decoration: none; transition: color 160ms ease; }
 .trail a svg { width: 12px; height: 12px; flex: none; }
-.trail a::after { content: ""; position: absolute; inset: -12px -8px; }
-@media (hover: hover) and (pointer: fine) { button.verify:not(:disabled):hover { background: var(--hover); } .trail a:hover { color: var(--ink); } }
+.trail a::after { content: ""; position: absolute; inset: 0 -8px -24px; }
+@media (hover: hover) and (pointer: fine) { button.verify:not([aria-disabled="true"]):hover { background: var(--hover); } .trail a:hover { color: var(--ink); } }
 
-.compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px 24px calc(32px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 24px); }
+.compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px max(24px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(24px, var(--safe-l)); background: linear-gradient(transparent, var(--bg) 24px); }
 .box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 11px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
 .box:focus-within { border-color: var(--field-focus); }
 textarea { flex: 1; min-width: 0; max-height: 192px; resize: none; border: 0; outline: 0; padding: 6px 0; background: transparent; color: var(--ink); font: 16px/24px var(--sans); }
@@ -161,7 +166,7 @@ button.send:disabled { cursor: default; transform: none; }
 
 @media (max-width: 899px) {
   html { scroll-padding: 72px 0 112px; }
-  .side { width: 288px; border-right: 0; transform: translateX(-100%); transition: transform 280ms var(--ease-drawer); }
+  .side { width: calc(288px + env(safe-area-inset-left)); border-right: 0; transform: translateX(-100%); transition: transform 280ms var(--ease-drawer); }
   body[data-side="closed"] .side { display: flex; }
   body[data-side="open"] .side { transform: none; box-shadow: 0 0 32px rgb(0 0 0 / 0.16); }
   .side-top { height: 56px; }
@@ -169,17 +174,17 @@ button.send:disabled { cursor: default; transform: none; }
   .side { z-index: 5; overscroll-behavior: contain; }
   .scrim { display: block; position: fixed; inset: 0; z-index: 4; background: rgb(0 0 0 / 0.32); opacity: 0; pointer-events: none; transition: opacity 200ms ease; }
   body[data-side="open"] .scrim { opacity: 1; pointer-events: auto; }
-  .pane { padding-left: 0; }
+  .pane { padding-left: 0; --safe-l: env(safe-area-inset-left); }
   /* A 44 px drawer button with no fill; 2 px of bar padding puts its icon's stroke on the thread's 16 px gutter. */
-  .bar { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; height: 56px; padding: 0 2px; }
+  .bar { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; height: 56px; padding: 0 max(2px, env(safe-area-inset-right)) 0 max(2px, var(--safe-l)); }
   .bar .icon { width: 44px; height: 44px; border-radius: 50%; color: var(--ink); }
   .bar .icon:active { background: var(--hover); }
   .bar .icon svg { width: 18px; height: 18px; }
   .bar .title { font-size: 17px; line-height: 24px; text-align: center; }
   .intro h1 { font-size: 24px; line-height: 32px; }
-  .intro h1, .tries { width: calc(100% - 32px); }
-  #thread { padding: 16px 16px 24px; }
-  .compose { padding: 16px 12px calc(16px + env(safe-area-inset-bottom)); }
+  .intro h1, .tries { width: calc(100% - max(16px, var(--safe-l)) - max(16px, env(safe-area-inset-right))); }
+  #thread { padding: 16px max(16px, env(safe-area-inset-right)) 24px max(16px, var(--safe-l)); }
+  .compose { padding: 16px max(12px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(12px, var(--safe-l)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
@@ -201,7 +206,7 @@ button.send:disabled { cursor: default; transform: none; }
   </nav>
   <ol class="history" id="history"></ol>
   <p class="install" id="install">To open Aliquot like an app, choose Add to Home Screen or Install in the browser menu.</p>
-  <div class="me"><span class="avatar" id="initial" aria-hidden="true"></span><span><span id="who"></span>${whereSpan(where)}</span></div>
+  <div class="me"><span><span id="who"></span>${whereSpan(where)}</span></div>
 </aside>
 <div class="scrim" id="scrim"></div>
 <div class="pane">
@@ -232,8 +237,6 @@ const blank = () => ({ v: 1, thread: "web-" + crypto.randomUUID(), n: 0, turns: 
 let state = (() => { try { const s = JSON.parse(sessionStorage.getItem(KEY) || "null"); return s && s.v === 1 && Array.isArray(s.turns) ? s : blank(); } catch { return blank(); } })();
 const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
 const reduce = matchMedia("(prefers-reduced-motion: reduce)");
-// Loaded once, off the critical path; if it fails to load, a check still shows its verdict, without movement.
-const motion = import("/vendor/motion.js").catch(() => null);
 
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text !== undefined) x.textContent = text; return x; };
 const svg = (paths) => { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 16 16"); s.setAttribute("aria-hidden", "true"); s.innerHTML = paths; return s; };
@@ -243,7 +246,6 @@ const dayName = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: 
 const hex = (h) => h.slice(0, 16).replace(/(.{4})(?!$)/g, "$1 ");
 
 $("who").textContent = user;
-$("initial").textContent = user.slice(0, 1).toUpperCase();
 
 // The sidebar sits beside the thread on a wide screen, where the toggle hides it and the choice is remembered, and
 // slides over it as a drawer on a phone, where it starts closed.
@@ -378,34 +380,36 @@ function witness(runId, events) {
   // ends sooner, or on another hash, reads as changed.
   const seen = { n: events.length, head: events.at(-1).hash };
   mark(w, "unverified", "Not checked", seen.head);
-  verify.onclick = () => check(w, runId, verify, seen);
+  // aria-disabled rather than disabled, so keyboard focus stays on Check through the walk and after the verdict.
+  verify.onclick = () => { if (!w.hasAttribute("aria-busy")) check(w, runId, verify, seen); };
   return w;
 }
 
 // The check moment, the page's one motion with character: the hash steps through each event the door checked, then
-// the verdict settles in one beat, the glyph filling its dashed ring, the hash landing, the words fading in. A spring
-// with no bounce, transform, opacity and clip-path only. Reduced motion skips the steps and shows the verdict at once.
-const STEP = [0.23, 1, 0.32, 1];
-const SETTLE = { type: "spring", bounce: 0, duration: 0.35 };
-const landHash = (m, code, options) => m.animate(code, { transform: ["translateY(4px)", "translateY(0px)"], opacity: [0.4, 1] }, options);
-function settle(m, w) {
+// the verdict settles in one beat, the glyph filling its dashed ring, the hash landing, the words fading in. A strong
+// ease-out, transform, opacity and clip-path only. Reduced motion skips the steps and shows the verdict at once.
+const EASE = "cubic-bezier(0.23, 1, 0.32, 1)";
+const SETTLE = 300;
+const play = (node, keyframes, duration) => node.animate(keyframes, { duration, easing: EASE, fill: "both" });
+const landHash = (code, duration) => play(code, { transform: ["translateY(4px)", "translateY(0px)"], opacity: [0.4, 1] }, duration);
+function settle(w) {
   const glyph = w.querySelector(".glyph svg"), ghost = svg(SEALS.unverified);
   ghost.setAttribute("class", "ghost");
   glyph.after(ghost);
-  // 60% of the glyph's 16 px box is just past the square's corners, so the fill lasts the whole spring.
-  m.animate(glyph, { clipPath: ["circle(0% at 50% 50%)", "circle(60% at 50% 50%)"], transform: ["scale(0.85)", "scale(1)"] }, SETTLE);
-  m.animate(ghost, { opacity: [1, 0] }, { duration: 0.2, ease: STEP }).finished.then(() => ghost.remove(), () => ghost.remove());
-  m.animate(w.querySelector(".words"), { opacity: [0, 1] }, { duration: 0.2, ease: STEP });
-  landHash(m, w.querySelector(".seal code"), SETTLE);
+  // 60% of the glyph's 16 px box is just past the square's corners, so the fill lasts the whole settle.
+  play(glyph, { clipPath: ["circle(0% at 50% 50%)", "circle(60% at 50% 50%)"], transform: ["scale(0.85)", "scale(1)"] }, SETTLE);
+  play(ghost, { opacity: [1, 0] }, 200).finished.then(() => ghost.remove(), () => ghost.remove());
+  play(w.querySelector(".words"), { opacity: [0, 1] }, 200);
+  landHash(w.querySelector(".seal code"), SETTLE);
 }
 
 const fetchJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(url + " answered " + r.status); return r.json(); });
 async function check(w, runId, verify, seen) {
-  verify.disabled = true;
+  verify.setAttribute("aria-disabled", "true");
   w.setAttribute("aria-busy", "true");
+  const code = w.querySelector(".seal code");
   try {
-    const [events, view, loaded] = await Promise.all([fetchJson("/runs/" + runId + "/events"), fetchJson("/runs/" + runId + "/view"), motion]);
-    const m = reduce.matches ? null : loaded;
+    const [events, view] = await Promise.all([fetchJson("/runs/" + runId + "/events"), fetchJson("/runs/" + runId + "/view")]);
     const n = events.length, last = events.at(-1), head = last ? last.hash : seen.head;
     const changed = view.chain.events !== n ? "The record changed while it was checked. Check again."
       : view.chain.firstBad === null && (n < seen.n || !last || last.hash !== seen.head || last.event.t !== "run.finished") ? "Changed since this page loaded: the record had " + seen.n + " events and ended on " + hex(seen.head)
@@ -414,26 +418,30 @@ async function check(w, runId, verify, seen) {
     const stop = bad === null ? n : bad;
     if (!reduce.matches) {
       mark(w, "checking", "Checking 0 of " + n + " events", seen.head);
-      const words = w.querySelector(".words"), code = w.querySelector(".seal code");
+      // The stepping words and hash are hidden from screen readers, so the live region announces only the verdict.
+      const words = w.querySelector(".words");
+      words.setAttribute("aria-hidden", "true");
+      code.setAttribute("aria-hidden", "true");
       // About 900 ms whatever the length: one event per step down to a frame, then several per frame.
       const delay = Math.min(70, 900 / Math.max(stop, 1)), per = Math.max(1, Math.ceil(16 / delay));
       for (let i = 0; i < stop; i += per) {
         const k = Math.min(stop, i + per) - 1;
         words.textContent = "Checking " + (k + 1) + " of " + n + " events";
         code.textContent = hex(events[k].hash);
-        if (m) landHash(m, code, { duration: (delay * per) / 1000, ease: STEP });
+        landHash(code, delay * per);
         await sleep(delay * per);
       }
     }
     if (changed) mark(w, "broken", changed, head);
     else if (bad !== null) mark(w, "broken", "Broken at #" + bad + ": an event was edited or removed", head);
     else mark(w, "verified", "Verified: chain intact over " + n + " events", head);
-    if (m) settle(m, w);
+    if (!reduce.matches) settle(w);
   } catch {
     mark(w, "unverified", "The web door did not answer. Try again.", seen.head);
   } finally {
+    code.removeAttribute("aria-hidden");
     w.removeAttribute("aria-busy");
-    verify.disabled = false;
+    verify.removeAttribute("aria-disabled");
   }
 }
 

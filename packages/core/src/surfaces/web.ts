@@ -10,12 +10,13 @@
  *   GET  /runs/:id/events                                    -> the run record (events, no bodies)
  *   GET  /runs/:id/view                                      -> the record as the record page shows it, chain recomputed
  *   GET  /                                                   -> the member chat page
- *   GET  /manifest.webmanifest, /sw.js, /icons/:name, /fonts/:name, /vendor/:name -> what installs the chat page as an app, its typefaces and its animation library (web-app.ts)
+ *   GET  /manifest.webmanifest, /sw.js, /icons/:name, /fonts/:name -> what installs the chat page as an app, and its typefaces (web-app.ts)
  *   GET  /runs?show=refusals|failed                          -> the newest runs, optionally only those with a refusal or that failed
  *   GET  /runs/:id                                           -> the read-only record page
  *   POST /studio/<op>  {actor, ...}                          -> the studio's reads and writes of core (studio-door.ts), studio token only
  *
- * Pages and JSON go out gzipped when the browser accepts it.
+ * Pages and JSON go out gzipped when the browser accepts it. Answers, the runs list and records go out no-store, so no
+ * browser cache keeps them on the device.
  *
  * "Bearer <token>" names a surface the door serves (DOOR_KINDS), and a bearer
  * the door does not accept is a 401 that never falls back to web. Any other
@@ -177,8 +178,10 @@ function respond(req: IncomingMessage, res: ServerResponse, status: number, head
   res.end(gzip ? gzipSync(text) : text);
 }
 
-function sendHtml(req: IncomingMessage, res: ServerResponse, html: string): void {
-  respond(req, res, 200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; worker-src 'self'", "x-content-type-options": "nosniff" }, html);
+const NO_STORE = { "cache-control": "no-store" };
+
+function sendHtml(req: IncomingMessage, res: ServerResponse, html: string, headers: Record<string, string> = {}): void {
+  respond(req, res, 200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; worker-src 'self'", "x-content-type-options": "nosniff", ...headers }, html);
 }
 
 function send(req: IncomingMessage, res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -252,12 +255,12 @@ export function createWebHandler(
         const runId = uuid.safeParse(url.searchParams.get(`runId`));
         if (!runId.success) throw new HttpError(400, "runId must be a uuid");
         await requireOwnRun(db, runId.data, surface);
-        return send(req, res, 200, await readReplies(db, runId.data as RunId));
+        return send(req, res, 200, await readReplies(db, runId.data as RunId), NO_STORE);
       }
       if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(req, res, chatPage(where));
       if (req.method === "GET" && url.pathname === "/manifest.webmanifest") return respond(req, res, 200, { "content-type": "application/manifest+json", "cache-control": "no-cache" }, JSON.stringify(appManifest(where)));
       if (req.method === "GET" && url.pathname === "/sw.js") return respond(req, res, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" }, SERVICE_WORKER);
-      const assetPath = /^\/(icons|fonts|vendor)\/([^/]+)$/.exec(url.pathname);
+      const assetPath = /^\/(icons|fonts)\/([^/]+)$/.exec(url.pathname);
       const asset = req.method === "GET" && assetPath ? appAsset(assetPath[1] as AssetDir, assetPath[2]!) : null;
       if (asset) {
         res.writeHead(200, { "content-type": asset.type, "content-length": String(asset.body.length), "cache-control": "public, max-age=86400" });
@@ -266,15 +269,15 @@ export function createWebHandler(
       if (req.method === "GET" && url.pathname === "/runs") {
         const show = url.searchParams.get("show");
         const filter: RunFilter = show === "refusals" || show === "failed" ? show : "all";
-        return sendHtml(req, res, runsPage(await listRuns(db), filter, RUNS_LISTED, where));
+        return sendHtml(req, res, runsPage(await listRuns(db), filter, RUNS_LISTED, where), NO_STORE);
       }
       const runPath = /^\/runs\/([^/]+)(?:\/(events|view))?$/.exec(url.pathname);
       if (req.method === "GET" && runPath) {
         const runId = uuid.safeParse(runPath[1]);
         if (!runId.success) throw new HttpError(404, "not found");
         const events = await loadEvents(db, runId.data as RunId);
-        if (!runPath[2]) return sendHtml(req, res, recordPage(recordView(runId.data, events), where));
-        return send(req, res, 200, runPath[2] === "events" ? events : recordView(runId.data, events));
+        if (!runPath[2]) return sendHtml(req, res, recordPage(recordView(runId.data, events), where), NO_STORE);
+        return send(req, res, 200, runPath[2] === "events" ? events : recordView(runId.data, events), NO_STORE);
       }
       send(req, res, 404, { error: "not found" });
     } catch (err) {

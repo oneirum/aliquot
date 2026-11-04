@@ -3,7 +3,8 @@
  * packages/core/assets/icon.svg by scripts/icons.ts, and a service worker that caches the page shell.
  *
  * The worker caches only the paths in APP_SHELL. Every other request, /replies, /runs and the record pages among
- * them, goes to the network alone, so no answer or record is ever kept on the device. No push notifications.
+ * them, goes to the network alone, and the door sends those no-store (web.ts), so no answer or record is ever kept on
+ * the device. No push notifications.
  */
 
 import { readFileSync } from "node:fs";
@@ -14,9 +15,8 @@ import { fileURLToPath } from "node:url";
 export const THEME = { light: "#fbfaf8", dark: "#151514" } as const;
 
 /**
- * What /icons/, /fonts/ and /vendor/ serve, by file name. The typefaces are IBM Plex Sans, its weight axis, and IBM Plex
- * Mono 400, both Latin only (OFL, assets/fonts/OFL.txt). vendor/motion.js is the motion animation library as one ES
- * module (MIT, assets/vendor/LICENSE.md), so a page imports it from its own origin.
+ * What /icons/ and /fonts/ serve, by file name. The typefaces are IBM Plex Sans, its weight axis, and IBM Plex Mono 400,
+ * both Latin only (OFL, assets/fonts/OFL.txt).
  */
 const ASSET_TYPES = {
   icons: {
@@ -27,7 +27,6 @@ const ASSET_TYPES = {
     "apple-touch-icon.png": "image/png",
   },
   fonts: { "ibm-plex-sans.woff2": "font/woff2", "ibm-plex-mono.woff2": "font/woff2" },
-  vendor: { "motion.js": "text/javascript; charset=utf-8" },
 } as const satisfies Record<string, Record<string, string>>;
 export type AssetDir = keyof typeof ASSET_TYPES;
 
@@ -62,7 +61,7 @@ export function appManifest(where: string): object {
   };
 }
 
-export const SERVICE_WORKER = `const CACHE = "aliquot-shell-2";
+export const SERVICE_WORKER = `const CACHE = "aliquot-shell-3";
 const SHELL = ${JSON.stringify(APP_SHELL)};
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (e) => e.waitUntil(caches.keys().then((names) => Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n)))).then(() => self.clients.claim())));

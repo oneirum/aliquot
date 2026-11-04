@@ -72,22 +72,6 @@ test("the chat page tells a visitor how to add it to the Home Screen in one sent
   assert.match(html, /@media \(display-mode: standalone\) \{ \.install \{ display: none; \} \}/);
 });
 
-test("the door serves the motion library as one same-origin ES module that a page imports", { timeout: 60_000 }, async () => {
-  const res = await fetch(`${base}/vendor/motion.js`);
-  assert.equal(res.status, 200);
-  assert.match(res.headers.get("content-type") ?? "", /^text\/javascript\b/);
-  assert.equal((await fetch(`${base}/vendor/nope.js`)).status, 404);
-
-  const browser = await chromium.launch(process.env.LABH_CHROMIUM ? { executablePath: process.env.LABH_CHROMIUM } : {});
-  try {
-    const page = await browser.newPage();
-    await page.goto(`${base}/?user=m3`);
-    assert.equal(await page.evaluate(`import("/vendor/motion.js").then((m) => typeof m.animate)`), "function");
-  } finally {
-    await browser.close();
-  }
-});
-
 test("the service worker serves the page shell offline and never answers /runs or /replies from its cache", { timeout: 60_000 }, async () => {
   const ANSWER = "The -80 freezer held at minus 79.6 C all week (answer 7f3a)";
   const run = (await db.query<{ id: string }>("insert into jobs (kind, key, payload) values ('run', 'k:webapp', '{\"surface\":\"web\"}') returning id")).rows[0]!.id;
@@ -109,9 +93,13 @@ test("the service worker serves the page shell offline and never answers /runs o
       replies: await (await fetch("/replies?runId=${run}")).text(),
       runs: (await fetch("/runs")).status,
       record: (await fetch("/runs/${run}/events")).status,
-    }))()`)) as { replies: string; runs: number; record: number };
+      // No browser cache keeps an answer or a record either.
+      stores: await Promise.all(["/replies?runId=${run}", "/runs", "/runs/${run}", "/runs/${run}/events", "/runs/${run}/view"]
+        .map((path) => fetch(path).then((r) => r.headers.get("cache-control")))),
+    }))()`)) as { replies: string; runs: number; record: number; stores: string[] };
     assert.ok(online.replies.includes(ANSWER));
     assert.deepEqual([online.runs, online.record], [200, 200]);
+    assert.deepEqual(online.stores, ["no-store", "no-store", "no-store", "no-store", "no-store"]);
 
     const cached = (await page.evaluate(`(async () => {
       const out = [];
@@ -121,7 +109,7 @@ test("the service worker serves the page shell offline and never answers /runs o
       }
       return out;
     })()`)) as { path: string; body: string }[];
-    assert.deepEqual(cached.map((c) => c.path).sort(), ["/", "/fonts/ibm-plex-mono.woff2", "/fonts/ibm-plex-sans.woff2", "/icons/apple-touch-icon.png", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon.svg", "/icons/maskable-512.png", "/manifest.webmanifest", "/vendor/motion.js"]);
+    assert.deepEqual(cached.map((c) => c.path).sort(), ["/", "/fonts/ibm-plex-mono.woff2", "/fonts/ibm-plex-sans.woff2", "/icons/apple-touch-icon.png", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon.svg", "/icons/maskable-512.png", "/manifest.webmanifest"]);
     for (const c of cached) assert.ok(!c.body.includes(ANSWER) && !c.body.includes("7f3a"), `${c.path} holds answer text`);
 
     own.server.closeAllConnections();
