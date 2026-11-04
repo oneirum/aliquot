@@ -15,6 +15,8 @@ const icon = (paths: string) => `<svg viewBox="0 0 16 16" aria-hidden="true">${p
 const SIDEBAR = icon('<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 3v10" stroke="currentColor" stroke-width="1.5"/>');
 const NEW = icon('<path d="M13.25 8.75v2.5a2 2 0 0 1-2 2h-6.5a2 2 0 0 1-2-2v-6.5a2 2 0 0 1 2-2h2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M11.5 2.5a1.41 1.41 0 0 1 2 2L8.25 9.75 6 10.25l.5-2.25z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>');
 const RUNS = icon('<path d="M6 4.25h7.25M6 8h7.25M6 11.75h7.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="3" cy="4.25" r="1" fill="currentColor"/><circle cx="3" cy="8" r="1" fill="currentColor"/><circle cx="3" cy="11.75" r="1" fill="currentColor"/>');
+const REFUSED = icon('<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 12l8-8" stroke="currentColor" stroke-width="1.5"/>');
+const FAILED = icon('<path d="M8 2.25l6 10.5H2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v2.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.1" r=".85" fill="currentColor"/>');
 const CLOSE = icon('<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>');
 const SEND = icon('<path d="M8 13V3.5M3.75 7.5L8 3.25l4.25 4.25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>');
 
@@ -27,8 +29,8 @@ export function chatPage(where = ""): string {
 <title>Ask the lab · Aliquot</title>
 ${APP_HEAD}
 <style>${BASE_CSS}
-:root { --field: var(--surface); --field-line: var(--line); --send-off: #dcd9d2; --send-off-ink: #ffffff; }
-@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --send-off: #3a3936; --send-off-ink: #8f8b84; } }
+:root { --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.22); --bar-btn: rgb(28 27 25 / 0.06); }
+@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: rgb(236 235 230 / 0.16); --bar-btn: rgb(236 235 230 / 0.1); } }
 html { scroll-padding: 64px 0 120px; }
 body { min-height: 100dvh; }
 svg { display: block; }
@@ -46,7 +48,7 @@ svg { display: block; }
 .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (hover: hover) and (pointer: fine) { .row:hover { background: var(--hover); } }
 .history { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 0 8px 16px; }
-.history .label { margin: 24px 0 8px; padding: 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
+.side .label { margin: 24px 0 8px; padding: 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .history .row { color: var(--ink-2); }
 .me { flex: none; display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 16px; font-size: 14px; line-height: 20px; }
 .me > span:last-child { display: grid; min-width: 0; }
@@ -58,23 +60,21 @@ svg { display: block; }
 body[data-side="closed"] .side { display: none; }
 body[data-side="closed"] .pane { padding-left: 0; }
 .bar { position: sticky; top: 0; z-index: 2; height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--bg); }
-.bar::after { content: ""; position: absolute; inset: 100% 0 auto; height: 16px; background: linear-gradient(var(--bg), transparent); pointer-events: none; }
+.bar[data-edge] { box-shadow: 0 1px 0 var(--line); }
 .bar .title { flex: 1; min-width: 0; display: flex; gap: 8px; margin: 0; font-size: 15px; line-height: 20px; font-weight: 500; white-space: nowrap; }
 .bar .title > * { overflow: hidden; text-overflow: ellipsis; }
 .bar .title .where { flex: none; }
 .bar .title .where:has(+ .topic:not(:empty)) { color: var(--muted); font-weight: 400; }
 .bar .title .where + .topic:not(:empty)::before { content: "/"; margin-right: 8px; color: var(--muted); font-weight: 400; }
-.bar .fresh { display: none; }
 
 .intro { display: contents; }
 .intro[hidden] { display: none; }
-.pane:has(.intro:not([hidden])) { --gap: 24px; }
 .pane:has(.intro:not([hidden]))::before, .pane:has(.intro:not([hidden]))::after { content: ""; flex: 1 1 0; }
 .pane:has(.intro:not([hidden]))::before { order: 1; }
-.pane:has(.intro:not([hidden]))::after { order: 5; flex-grow: 1.4; }
-.intro h1 { order: 2; align-self: center; width: min(720px, 100% - 48px); margin: 0 0 24px; font-size: 28px; line-height: 36px; font-weight: 500; letter-spacing: -0.015em; text-align: center; }
-.pane:has(.intro:not([hidden])) .compose { order: 3; position: static; padding-top: 0; padding-bottom: 16px; background: none; }
-.tries { order: 4; align-self: center; width: min(720px, 100% - 48px); list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.pane:has(.intro:not([hidden]))::after { order: 3; }
+.intro h1 { order: 2; align-self: center; width: min(720px, 100% - 48px); margin: 0; font-size: 28px; line-height: 36px; font-weight: 500; letter-spacing: -0.015em; text-align: center; }
+.pane:has(.intro:not([hidden])) .compose { order: 5; position: static; padding-top: 0; padding-bottom: 8px; background: none; }
+.tries { order: 4; align-self: center; width: min(720px, 100% - 48px); list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .tries:empty { display: none; }
 .try { height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--field); color: var(--ink); font: 500 14px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
 .try:active { transform: scale(0.97); }
@@ -122,7 +122,7 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .margin:empty { display: none; }
 .margin p { margin: 0; }
 .cite { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
-.doc { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.doc { color: var(--ink-2); font-weight: 500; overflow-wrap: anywhere; }
 .cite > * + .facts::before { content: "\\00b7"; margin-right: 8px; }
 .witness { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .status { grid-column: 1; display: flex; gap: 8px; align-items: center; font-size: 14px; line-height: 20px; font-weight: 500; }
@@ -145,16 +145,16 @@ button.verify:active, .acts a:active { transform: scale(0.97); }
 button.verify:disabled { cursor: default; color: var(--muted); }
 @media (hover: hover) and (pointer: fine) { button.verify:hover, .acts a:hover { border-color: var(--muted); } }
 
-.compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px 24px calc(16px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 24px); }
+.compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px 24px calc(24px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 24px); }
 .box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 9px 9px 20px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
-.box:focus-within { border-color: var(--muted); }
+.box:focus-within { border-color: var(--field-focus); }
 textarea { flex: 1; min-width: 0; max-height: 192px; resize: none; border: 0; outline: 0; padding: 6px 0; background: transparent; color: var(--ink); font: 16px/24px var(--sans); }
 textarea::placeholder { color: var(--muted); }
 textarea:focus-visible { outline: none; }
 button.send { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border: 0; border-radius: 50%; background: var(--ink); color: var(--bg); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease, color 160ms ease; }
 button.send svg { width: 18px; height: 18px; }
 button.send:active { transform: scale(0.94); }
-button.send:disabled { background: var(--send-off); color: var(--send-off-ink); cursor: default; transform: none; }
+button.send:disabled { cursor: default; transform: none; }
 
 @media (max-width: 899px) {
   html { scroll-padding: 72px 0 112px; }
@@ -167,21 +167,22 @@ button.send:disabled { background: var(--send-off); color: var(--send-off-ink); 
   body[data-side="open"] .scrim { opacity: 1; pointer-events: auto; }
   .pane { padding-left: 0; }
   .bar { height: 56px; }
-  .bar { padding: 0 8px; }
-  .bar .icon { width: 40px; height: 40px; border-radius: 50%; background: var(--hover); color: var(--ink); }
+  .bar { padding: 0 12px; }
+  .bar .icon { width: 40px; height: 40px; border-radius: 50%; background: var(--bar-btn); color: var(--ink); }
   .bar .icon svg { width: 18px; height: 18px; }
   .bar .title { justify-content: center; font-size: 17px; line-height: 24px; }
   .bar .title .topic { display: none; }
   .bar .title .where, .bar .title .where:has(+ .topic:not(:empty)) { color: var(--ink); font-weight: 500; }
-  .bar .fresh { display: grid; }
   .intro h1 { font-size: 24px; line-height: 32px; }
-  .intro h1, .tries, .install { width: calc(100% - 32px); }
+  .intro h1, .install { width: calc(100% - 32px); }
   #thread { padding: 16px 16px 24px; }
   .cite .facts { flex-basis: 100%; }
   .cite > * + .facts::before { content: none; }
   .witness { grid-template-columns: minmax(0, 1fr); }
   .acts { grid-column: 1; grid-row: auto; margin-left: -12px; }
-  .compose { padding: 16px 12px calc(12px + env(safe-area-inset-bottom)); }
+  .compose { padding: 16px 12px calc(16px + env(safe-area-inset-bottom)); }
+  .tries { width: calc(100% - 24px); flex-direction: column; }
+  .try { width: 100%; text-align: left; }
 }
 @media (prefers-reduced-motion: reduce) {
   .entry { transition: opacity 200ms ease; }
@@ -196,7 +197,12 @@ button.send:disabled { background: var(--send-off); color: var(--send-off-ink); 
   <div class="side-top"><a class="wordmark" href="/">Aliquot</a><button type="button" class="icon close" id="close" aria-label="Close sidebar">${CLOSE}</button></div>
   <nav class="side-nav">
     <button type="button" class="row fresh" id="fresh">${NEW}<span>New question</span></button>
-    <a class="row" href="/runs">${RUNS}<span>Runs</span></a>
+  </nav>
+  <nav class="side-nav" aria-labelledby="records">
+    <p class="label" id="records">Records</p>
+    <a class="row" href="/runs">${RUNS}<span>All runs</span></a>
+    <a class="row" href="/runs?show=refusals">${REFUSED}<span>Refusals</span></a>
+    <a class="row" href="/runs?show=failed">${FAILED}<span>Failed runs</span></a>
   </nav>
   <ol class="history" id="history"></ol>
   <div class="me"><span class="avatar" id="initial" aria-hidden="true"></span><span><span id="who"></span>${whereSpan(where)}</span></div>
@@ -245,6 +251,10 @@ $("initial").textContent = user.slice(0, 1).toUpperCase();
 
 // The sidebar sits beside the thread on a wide screen, where the toggle hides it and the choice is remembered, and
 // slides over it as a drawer on a phone, where it starts closed.
+const bar = document.querySelector(".bar");
+const edge = () => bar.toggleAttribute("data-edge", scrollY > 0);
+addEventListener("scroll", edge, { passive: true });
+
 const wide = matchMedia("(min-width: 900px)");
 const SIDE = "aliquot.sidebar";
 const setSide = (open, focus) => {
