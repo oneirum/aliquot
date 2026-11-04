@@ -1,0 +1,8 @@
+{
+  "name": "deepmerge",
+  "version": "4.3.1-aliquot.1",
+  "description": "deepmerge 4.3.1 (MIT, TehShrike) with the GHSA-gcqx-w48m-w2h4 fix; upstream has no fixed release",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT"
+}
