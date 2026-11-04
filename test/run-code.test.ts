@@ -106,7 +106,9 @@ test("the dataset mount is read-only", opts, async () => {
   const r = await runCode({ language: "python", code: "open('/data/visits/visits.csv', 'a').write('x')", datasets: ["visits"] });
   assert.ok("out" in r);
   assert.equal(r.out!.exitCode, 1);
-  assert.match(r.out!.stderr, /OSError: \[Errno 30\] Read-only file system/);
+  // Errno 30 when the read-only mount is what refuses the write (Docker Desktop); Errno 13 when the file is owned by
+  // another uid and the permission check fires first (Linux runners). Either way the dataset cannot be written.
+  assert.match(r.out!.stderr, /(OSError: \[Errno 30\] Read-only file system|PermissionError: \[Errno 13\] Permission denied)/);
 });
 
 test("the root filesystem is read-only and the code runs as 65534", opts, async () => {
