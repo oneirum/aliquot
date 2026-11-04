@@ -41,6 +41,7 @@ services:
     environment:
       <<: *app-env
       ALIQUOT_STUDIO_TOKEN: ${ALIQUOT_STUDIO_TOKEN:-}
+      ALIQUOT_SLACK_TOKEN: ${ALIQUOT_SLACK_TOKEN:-}    # the [surfaces.slack] token, so the door knows the Slack door
     ports: ["${LABH_BIND:-127.0.0.1}:${LABH_WEB_PORT:-3000}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
@@ -80,6 +81,21 @@ services:
     working_dir: /lab
     volumes: ["./:/lab"]
     entrypoint: ["sh", "-c", "mkdir -p config && node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net --allow-fs-write=/lab/config/lab.toml --allow-fs-write=/lab/.env /app/packages/core/bin/aliquot.ts init --config /lab/config/lab.toml --env /lab/.env \"$$@\"; code=$$?; chown -R $$(stat -c %u:%g /lab) config .env 2>/dev/null; exit $$code", "init"]
+
+  # docker compose --profile slack up -d: the Slack door (docs/slack.md). It holds the two Slack tokens and the slack
+  # surface's token, and no database or payload key; it reaches the web door over HTTP like aliquot ask.
+  slack:
+    image: aliquot-app:0.5.1
+    build: .
+    profiles: [slack]
+    restart: unless-stopped
+    depends_on:
+      web: { condition: service_healthy }
+    environment:
+      ALIQUOT_SURFACE_TOKEN: ${ALIQUOT_SLACK_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+    command: ["node", "--disable-warning=ExperimentalWarning", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/aliquot.ts", "slack", "--door", "http://web:3000", "--links", "${ALIQUOT_LINKS:-http://localhost:3000}"]
 
   ollama:
     image: ollama/ollama

@@ -44,6 +44,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/surfaces/web.ts": ["module:http"],
   // aliquot ask and acp: a client of the web door's routes, over http or https.
   "packages/core/src/door-client.ts": ["module:http", "module:https"],
+  // aliquot slack: Slack's Web API and Socket Mode, over https (http and ws on loopback for a test).
+  "packages/core/src/surfaces/slack-wire.ts": ["module:http", "module:https"],
   // run_code's Docker Engine client, over the daemon's unix socket.
   "packages/core/src/sandbox.ts": ["module:http"],
   // The agent worker: the one spawn in core, the loopback MCP server, and the CONNECT proxy.

@@ -96,6 +96,7 @@ placement = "lab"                        # the most a test thread shows its auth
 token_env = "ALIQUOT_STUDIO_TOKEN"
 
 # Slack's servers keep a copy of every answer, so a Slack surface may be approved at most, never lab or institution.
+# docs/slack.md: the app manifest, the two Slack tokens, and docker compose --profile slack up -d.
 # [surfaces.slack]
 # kind = "slack"
 # placement = "approved"

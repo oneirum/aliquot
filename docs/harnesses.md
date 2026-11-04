@@ -44,7 +44,7 @@ Each way into the door is a surface, `[surfaces.<id>]` in `lab.toml`, with a kin
 | `web` | `web` | `lab` by default | D3 | No token. The chat page, and `aliquot ask`, `aliquot acp` or `aliquot mcp` without `ALIQUOT_SURFACE_TOKEN`. |
 | `acp` | `acp` | `zdr`, as `aliquot init` writes it | D1 | `ALIQUOT_SURFACE_TOKEN` set to the value of `ALIQUOT_ACP_TOKEN`. |
 | any id | `mcp` | `public` for members' personal subscriptions; `approved` for a seat the institution approved | D0 or D2 | `ALIQUOT_SURFACE_TOKEN` set to the value of its `token_env`. |
-| `slack` | `slack` | `approved` at most | D2 | Planned. Slack's servers keep a copy of every answer, so `lab.toml` refuses `lab` and `institution` for it. The door takes no Slack token. |
+| `slack` | `slack` | `approved` at most | D2 | `aliquot slack` sets `ALIQUOT_SURFACE_TOKEN` to the value of `ALIQUOT_SLACK_TOKEN` ([slack.md](slack.md)). Slack's servers keep a copy of every answer, so `lab.toml` refuses `lab` and `institution` for it. The door never sees a Slack token. |
 | `phone` | `phone` | set by the lab | that placement's | Planned. A bearer token, like `acp`. |
 
 The chat ceilings by placement are `lab` D3, `institution` D2, `approved` D2, `zdr` D1 and `public` D0.

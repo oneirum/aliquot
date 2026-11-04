@@ -73,7 +73,7 @@ ceiling of its placement. An answer above it is posted as the record link only, 
 | `web` | the chat page, and `aliquot ask` or `aliquot acp` with no token; no sign-in until the sign-on release | `lab` by default | D3 |
 | `acp` | `aliquot acp` for T3 Code and other ACP clients, and `aliquot ask`, with the surface's bearer token | `zdr`, as `aliquot init` writes it | D1 |
 | `studio` | the studio's reads and writes of core and its test threads, on the `/studio` routes only, with the surface's bearer token | `lab`, as `aliquot init` writes it | D3 |
-| `slack` (planned) | Slack, through its own adapter, never the web door | `approved` at most; `lab.toml` refuses `lab` and `institution` because Slack keeps a copy of every answer | D2 |
+| `slack` | `aliquot slack`, over Socket Mode to Slack and over HTTP to the door with the surface's bearer token ([slack.md](slack.md)) | `approved` at most; `lab.toml` refuses `lab` and `institution` because Slack keeps a copy of every answer and every question | D2 |
 | `phone` (planned) | the phone bridge, with its own bearer token | set by the lab | that placement's |
 
 A surface's token comes from an environment variable that `lab.toml` names, never from the file. The door keeps only

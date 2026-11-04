@@ -165,6 +165,12 @@ export async function post(base: string, path: string, body: unknown): Promise<{
   return { status: res.status, json: (await res.json()) as Record<string, unknown> };
 }
 
+/** A page a member opens from a link, such as a record URL. */
+export async function get(url: string): Promise<{ status: number; text: string }> {
+  const res = await fetch(url);
+  return { status: res.status, text: await res.text() };
+}
+
 export interface CheckResult {
   readonly name: string;
   readonly ok: boolean;

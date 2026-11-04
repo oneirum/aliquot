@@ -150,7 +150,6 @@ test("a request that tries to authenticate and fails is a 401 on every route, an
   const attempts: [string, string, string][] = [
     ["an unknown token", bearer(hex()), unknown],
     ["Bearer with nothing after it", "Bearer ", scheme],
-    ["a slack surface's token", bearer(SLACK), unknown],
     ["the token of a surface whose env var is unset on the door", bearer(PHONE), unknown],
     ["a token shorter than 32 characters", bearer(SHORT), unknown],
   ];

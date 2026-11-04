@@ -29,8 +29,9 @@ import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { loadManifest, tokenize, type KbSnapshot } from "../packages/core/src/kb.ts";
 import { createPayloadStore, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { startFakeModel } from "../test/fake-model.ts";
+import { startFakeSlack } from "../test/fake-slack.ts";
 import { freshDatabase } from "../test/db.ts";
-import { checker, ensurePostgres, post, processes, runWithInput, waitFor } from "./procs.ts";
+import { checker, ensurePostgres, get, post, processes, runWithInput, waitFor } from "./procs.ts";
 
 interface Prereg {
   readonly inDocument: readonly { readonly id: string; readonly question: string; readonly expected: string }[];
@@ -59,7 +60,8 @@ const payloadKey = randomBytes(32).toString("hex");
 const acpToken = randomBytes(32).toString("hex");
 const mcpToken = randomBytes(32).toString("hex");
 const personalToken = randomBytes(32).toString("hex");
-const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken };
+const slackToken = randomBytes(32).toString("hex");
+const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken, LAB0_SLACK_TOKEN: slackToken };
 const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
@@ -94,6 +96,11 @@ function config(name: string, agentPath: string): string {
     'kind = "mcp"',
     'placement = "public"',
     'token_env = "LAB0_PERSONAL_TOKEN"',
+    // Check S: the Slack door at approved (D2), so the D1 handbook answer posts in the thread.
+    "[surfaces.slack]",
+    'kind = "slack"',
+    'placement = "approved"',
+    'token_env = "LAB0_SLACK_TOKEN"',
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['${prereg.restricted.pattern}']`,
@@ -306,6 +313,63 @@ try {
     assert.ok(!JSON.stringify(personal).includes(q.expected), "nothing of the answer reaches the public surface's client");
     await ps.stopAll();
     return `tools [ask]; zdr surface: answer names ${q.expected}, record ${runId.slice(0, 8)} on surface mcp, chain verified; public surface: withheld, record link only`;
+  });
+
+  await check("check S: through a fake Slack API, a mention gets the cited answer in its thread with a record link that resolves, and a participant id is refused with zero hosted requests", async () => {
+    assert.ok(published, "check 1 published a snapshot");
+    await ps.stopAll();
+    const slack = await startFakeSlack();
+    const slackDoors = processes(root, work, { PATH: childEnv.PATH!, HOME: childEnv.HOME!, ALIQUOT_SURFACE_TOKEN: slackToken, SLACK_APP_TOKEN: "xapp-1-lab0", SLACK_BOT_TOKEN: "xoxb-lab0", ALIQUOT_SLACK_API: slack.api });
+    try {
+      const q = prereg.inDocument[0]!;
+      const door = (base: string) => slackDoors.start("slack-S", "aliquot.ts", ["slack", "--door", base]);
+      /** The edit of the "looking" message in the thread a mention at ts started. */
+      const reply = async (ts: string) => {
+        await slack.waitFor(`the reply in thread ${ts}`, () => slack.calls.some((c) => c.method === "chat.postMessage" && c.body.thread_ts === ts));
+        const looking = slack.calls.findIndex((c) => c.method === "chat.postMessage" && c.body.thread_ts === ts);
+        return slack.waitFor(`the answer in thread ${ts}`, () => slack.calls.slice(looking).find((c) => c.method === "chat.update")?.body.text as string | undefined, 30_000);
+      };
+      const runIn = (text: string) => /\/runs\/([0-9a-f-]{36})/.exec(text)?.[1] as RunId | undefined;
+
+      let web = await ps.startWeb(cfgHandbook);
+      ps.startWorker(cfgHandbook, "WS");
+      door(web.base);
+      await slack.connected();
+      slack.deliver("S-1", { type: "app_mention", user: "U0MEMBER", text: `<@U0ALIQUOT> ${q.question}`, channel: "C0LAB", ts: "1730200000.000100" });
+      const answered = await reply("1730200000.000100");
+      assert.ok(answered.includes(q.expected), `the thread's answer does not name ${q.expected}: ${answered}`);
+      assert.ok(slack.acks.includes("S-1"), "the envelope was acknowledged");
+      const runId = runIn(answered);
+      assert.ok(runId, `the answer carries a record link: ${answered}`);
+      const recorded = await loadEvents(db, runId);
+      assert.equal(verifyChain(recorded), null);
+      assert.equal(recorded[0]?.event.t === "run.started" ? recorded[0].event.surface : null, "slack");
+      const page = await get(`${web.base}/runs/${runId}`);
+      assert.equal(page.status, 200);
+      assert.ok(page.text.includes(runId), "the record page names the run");
+      await slackDoors.stopAll();
+      await ps.stopAll();
+
+      const start = hosted.requests;
+      web = await ps.startWeb(cfgHosted);
+      ps.startWorker(cfgHosted, "WS2");
+      door(web.base);
+      await slack.connected();
+      slack.deliver("S-2", { type: "app_mention", user: "U0MEMBER", text: `<@U0ALIQUOT> ${prereg.restricted.message}`, channel: "C0LAB", ts: "1730200000.000200" });
+      const refused = await reply("1730200000.000200");
+      const refusedRun = runIn(refused);
+      assert.ok(refusedRun, `the refusal carries a record link: ${refused}`);
+      const refusedEvents = await loadEvents(db, refusedRun);
+      assert.equal(finishedOf(refusedEvents).outcome, "refused");
+      assert.equal(refusedEvents.some((e) => e.event.t === "model.requested"), false, "no model.requested was journaled");
+      assert.equal(hosted.requests, start, "the participant id sent nothing to the hosted endpoint");
+      await slackDoors.stopAll();
+      await ps.stopAll();
+      return `answer in thread names ${q.expected}, record ${runId.slice(0, 8)} on surface slack, chain verified, record page 200; participant id: run ${refusedRun.slice(0, 8)} refused, hosted requests ${start} -> ${hosted.requests}; Slack saw: ${refused.split("\n")[0]}`;
+    } finally {
+      await slackDoors.stopAll();
+      await slack.close();
+    }
   });
 
   await check("check B: questions outside the documents get the coverage-gap behaviour", async () => {

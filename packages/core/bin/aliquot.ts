@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n]>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
-// aliquot ask, acp and mcp need no lab.toml or database: they reach the web door named by --door, and only it.
+// aliquot ask, acp, mcp and slack need no lab.toml or database: they reach the web door named by --door, and only it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,8 @@ import { formatRecordView, formatRunList, recordView } from "../src/record-view.
 import { DEFAULT_ALLOWANCE, PERMISSION_FLAGS, requireProcessPermission, sealNetwork } from "../src/seal.ts";
 import { acpAgent } from "../src/acp.ts";
 import { mcpServer } from "../src/mcp.ts";
+import { slackDoor } from "../src/surfaces/slack.ts";
+import { checkApiBase, runSocketMode, slackApi, SLACK_API } from "../src/surfaces/slack-wire.ts";
 import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
 import { rank } from "../src/dataclass.ts";
 
@@ -24,8 +26,8 @@ if (denied) {
   process.exit(2);
 }
 const here = dirname(fileURLToPath(import.meta.url));
-// The door client is the one file this binary adds to the seal: it reaches the web door over HTTP.
-sealNetwork({ ...DEFAULT_ALLOWANCE, files: [...DEFAULT_ALLOWANCE.files, join(here, "..", "src", "door-client.ts")] });
+// The door client reaches the web door over HTTP, and the Slack door's wire reaches Slack; this binary adds those two files to the seal.
+sealNetwork({ ...DEFAULT_ALLOWANCE, files: [...DEFAULT_ALLOWANCE.files, join(here, "..", "src", "door-client.ts"), join(here, "..", "src", "surfaces", "slack-wire.ts")] });
 
 const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
 
@@ -42,6 +44,12 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       $ALIQUOT_SURFACE_TOKEN names the surface ask, acp and mcp speak as, such as [surfaces.acp];
                       without it they speak as the web surface. The door withholds any answer above that
                       surface's placement. --ceiling is a stricter promise on this side, for a client that keeps a copy.
+  slack [--door url] [--links url]
+                      the Slack door: answer mentions and direct messages in Slack over Socket Mode, through the web
+                      door as the [surfaces.slack] surface. Needs $SLACK_APP_TOKEN (xapp-, connections:write),
+                      $SLACK_BOT_TOKEN (xoxb-) and $ALIQUOT_SURFACE_TOKEN set to the slack surface's token; it will not
+                      speak as the web surface. --links is the door's address members open record links at, when
+                      --door is internal (default: the --door address). docs/slack.md has the app manifest.
   init [--config config/lab.toml] [--env .env] [--force] [--yes --sample <id>... [--pattern <regex>...]]
                       write lab.toml from a few questions, testing the participant id patterns against
                       sample ids, and write .env with new secrets when it does not exist yet. --force
@@ -70,6 +78,7 @@ try {
       pattern: { type: "string", multiple: true, default: [] },
       sample: { type: "string", multiple: true, default: [] },
       door: { type: "string" },
+      links: { type: "string" },
       user: { type: "string" },
       thread: { type: "string" },
       ceiling: { type: "string" },
@@ -92,6 +101,7 @@ if (command === "init") {
   process.exit(await init());
 }
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
+if (command === "slack") process.exit(await slack(positionals.slice(1)));
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0;
 const valid =
@@ -99,6 +109,42 @@ const valid =
   !initOnly &&
   ((command === "record" && !!runId && /^[0-9a-f-]{36}$/i.test(runId)) || (command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000));
 if (!valid) usage();
+
+async function slack(words: readonly string[]): Promise<number> {
+  if (words.length || values.json || values.user || values.ceiling || values.thread) usage();
+  const fail = (line: string) => (process.stderr.write(`[slack] ${line}\n`), 2);
+  const token = process.env[SURFACE_TOKEN_ENV];
+  // Without a token the door would take Slack for the web surface, whose placement is the lab's own.
+  if (!token) return fail(`${SURFACE_TOKEN_ENV} is not set. Set it to the value of [surfaces.slack] token_env, so the door holds Slack to that surface's placement.`);
+  const appToken = process.env.SLACK_APP_TOKEN;
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  if (!appToken?.startsWith("xapp-")) return fail("SLACK_APP_TOKEN must be the app-level token (xapp-...) with connections:write, from the app's Basic Information page.");
+  if (!botToken?.startsWith("xoxb-")) return fail("SLACK_BOT_TOKEN must be the bot token (xoxb-...) from the app's OAuth & Permissions page.");
+  let base: URL;
+  try {
+    base = checkApiBase(process.env.ALIQUOT_SLACK_API ?? SLACK_API);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+  const door: Door = { url: values.door ?? process.env.ALIQUOT_DOOR ?? "http://127.0.0.1:3000", token };
+  const timeout = Number(values.timeout);
+  if (!Number.isFinite(timeout) || timeout <= 0) usage();
+  const doorBase = door.url.endsWith("/") ? door.url : `${door.url}/`;
+  const links = values.links ? (values.links.endsWith("/") ? values.links : `${values.links}/`) : doorBase;
+  const log = (line: string) => void process.stderr.write(`${line}\n`);
+  const handle = slackDoor({
+    ask: (input, opts) => ask(door, input, { ...opts, timeoutMs: timeout * 1000 }),
+    stop: (runId, user) => stop(door, runId, user),
+    api: slackApi(base, botToken),
+    log,
+    recordLink: (url) => (url.startsWith(doorBase) ? links + url.slice(doorBase.length) : url),
+  });
+  const abort = new AbortController();
+  for (const sig of ["SIGINT", "SIGTERM"] as const) process.once(sig, () => abort.abort());
+  log(`[slack] answering through the door at ${door.url}`);
+  await runSocketMode(slackApi(base, appToken), (msg, reply) => void handle(msg, reply), log, abort.signal);
+  return 0;
+}
 
 async function viaDoor(command: "ask" | "acp" | "mcp", words: readonly string[]): Promise<number> {
   // From the environment only, never a flag, so the token stays out of argv and ps.

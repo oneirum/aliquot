@@ -98,8 +98,8 @@ export async function listRuns(db: Db, limit = RUNS_LISTED): Promise<RunListRow[
   return rows.rows.map((r) => ({ runId: r.run_id, startedAt: r.at.toISOString(), agent: r.agent, outcome: r.outcome, events: r.events, refusals: r.refusals }));
 }
 
-/** Kinds the door serves over HTTP. Slack is reached through its own adapter, so the door takes no Slack token. */
-export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "mcp", "phone", "studio"];
+/** Kinds the door serves over HTTP. The Slack door (aliquot slack) is a client too, with its surface's token, never a Slack token. */
+export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "mcp", "phone", "studio", "slack"];
 /** Shorter than this, a token could be guessed, so its surface accepts nothing. */
 const MIN_TOKEN_LENGTH = 32;
 
