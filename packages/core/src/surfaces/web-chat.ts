@@ -105,11 +105,11 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .a li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
 .a .h { font-weight: 500; margin-top: 24px; }
 .a > .h:first-child { margin-top: 0; }
-.a pre { font: 13px/20px var(--mono); font-variation-settings: "MONO" 1; background: var(--quiet); border-radius: 8px; padding: 12px 16px; overflow-x: auto; white-space: pre; }
+.a pre { font: 13px/20px var(--mono); background: var(--quiet); border-radius: 8px; padding: 12px 16px; overflow-x: auto; white-space: pre; }
 .a strong { font-weight: 600; }
-.a code { font: 14px var(--mono); font-variation-settings: "MONO" 1; background: var(--quiet); padding: 2px 4px; border-radius: 4px; }
+.a code { font: 14px var(--mono); background: var(--quiet); padding: 2px 4px; border-radius: 4px; }
 .steps { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; font-size: 14px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.steps code { font: 13px var(--mono); font-variation-settings: "MONO" 1; color: var(--ink-2); }
+.steps code { font: 13px var(--mono); color: var(--ink-2); }
 .err { margin: 0; }
 .facts { color: var(--muted); font-variant-numeric: tabular-nums; }
 .body > .facts { margin: 16px 0 0; font-size: 13px; line-height: 20px; }
@@ -138,7 +138,7 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .links i.broken { background-image: linear-gradient(var(--broken) 0 6px, transparent 6px 10px, var(--broken) 10px); box-shadow: none; }
 [data-chain="broken"] .links i:not(.held):not(.broken) { opacity: 0.4; }
 .seal { font-size: 13px; line-height: 20px; color: var(--muted); }
-.seal code { font: 13px/20px var(--mono); font-variation-settings: "MONO" 1; color: var(--ink-2); }
+.seal code { font: 13px/20px var(--mono); color: var(--ink-2); }
 .acts { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: 8px; }
 button.verify, .acts a { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px; font: 500 13px/1 var(--sans); text-decoration: none; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease, border-color 160ms ease; }
 button.verify, .acts a { color: var(--ink); background: var(--bg); border: 1px solid var(--line); }

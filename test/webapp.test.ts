@@ -72,6 +72,22 @@ test("the chat page tells a visitor how to add it to the Home Screen in one sent
   assert.match(html, /@media \(display-mode: standalone\) \{ \.install \{ display: none; \} \}/);
 });
 
+test("the door serves the motion library as one same-origin ES module that a page imports", { timeout: 60_000 }, async () => {
+  const res = await fetch(`${base}/vendor/motion.js`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /^text\/javascript\b/);
+  assert.equal((await fetch(`${base}/vendor/nope.js`)).status, 404);
+
+  const browser = await chromium.launch(process.env.LABH_CHROMIUM ? { executablePath: process.env.LABH_CHROMIUM } : {});
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${base}/?user=m3`);
+    assert.equal(await page.evaluate(`import("/vendor/motion.js").then((m) => typeof m.animate)`), "function");
+  } finally {
+    await browser.close();
+  }
+});
+
 test("the service worker serves the page shell offline and never answers /runs or /replies from its cache", { timeout: 60_000 }, async () => {
   const ANSWER = "The -80 freezer held at minus 79.6 C all week (answer 7f3a)";
   const run = (await db.query<{ id: string }>("insert into jobs (kind, key, payload) values ('run', 'k:webapp', '{\"surface\":\"web\"}') returning id")).rows[0]!.id;
@@ -105,7 +121,7 @@ test("the service worker serves the page shell offline and never answers /runs o
       }
       return out;
     })()`)) as { path: string; body: string }[];
-    assert.deepEqual(cached.map((c) => c.path).sort(), ["/", "/fonts/recursive.woff2", "/icons/apple-touch-icon.png", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon.svg", "/icons/maskable-512.png", "/manifest.webmanifest"]);
+    assert.deepEqual(cached.map((c) => c.path).sort(), ["/", "/fonts/ibm-plex-mono.woff2", "/fonts/ibm-plex-sans.woff2", "/icons/apple-touch-icon.png", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon.svg", "/icons/maskable-512.png", "/manifest.webmanifest", "/vendor/motion.js"]);
     for (const c of cached) assert.ok(!c.body.includes(ANSWER) && !c.body.includes("7f3a"), `${c.path} holds answer text`);
 
     own.server.closeAllConnections();
@@ -145,7 +161,7 @@ test("Verify walks a run's chain to the door's verdict, and an edited or shorten
     };
     assert.equal(await page.locator(".doc").textContent(), "sop-freezer.md");
     assert.deepEqual(await verdict(), ["verified", "Verified: chain intact over 3 events", false]);
-    assert.equal(await page.evaluate(`getComputedStyle(document.querySelector(".seal code")).fontVariationSettings`), '"MONO" 1');
+    assert.match(String(await page.evaluate(`getComputedStyle(document.querySelector(".seal code")).fontFamily`)), /^"?IBM Plex Mono\b/);
 
     // run_events refuses updates and deletes, so the tampering is a superuser's: triggers off for one transaction.
     const tamper = (sql: string) => db.query(`begin; set local session_replication_role = replica; ${sql}; commit`);

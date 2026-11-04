@@ -13,7 +13,11 @@ import { fileURLToPath } from "node:url";
 /** The page background in each theme, which is also the colour of the bar an installed app sits under. */
 export const THEME = { light: "#fbfaf8", dark: "#151514" } as const;
 
-/** What /icons/ and /fonts/ serve, by file name. The typeface is Recursive (OFL, assets/fonts/OFL.txt), cut to its MONO and weight axes. */
+/**
+ * What /icons/, /fonts/ and /vendor/ serve, by file name. The typefaces are IBM Plex Sans, its weight axis, and IBM Plex
+ * Mono 400, both Latin only (OFL, assets/fonts/OFL.txt). vendor/motion.js is the motion animation library as one ES
+ * module (MIT, assets/vendor/LICENSE.md), so a page imports it from its own origin.
+ */
 const ASSET_TYPES = {
   icons: {
     "icon.svg": "image/svg+xml",
@@ -22,7 +26,8 @@ const ASSET_TYPES = {
     "maskable-512.png": "image/png",
     "apple-touch-icon.png": "image/png",
   },
-  fonts: { "recursive.woff2": "font/woff2" },
+  fonts: { "ibm-plex-sans.woff2": "font/woff2", "ibm-plex-mono.woff2": "font/woff2" },
+  vendor: { "motion.js": "text/javascript; charset=utf-8" },
 } as const satisfies Record<string, Record<string, string>>;
 export type AssetDir = keyof typeof ASSET_TYPES;
 
@@ -31,7 +36,7 @@ export const APP_SHELL = ["/", "/manifest.webmanifest", ...Object.entries(ASSET_
 
 /** Every page links these. The lab's name rides in the manifest, so the head is the same for every lab. */
 export const APP_HEAD = `<link rel="manifest" href="/manifest.webmanifest">
-<link rel="preload" href="/fonts/recursive.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibm-plex-sans.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="Aliquot">
@@ -57,7 +62,7 @@ export function appManifest(where: string): object {
   };
 }
 
-export const SERVICE_WORKER = `const CACHE = "aliquot-shell-1";
+export const SERVICE_WORKER = `const CACHE = "aliquot-shell-2";
 const SHELL = ${JSON.stringify(APP_SHELL)};
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (e) => e.waitUntil(caches.keys().then((names) => Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n)))).then(() => self.clients.claim())));
@@ -77,7 +82,7 @@ self.addEventListener("fetch", (e) => {
 const assets = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets");
 const read = new Map<string, Buffer>();
 
-/** An icon or font by file name, read once; null for a name that is not one. Icons live in assets/, fonts in assets/fonts/. */
+/** An asset by file name, read once; null for a name that is not one. Icons live in assets/, the others in assets/<dir>/. */
 export function appAsset(dir: AssetDir, name: string): { type: string; body: Buffer } | null {
   const types: Record<string, string> = ASSET_TYPES[dir];
   if (!Object.hasOwn(types, name)) return null;
