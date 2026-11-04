@@ -15,7 +15,7 @@
  */
 
 import { z } from "zod";
-import { atMost, ceilingOf, DATA_CLASSES, Labelled, rank, type DataClass, type Placement } from "./dataclass.ts";
+import { atMost, ceilingOf, coveredModelRefusal, DATA_CLASSES, describeRefusal, Labelled, rank, type DataClass, type Placement } from "./dataclass.ts";
 import { contentHash, type AgentVersionHash, type SkillVersionHash, type SnapshotId, type ToolHash, type Sha256 } from "./hash.ts";
 import { DEFAULT_READ_CAP_TOKENS, RETRIEVAL_ALGORITHM } from "./kb.ts";
 import type { ModelTarget, ExactModelId } from "./gateway.ts";
@@ -349,6 +349,8 @@ export function validateAgentDraft(doc: AgentDocument, catalog: Catalog): Issue[
     if (modelCeiling === "none" || !atMost(doc.ceiling, modelCeiling)) {
       error("model.endpointId", `ceiling ${doc.ceiling} needs an endpoint that may receive it; ${doc.model.endpointId} is placement ${endpoint.placement} (up to ${modelCeiling})`);
     }
+    const covered = coveredModelRefusal(doc.model.modelId, endpoint.placement);
+    if (covered) error("model.endpointId", describeRefusal(covered));
   }
   let touchesD3 = false;
   for (const kbId of doc.knowledgeBases) {
@@ -421,6 +423,8 @@ function bandIssues(doc: AgentDocument, catalog: Catalog): Issue[] {
     if (endpoint.agentCli) return error(`${n}: ${b.model.endpointId} is an agent CLI; a band needs a model endpoint`);
     const ceiling = ceilingOf("model", endpoint.placement);
     if (ceiling === "none" || !atMost(b.upTo, ceiling)) error(`${n} is up to ${b.upTo}, but ${b.model.endpointId} is placement ${endpoint.placement} (up to ${ceiling})`);
+    const covered = coveredModelRefusal(b.model.modelId, endpoint.placement);
+    if (covered) error(`${n}: ${describeRefusal(covered)}`);
   });
   return issues;
 }

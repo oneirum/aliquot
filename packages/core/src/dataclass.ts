@@ -130,6 +130,24 @@ export function ceilingOf(kind: Exclude<Destination["kind"], "export">, placemen
   return CEILINGS[kind][placement];
 }
 
+/**
+ * Models whose vendor keeps every request for a fixed time on every route, whatever an org's agreement says, so a
+ * placement that promises less is false for them. Code, like CEILINGS: lab.toml cannot declare one zdr. Anthropic:
+ * "Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, and Claude Mythos 5 are designated Covered Models ... and
+ * require 30-day data retention; ZDR is therefore not available for any of them unless expressly authorized by
+ * Anthropic" (platform.claude.com/docs/en/manage-claude/api-and-data-retention). The id may carry a cloud's prefix:
+ * us.anthropic.claude-fable-5-1-v1:0 on Bedrock, anthropic/claude-mythos-5.1 on OpenRouter.
+ */
+const COVERED_MODELS: readonly { readonly id: RegExp; readonly refused: readonly Placement[]; readonly why: string }[] = [
+  { id: /(?:^|[./])claude-(?:fable|mythos)-5/i, refused: ["zdr"], why: "Anthropic keeps for 30 days on every route" },
+];
+
+/** The refusal for sending to modelId at placement, or null when no Covered Model rule refuses it. */
+export function coveredModelRefusal(modelId: string, placement: Placement): EgressRefusal | null {
+  const rule = COVERED_MODELS.find((r) => r.id.test(modelId) && r.refused.includes(placement));
+  return rule ? { code: "covered-model", modelId, placement } : null;
+}
+
 export interface EgressPolicy {
   /** "refuse": R content is refused at the gate and stored only as a hash. "lab-only": R may go to lab placements for model, store and chat. */
   readonly reviewConfidential: "refuse" | "lab-only";
@@ -147,7 +165,9 @@ export type EgressRefusal =
   /** The payload was not a genuine Labelled, so its class is unknown and nothing may receive it. */
   | { readonly code: "unlabelled" }
   /** A tool's request, or a redirect hop of one, to a host its manifest does not list. */
-  | { readonly code: "host-not-declared"; readonly host: string };
+  | { readonly code: "host-not-declared"; readonly host: string }
+  /** A Covered Model at a placement its vendor's retention makes false. */
+  | { readonly code: "covered-model"; readonly modelId: string; readonly placement: Placement };
 
 declare const authorized: unique symbol;
 /** A destination the egress decision allowed for one payload. Only decideEgress produces it. */
@@ -203,6 +223,10 @@ export function describeRefusal(r: EgressRefusal): string {
       return "the content carries no genuine class label";
     case "host-not-declared":
       return `host ${r.host} is not in the tool's egress list`;
+    case "covered-model": {
+      const why = COVERED_MODELS.find((m) => m.id.test(r.modelId))?.why ?? "its vendor keeps on every route";
+      return `${r.modelId} is a Covered Model, which ${why}, so no endpoint serving it is ${r.placement}`;
+    }
     default: {
       const never: never = r;
       return never;

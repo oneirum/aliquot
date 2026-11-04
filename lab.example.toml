@@ -39,6 +39,41 @@ placement = "lab"                        # lab hardware: up to D3
 # protocol = "openai-responses"
 # api_key_env = "OPENAI_API_KEY"
 
+# What a university's IT usually buys. auth_header is "bearer", "x-api-key" or "api-key"; without it the key goes as
+# x-api-key on anthropic-messages and as Authorization: Bearer on the others. api_key_file (beside lab.toml) is read
+# on every request, so a timer outside Aliquot can refresh a short-lived token; use it or api_key_env, not both.
+# models lists the exact ids an endpoint serves when it has no model list to ask. Claude Fable 5 and Mythos 5 are
+# Covered Models, kept 30 days on every route, so Aliquot refuses any zdr endpoint that lists one.
+# [endpoints.bedrock]
+# base_url = "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic"
+# placement = "approved"                 # stays in the university's AWS account; what its risk assessment approved
+# protocol = "anthropic-messages"
+# api_key_env = "AWS_BEARER_TOKEN_BEDROCK"
+# models = ["us.anthropic.claude-sonnet-5"]
+
+# [endpoints.azure]
+# base_url = "https://your-resource.openai.azure.com/openai/v1"
+# placement = "approved"                 # the lab's tenant; not available to OpenAI, no training
+# protocol = "openai-responses"
+# api_key_env = "AZURE_OPENAI_API_KEY"
+# auth_header = "api-key"
+
+# [endpoints.foundry]
+# base_url = "https://your-resource.services.ai.azure.com/anthropic"
+# placement = "approved"                 # Claude inside the lab's Azure tenant, with a HIPAA configuration available
+# protocol = "anthropic-messages"
+# api_key_env = "AZURE_FOUNDRY_API_KEY"
+
+# [endpoints.gemini]
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# placement = "public"                   # the unpaid tier uses what it receives; approved only on a paid tier IT approved
+# api_key_env = "GEMINI_API_KEY"
+
+# [endpoints.campus]
+# base_url = "https://ai-gateway.your-university.edu/v1"
+# placement = "institution"              # campus IT issues the key; use only for the data its approval names
+# api_key_env = "CAMPUS_AI_KEY"
+
 [lab]
 name = "Mettu Lab"                     # shown at the top of the chat and record pages; leave it out to show the hostname
 

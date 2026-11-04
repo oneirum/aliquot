@@ -8,8 +8,8 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
-import { DATA_CLASSES, PLACEMENTS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
-import type { ModelEndpoint } from "./gateway.ts";
+import { coveredModelRefusal, DATA_CLASSES, describeRefusal, PLACEMENTS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
+import { AUTH_HEADERS, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
@@ -135,6 +135,9 @@ const schema = z.object({
       base_url: z.string().url(),
       placement,
       api_key_env: z.string().optional(),
+      api_key_file: z.string().min(1).optional(),
+      auth_header: z.enum(AUTH_HEADERS).optional(),
+      models: z.array(z.string().min(1)).min(1).optional(),
       provider: z.object({ zdr: z.literal(true), data_collection: z.literal("deny"), allow_fallbacks: z.literal(false), only: z.array(z.string()) }).optional(),
       logprobs: z.boolean().default(false),
       protocol: z.enum(PROTOCOLS).default("openai-chat"),
@@ -208,6 +211,18 @@ export function parseConfig(text: string, path: string): LabConfig {
     if ("auth_env" in b && b.placement !== "public")
       throw new Error(`lab.toml: agent backend ${id}: auth_env is a personal subscription's OAuth token, which only a public placement under agent-worker --dev-shared-login may use; a lab's key goes in api_key_env`);
   }
+  for (const [id, e] of Object.entries((raw.endpoints ?? {}) as Record<string, Record<string, unknown>>)) {
+    const fail = (why: string): never => {
+      throw new Error(`lab.toml: endpoint ${id} ${why}`);
+    };
+    if ("api_key_env" in e && "api_key_file" in e) fail("names both api_key_env and api_key_file; the key comes from one of them");
+    if ("auth_header" in e && !AUTH_HEADERS.includes(e.auth_header as never)) fail(`auth_header must be one of ${AUTH_HEADERS.join(", ")}`);
+    if (Array.isArray(e.models) && e.models.length === 0) fail("has models = [], so it serves nothing; list its exact ids or remove models to ask the provider");
+    for (const m of Array.isArray(e.models) ? e.models : []) {
+      const covered = typeof m === "string" && typeof e.placement === "string" ? coveredModelRefusal(m, e.placement as Placement) : null;
+      if (covered) throw new Error(`lab.toml: endpoint ${id}: ${describeRefusal(covered)}; give it the placement that 30-day retention allows`);
+    }
+  }
   const c = schema.parse(raw);
   const dir = dirname(path);
   const clash = Object.keys(c.agent_backends).filter((id) => id in c.endpoints);
@@ -226,6 +241,9 @@ export function parseConfig(text: string, path: string): LabConfig {
       baseUrl: e.base_url,
       placement: e.placement,
       ...(e.api_key_env ? { apiKeyEnv: e.api_key_env } : {}),
+      ...(e.api_key_file ? { apiKeyFile: resolve(dir, e.api_key_file) } : {}),
+      ...(e.auth_header ? { authHeader: e.auth_header } : {}),
+      ...(e.models ? { models: e.models } : {}),
       ...(e.provider ? { providerRouting: e.provider } : {}),
       supportsLogprobs: e.logprobs,
       protocol: e.protocol,

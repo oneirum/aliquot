@@ -17,9 +17,10 @@
  * gateway-wire.ts; callers see Prompt, ModelResult and Distribution only.
  */
 
-import { decideEgress, describeRefusal, join, Labelled, Unlabelled, type AuthorizedRoute, type DataClass, type EgressDecision, type EgressPolicy, type EgressRefusal, type ModelDestination, type Placement } from "./dataclass.ts";
+import { coveredModelRefusal, decideEgress, describeRefusal, join, Labelled, Unlabelled, type AuthorizedRoute, type DataClass, type EgressDecision, type EgressPolicy, type EgressRefusal, type ModelDestination, type Placement } from "./dataclass.ts";
 import { describeFailure, type CallFailure, type CallRecorder, type ToolCallRef } from "./record.ts";
 import { ADAPTERS, type Protocol, type WireCompletion } from "./gateway-wire.ts";
+import { readFile } from "node:fs/promises";
 import { platformFetch } from "./seal.ts";
 
 export type ExactModelId = string & { readonly __exactModel: true };
@@ -37,12 +38,21 @@ export interface ModelTarget {
   readonly params: ModelParams;
 }
 
-/** From lab.toml. apiKeyEnv names an env var; the key never enters a document or the DB. */
+export const AUTH_HEADERS = ["bearer", "x-api-key", "api-key"] as const;
+export type AuthHeader = (typeof AUTH_HEADERS)[number];
+
+/** From lab.toml. apiKeyEnv names an env var and apiKeyFile a file; the key never enters a document or the DB. */
 export interface ModelEndpoint {
   readonly id: string;
   readonly baseUrl: string;
   readonly placement: Placement;
   readonly apiKeyEnv?: string;
+  /** Read on every request, so a timer outside Aliquot can refresh a short-lived token. An absolute path. */
+  readonly apiKeyFile?: string;
+  /** How the key is sent. Absent: x-api-key on anthropic-messages, Authorization: Bearer on the others. */
+  readonly authHeader?: AuthHeader;
+  /** The exact ids the endpoint serves, for one with no model list (Bedrock). serves() reads this in place of the provider. */
+  readonly models?: readonly string[];
   /** OpenRouter provider routing, sent verbatim as `provider`. zdr and allow_fallbacks are required when present. */
   readonly providerRouting?: { readonly zdr: true; readonly data_collection: "deny"; readonly allow_fallbacks: false; readonly only: readonly string[] };
   readonly supportsLogprobs: boolean;
@@ -193,13 +203,24 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
     if (!e) throw new Error(`endpoint ${id} is not configured`);
     return e;
   };
-  const headers = (e: ModelEndpoint): Record<string, string> => {
+  const keyOf = async (e: ModelEndpoint): Promise<string | undefined> => {
+    if (e.apiKeyEnv) return process.env[e.apiKeyEnv];
+    if (!e.apiKeyFile) return undefined;
+    try {
+      return (await readFile(e.apiKeyFile, "utf8")).trim();
+    } catch (err) {
+      // Retryable: the timer that refreshes the file may be between writes.
+      throw new GatewayError("network", `api_key_file ${e.apiKeyFile} could not be read (${(err as NodeJS.ErrnoException).code ?? "error"})`, true);
+    }
+  };
+  const headers = async (e: ModelEndpoint): Promise<Record<string, string>> => {
     const h: Record<string, string> = { "content-type": "application/json" };
-    const key = e.apiKeyEnv ? process.env[e.apiKeyEnv] : undefined;
-    if (e.protocol === "anthropic-messages") {
-      h["anthropic-version"] = "2023-06-01";
-      if (key) h["x-api-key"] = key;
-    } else if (key) h.authorization = `Bearer ${key}`;
+    if (e.protocol === "anthropic-messages") h["anthropic-version"] = "2023-06-01";
+    const key = await keyOf(e);
+    if (!key) return h;
+    const shape = e.authHeader ?? (e.protocol === "anthropic-messages" ? "x-api-key" : "bearer");
+    if (shape === "bearer") h.authorization = `Bearer ${key}`;
+    else h[shape] = key;
     return h;
   };
   const urlOf = (e: ModelEndpoint, path: string) => `${e.baseUrl.replace(/\/$/, "")}${path}`;
@@ -208,10 +229,11 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
   const send = async (route: AuthorizedRoute, target: ModelTarget, prompt: Prompt, signal: AbortSignal): Promise<WireCompletion> => {
     const e = endpointOf(route.endpointId);
     const adapter = ADAPTERS[e.protocol ?? "openai-chat"];
+    const sendHeaders = await headers(e);
     let res: Response;
     try {
       // Never followed: Node's fetch replays the body and x-api-key across a 307 to another origin.
-      res = await fetchImpl(urlOf(e, adapter.completionPath), { method: "POST", headers: headers(e), body: JSON.stringify(adapter.request(target, prompt, e)), signal, redirect: "manual" });
+      res = await fetchImpl(urlOf(e, adapter.completionPath), { method: "POST", headers: sendHeaders, body: JSON.stringify(adapter.request(target, prompt, e)), signal, redirect: "manual" });
     } catch (err) {
       const aborted = (err as { name?: string }).name === "AbortError" || signal.aborted;
       throw aborted ? new GatewayError("aborted", null, true) : new GatewayError("network", (err as Error).message, true);
@@ -242,11 +264,15 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
       // Everything derived from the prompt is at least the prompt's class, so that is the floor on each put.
       const from = prompt.parts.flatMap(labelsOf);
       const record = Labelled.derive(prompt.toRecord(), from, "gateway:prompt", prompt.cls);
+      const refuse = async (refusal: EgressRefusal): Promise<GatewayOutcome<ModelResult>> => {
+        await rec.record({ t: "egress.refused", destination: `model:${e.id}`, payload: prompt.cls, refusal });
+        return { ok: false, t: "refused-egress", refusal };
+      };
+      // An agent version published before a rule refused its pin still never reaches the endpoint.
+      const covered = coveredModelRefusal(target.modelId, e.placement);
+      if (covered) return refuse(covered);
       const decision = decideEgress(record, destination, policy);
-      if (!decision.allow) {
-        await rec.record({ t: "egress.refused", destination: `model:${e.id}`, payload: prompt.cls, refusal: decision.refusal });
-        return { ok: false, t: "refused-egress", refusal: decision.refusal };
-      }
+      if (!decision.allow) return refuse(decision.refusal);
       const promptRef = await rec.put(record);
       await rec.record({ t: "model.requested", step: opts.step, attempt: opts.attempt, target, prompt: promptRef, final: opts.final });
       const startedAt = Date.now();
@@ -279,12 +305,13 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
     },
     async serves(target) {
       const e = endpointOf(target.endpointId);
+      if (e.models) return e.models.includes(target.modelId);
       const adapter = ADAPTERS[e.protocol ?? "openai-chat"];
       try {
         // A bounded walk of a paged list: Anthropic pages at 1000 ids, the others answer in one page.
         let after: string | null = null;
         for (let page = 0; page < 20; page++) {
-          const res = await fetchImpl(urlOf(e, adapter.modelsPath(after)), { headers: headers(e), redirect: "manual" });
+          const res = await fetchImpl(urlOf(e, adapter.modelsPath(after)), { headers: await headers(e), redirect: "manual" });
           if (!res.ok) return false;
           const parsed = adapter.parseModels(await res.json());
           if (!parsed.ok) return false;

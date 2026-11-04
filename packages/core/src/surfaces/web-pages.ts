@@ -211,6 +211,7 @@ const REFUSAL = {
   "review-confidential-refused": () => "Review-confidential content is refused by lab policy.",
   "review-confidential-needs-lab": () => "Review-confidential content may only go to models on lab hardware.",
   "host-not-declared": (r) => "Host " + r.host + " is not in the tool's egress list.",
+  "covered-model": (r) => r.modelId + " is kept by its vendor on every route, so it may not run on a " + r.placement + " endpoint.",
 };
 
 // One quiet line from the run's record: what it read and how long it took.
