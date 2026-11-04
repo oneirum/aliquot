@@ -12,7 +12,7 @@ import { createToolRunner, type ToolRunner } from "./tools.ts";
 import { contactFromEnv } from "./config.ts";
 import { createSandbox, type Sandbox } from "./sandbox.ts";
 import { SurfaceUnknown, type Surface } from "./frontdoor.ts";
-import { createWebSurface } from "./surfaces/web.ts";
+import { createWebSurface, DOOR_KINDS } from "./surfaces/web.ts";
 
 export type { BootOptions } from "./boot-shared.ts";
 
@@ -27,7 +27,8 @@ export interface Core extends SharedCore {
 export async function boot(configPath: string, env: NodeJS.ProcessEnv = process.env, options: BootOptions = {}): Promise<Core> {
   const shared = await bootShared(configPath, env, options);
   const kb = createKbReader(firstOf(memorySnapshots(shared.fixtureSnapshots), storedSnapshots(shared.db, shared.store)));
-  const web = createWebSurface(shared.db, shared.config);
+  // Every surface the door serves posts through web_messages; Slack waits for its own adapter.
+  const served = new Map<string, Surface>(shared.config.surfaces.filter((s) => s.kind === "web" || DOOR_KINDS.includes(s.kind)).map((s) => [s.id, createWebSurface(shared.db, shared.config, s)]));
   const sandbox = shared.config.sandbox ? createSandbox(shared.config.sandbox) : null;
   return {
     ...shared,
@@ -36,7 +37,8 @@ export async function boot(configPath: string, env: NodeJS.ProcessEnv = process.
     tools: createToolRunner(shared.registry, { http: shared.http, kb, contact: contactFromEnv(shared.config, env), datasets: shared.config.datasets, sandbox }),
     sandbox,
     surfaces: (id) => {
-      if (id === web.id) return web;
+      const surface = served.get(id);
+      if (surface) return surface;
       throw new SurfaceUnknown(id);
     },
   };
