@@ -168,7 +168,7 @@ test("a door that refuses the token is one line naming ALIQUOT_SURFACE_TOKEN and
   const r = await aliquot(["ask", "--door", door, "--user", "member-1", "--json", "q"], "", { ALIQUOT_SURFACE_TOKEN: TOKEN });
   assert.equal(r.status, 2);
   assert.equal(r.stdout, "");
-  assert.equal(r.stderr, "the door refused ALIQUOT_SURFACE_TOKEN (401: unknown surface token). Set it to the token of a surface the door serves, or unset it to ask as the web surface.\n");
+  assert.equal(r.stderr, "the door refused ALIQUOT_SURFACE_TOKEN (401: unknown surface token). It must hold the token of a surface the door serves, and the door must start with that surface's token variable set.\n");
   assert.equal(r.stderr.includes(TOKEN), false);
 });
 

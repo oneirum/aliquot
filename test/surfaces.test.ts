@@ -22,12 +22,13 @@ const ACP = hex();
 const SLACK = hex();
 /** The token a phone bridge would hold; the door's environment has none for it. */
 const PHONE = hex();
+const BRIDGE = hex();
 const SHORT = "only-twenty-two-chars!";
 /** The fake model answers "Scripted answer to: <question>", so either string in a body is the answer leaking. */
 const QUESTION = "Which freezer holds batch quokka-5531?";
 const LEAKS = ["Scripted answer", "quokka-5531"];
 
-const env = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: url, LABH_PAYLOAD_KEY: hex(), LAB_ACP_TOKEN: ACP, LAB_SLACK_TOKEN: SLACK, LAB_KIOSK_TOKEN: SHORT };
+const env = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: url, LABH_PAYLOAD_KEY: hex(), LAB_ACP_TOKEN: ACP, LAB_SLACK_TOKEN: SLACK, LAB_KIOSK_TOKEN: SHORT, LAB_BRIDGE_TOKEN: BRIDGE };
 
 const base = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
 const agentPath = join(work, "agent.json");
@@ -48,6 +49,7 @@ const cfg = labToml(
     '[surfaces.slack]\nkind = "slack"\nplacement = "approved"\ntoken_env = "LAB_SLACK_TOKEN"\n',
     '[surfaces.phone]\nkind = "phone"\nplacement = "zdr"\ntoken_env = "LAB_PHONE_TOKEN"\n',
     '[surfaces.kiosk]\nkind = "phone"\nplacement = "zdr"\ntoken_env = "LAB_KIOSK_TOKEN"\n',
+    '[surfaces.bridge]\nkind = "phone"\nplacement = "zdr"\ntoken_env = "LAB_BRIDGE_TOKEN"\n',
   ].join(""),
 );
 
@@ -148,7 +150,6 @@ test("a request that tries to authenticate and fails is a 401 on every route, an
   const attempts: [string, string, string][] = [
     ["an unknown token", bearer(hex()), unknown],
     ["Bearer with nothing after it", "Bearer ", scheme],
-    ["another scheme", `Basic ${Buffer.from(`member-1:${ACP}`).toString("base64")}`, scheme],
     ["a slack surface's token", bearer(SLACK), unknown],
     ["the token of a surface whose env var is unset on the door", bearer(PHONE), unknown],
     ["a token shorter than 32 characters", bearer(SHORT), unknown],
@@ -187,13 +188,28 @@ test("a surface reads and stops only its own runs: an acp token on a web run, or
   }
   assert.equal((await db.query("select 1 from run_inbox where run_id = $1", [webRun])).rowCount, 0);
   assert.equal((await raw("GET", `/replies?runId=${acpRun}`, { auth: bearer(ACP) })).status, 200);
+  const own = await raw("POST", "/stop", { auth: bearer(ACP), body: { runId: acpRun, user: "member-1", confirmed: true } });
+  assert.equal(own.status, 202, own.text);
+  assert.equal((await db.query("select 1 from run_inbox where run_id = $1", [acpRun])).rowCount, 1);
+});
+
+test("a phone surface's token is its own surface, and a reverse proxy's Basic credentials are the web surface", async () => {
+  const phoneRun = await ask(QUESTION, bearer(BRIDGE));
+  const phone = await finished(phoneRun, bearer(BRIDGE));
+  assert.equal(eventOf(phone, "run.started").surface, "bridge");
+  assert.equal(eventOf(phone, "reply.posted").mode, "final-post");
+
+  const basic = `Basic ${Buffer.from("proxy-user:proxy-pass").toString("base64")}`;
+  assert.equal((await raw("GET", "/", { auth: basic })).status, 200);
+  const proxied = await ask(QUESTION, basic);
+  assert.equal(eventOf(await finished(proxied, basic), "run.started").surface, "web");
 });
 
 test("the door names each surface whose token it cannot accept, without printing any token", () => {
   const out = web.proc.out.join("");
   assert.match(out, /LAB_PHONE_TOKEN/);
   assert.match(out, /LAB_KIOSK_TOKEN/);
-  for (const token of [ACP, SLACK, SHORT]) assert.equal(out.includes(token), false);
+  for (const token of [ACP, SLACK, SHORT, BRIDGE]) assert.equal(out.includes(token), false);
 });
 
 test("two surfaces given the same token value stop the door before it listens", async () => {

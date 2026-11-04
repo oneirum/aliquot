@@ -76,8 +76,10 @@ ceiling of its placement. An answer above it is posted as the record link only, 
 | `phone` (planned) | the phone bridge, with its own bearer token | set by the lab | that placement's |
 
 A surface's token comes from an environment variable that `lab.toml` names, never from the file. The door keeps only
-its hash. A request with an unknown token, or any `Authorization` value other than a bearer token, is refused with a
-401 and is never treated as web. A surface reads and stops only its own runs.
+its hash. A request with an unknown bearer token, or `Bearer` with no token, is refused with a 401 and is never treated
+as web. A request with no bearer token is the web surface. A surface reads and stops only its own runs, which keeps
+each client on its own surface. While the web surface has no sign-in this is not access control, because anyone who
+reaches the door can ask as web.
 
 ### Hosted agent CLIs
 

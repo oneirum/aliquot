@@ -97,7 +97,7 @@ function call(door: Door, method: "GET" | "POST", path: string, body?: unknown):
         }
         if (res.statusCode === 401) {
           const why = (json as { error?: unknown } | null | undefined)?.error;
-          return reject(new DoorError(`the door refused ${SURFACE_TOKEN_ENV} (401${typeof why === "string" ? `: ${why}` : ""}). Set it to the token of a surface the door serves, or unset it to ask as the web surface.`));
+          return reject(new DoorError(`the door refused ${SURFACE_TOKEN_ENV} (401${typeof why === "string" ? `: ${why}` : ""}). It must hold the token of a surface the door serves, and the door must start with that surface's token variable set.`));
         }
         if (json === undefined) return reject(new DoorError(`${method} ${url.pathname} answered ${res.statusCode} with a body that is not JSON`));
         resolve({ status: res.statusCode ?? 0, json });

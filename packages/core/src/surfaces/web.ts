@@ -15,11 +15,12 @@
  *
  * Pages and JSON go out gzipped when the browser accepts it.
  *
- * A request with no Authorization header is the web surface. "Bearer <token>"
- * names another surface the door serves (DOOR_KINDS); any other Authorization
- * is a 401 and never falls back to web. /stop and /replies serve only the
- * caller's surface's runs, so a surface capped at D1 cannot read a web run's
- * D3 reply.
+ * "Bearer <token>" names a surface the door serves (DOOR_KINDS), and a bearer
+ * the door does not accept is a 401 that never falls back to web. Any other
+ * request is the web surface, as before tokens. /stop and /replies serve only
+ * the caller's surface's runs. That keeps each client on its own surface, but
+ * it is not access control while web has no sign-in: anyone who reaches the
+ * door can ask as web.
  *
  * Bodies are capped at MAX_BODY_BYTES, ids are validated before any query,
  * and an unexpected error is logged here and answered as "internal error".
@@ -190,10 +191,13 @@ function send(req: IncomingMessage, res: ServerResponse, status: number, body: u
   respond(req, res, status, { "content-type": "application/json", ...headers }, JSON.stringify(body));
 }
 
-/** The surface a request speaks as. No Authorization header is web; a request that tried to authenticate is never web. */
+/**
+ * The surface a request speaks as. A bearer the door does not accept is never web. Any other request is web, including
+ * one carrying a reverse proxy's Basic credentials, which nginx and Traefik forward upstream by default.
+ */
 function surfaceOf(req: IncomingMessage, tokens: DoorTokens): SurfaceId {
-  const header = req.headers.authorization;
-  if (header === undefined) return WEB_SURFACE;
+  const header = req.headers.authorization ?? "";
+  if (!/^bearer\b/i.test(header)) return WEB_SURFACE;
   const token = /^Bearer (\S+)$/i.exec(header)?.[1];
   if (!token) throw new HttpError(401, "Authorization must be Bearer <surface token>");
   const surface = tokens.get(sha256(token));
