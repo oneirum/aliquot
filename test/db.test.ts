@@ -2,13 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { applySchema, connect, type Db } from "../packages/core/src/db.ts";
-import { ADMIN_URL, databaseUrl } from "./db.ts";
+import { ADMIN_URL, databaseUrl, testDatabase } from "./db.ts";
 
 const dir = new URL("../packages/core/migrations/", import.meta.url);
 const migrations = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
 
 /** A database with no schema at all. */
-async function emptyDatabase(name: string): Promise<Db> {
+async function emptyDatabase(base: string): Promise<Db> {
+  const name = testDatabase(base);
   const admin = connect(ADMIN_URL);
   await admin.query(`drop database if exists ${name} with (force)`);
   await admin.query(`create database ${name}`);
