@@ -4,7 +4,7 @@ This page is for research IT. It covers one Linux machine running the whole stac
 
 ## What you need
 
-- Linux with Docker Engine 24 or later and the Compose plugin 2.24 or later (`docker compose version`). Node is not needed on the machine. Ubuntu's `docker.io` package builds without buildx, which works but is slow; install `docker-buildx` as well.
+- Linux with Docker Engine 25 or later and the Compose plugin 2.24 or later (`docker compose version`). Node is not needed on the machine. Ubuntu's `docker.io` package builds without buildx, which works but is slow; install `docker-buildx` as well.
 - About 3 GB of disk for the images, plus the database. The sandbox image adds about 1 GB.
 - A model the lab may use: Ollama on the same machine (`docker compose --profile ollama up -d`), a vLLM or other OpenAI-compatible server on lab hardware, or a hosted endpoint the institution approved. `lab.example.toml` lists every kind.
 

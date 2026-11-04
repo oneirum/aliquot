@@ -40,7 +40,7 @@ const created: Handler = (_req, res) => void res.writeHead(201, { "content-type"
 const spec = { language: "python", code: "print(1)", mounts: [] } as const;
 
 test("a stop before the call creates no container", async () => {
-  const d = await daemon({ "POST /v1.41/containers/create": created });
+  const d = await daemon({ "POST /v1.44/containers/create": created });
   try {
     const stop = new AbortController();
     stop.abort();
@@ -54,7 +54,7 @@ test("a stop before the call creates no container", async () => {
 test("a stop while the container is being created ends the call before start, and the container is removed", async () => {
   const stop = new AbortController();
   const d = await daemon({
-    "POST /v1.41/containers/create": async (req, res) => {
+    "POST /v1.44/containers/create": async (req, res) => {
       stop.abort();
       await sleep(50);
       created(req, res);
@@ -62,14 +62,14 @@ test("a stop while the container is being created ends the call before start, an
   });
   try {
     await assert.rejects(createSandbox(d.config).run(spec, stop.signal), { name: "AbortError" });
-    assert.deepEqual(d.log, ["POST /v1.41/containers/create", "DELETE /v1.41/containers/c1?force=true&v=true"]);
+    assert.deepEqual(d.log, ["POST /v1.44/containers/create", "DELETE /v1.44/containers/c1?force=true&v=true"]);
   } finally {
     await d.close();
   }
 });
 
 test("a daemon that accepts the connection and stalls fails the call after the timeout and the grace", async () => {
-  const d = await daemon({ "POST /v1.41/containers/create": () => new Promise<void>(() => {}) });
+  const d = await daemon({ "POST /v1.44/containers/create": () => new Promise<void>(() => {}) });
   try {
     await assert.rejects(createSandbox(d.config).run(spec, new AbortController().signal), { message: `docker POST /containers/create: no answer within ${100 + DOCKER_GRACE_MS} ms` });
   } finally {
@@ -79,17 +79,17 @@ test("a daemon that accepts the connection and stalls fails the call after the t
 
 test("a timeout that fires while the container starts reports timedOut, not a crash", async () => {
   const d = await daemon({
-    "POST /v1.41/containers/c1/start": async (_req, res) => {
+    "POST /v1.44/containers/c1/start": async (_req, res) => {
       await sleep(300);
       res.writeHead(204).end();
     },
-    "POST /v1.41/containers/c1/exec": (_req, res) => void res.writeHead(409).end("container c1 is not running"),
-    "POST /v1.41/containers/create": created,
+    "POST /v1.44/containers/c1/exec": (_req, res) => void res.writeHead(409).end("container c1 is not running"),
+    "POST /v1.44/containers/create": created,
   });
   try {
     const r = await createSandbox(d.config).run(spec, new AbortController().signal);
     assert.deepEqual(r, { exitCode: null, timedOut: true, stdout: "", stderr: "", files: [], truncated: { stdout: false, stderr: false, filesOmitted: [], filesUnlisted: false } });
-    assert.deepEqual(d.log, ["POST /v1.41/containers/create", "POST /v1.41/containers/c1/start", "POST /v1.41/containers/c1/kill", "POST /v1.41/containers/c1/exec", "DELETE /v1.41/containers/c1?force=true&v=true"]);
+    assert.deepEqual(d.log, ["POST /v1.44/containers/create", "POST /v1.44/containers/c1/start", "POST /v1.44/containers/c1/kill", "POST /v1.44/containers/c1/exec", "DELETE /v1.44/containers/c1?force=true&v=true"]);
   } finally {
     await d.close();
   }

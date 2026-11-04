@@ -71,7 +71,7 @@ test("a PDF that Microsoft Word wrote reads page by page", opts, async () => {
 test("a scanned page fails with the no-OCR message, and no read_pdf container is left behind", opts, async () => {
   await assert.rejects(readPdf(await fixture("scanned.pdf"), "scanned.pdf"), { message: `scanned.pdf: page 1 is a scanned image with no text. ${NO_OCR}` });
   const filters = encodeURIComponent(JSON.stringify({ label: ["aliquot.read_pdf"] }));
-  assert.deepEqual(JSON.parse((await get(config!.socket, `/v1.41/containers/json?all=true&filters=${filters}`)).body), []);
+  assert.deepEqual(JSON.parse((await get(config!.socket, `/v1.44/containers/json?all=true&filters=${filters}`)).body), []);
 });
 
 test("an encrypted or corrupt PDF fails with pdftotext's own reason", opts, async () => {

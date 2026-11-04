@@ -21,7 +21,8 @@ export const FILES_CAP_BYTES = 256 * 1024;
 const ARCHIVE_CAP_BYTES = 4 * 1024 * 1024 + 64 * 1024;
 export const TAR_ENTRIES_CAP = 4096;
 export const DOCKER_GRACE_MS = 2000;
-const API = "/v1.41";
+// Docker Engine 25 and later; Engine 29 refuses anything older than 1.44.
+const API = "/v1.44";
 const PIDS_LIMIT = 256;
 /** A PDF source larger than this is refused before a container is made. */
 export const PDF_CAP_BYTES = 50 * 1024 * 1024;
