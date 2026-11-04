@@ -10,6 +10,10 @@ Each release is tagged on `main`. Dates are in US Central time.
 
 - The chat and record pages show the lab's name at the top right, from a new `[lab] name` in `lab.toml` (`aliquot init` asks for it), or the machine's hostname when it is unset. The header labels "Runs on this machine" and "Read only", the chat page's footer line and its intro paragraph are gone.
 - The README demo is a new recording of the current pages, and the chat and record stills are retaken in light and dark.
+- **Runs** (`/runs`) lists the newest 100 runs with their outcome and how many refusals each had, and shows only the runs with a refusal, or only the failed ones, at a click. Each row opens its record. A PI no longer needs a terminal to find a refused run.
+- The chat thread is kept in the browser tab, so opening a record and coming back, or reloading, no longer loses it. **New thread** starts over. A dropped connection while an answer is pending says to reload, and the reload picks the answer up.
+- The record page has **Only refusals** when a run refused anything, prints cleanly for an IRB file, and arrives with its data in the page instead of a second request. Pages are gzipped: each is one request of about 6 KB, down from up to two requests and 16 KB.
+- Every control on the chat, runs and record pages shows where focus is, and asking, opening a record, downloading it and finding a refused run all work from the keyboard alone. The studio's status lines mark their kind by shape (a check, a triangle, a square, a dot), not only by colour.
 
 ## 0.5.0 (2026-11-03)
 

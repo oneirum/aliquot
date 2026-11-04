@@ -57,6 +57,8 @@ const webm = join(raw, readdirSync(raw).find((f) => f.endsWith(".webm"))!);
 const mp4 = join(out, "demo.mp4");
 const gif = join(out, "demo.gif");
 execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", webm, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "26", "-movflags", "+faststart", mp4]);
-execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", webm, "-vf", "fps=10,crop=1000:800:140:0,scale=900:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle", gif]);
+// The gif comes from the mp4, not the webm: the webm's noise changes pixels in every frame, which doubles the gif.
+// Flat UI needs no dither, and 64 colours keep text clean.
+execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", mp4, "-vf", "fps=10,crop=1000:800:140:0,scale=900:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=64:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle", gif]);
 rmSync(raw, { recursive: true, force: true });
 console.log(`wrote ${mp4} and ${gif}`);

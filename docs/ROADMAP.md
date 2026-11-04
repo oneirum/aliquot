@@ -66,8 +66,8 @@ Runs beside the releases.
 
 | Surface | Next |
 |---|---|
-| Chat page | The agent's name and knowledge base in the header; a stop button; sources taken from the record's `kb_read` calls rather than the model's own "Source:" line; the thread kept across a reload. |
-| Record page | A model call grouped with the tool calls it asked for; a filter for refusals; a printable view for an IRB file. |
+| Chat page | The agent's name and knowledge base in the header; a stop button; sources taken from the record's `kb_read` calls rather than the model's own "Source:" line; a source entry readable from the chat for members allowed to see its class. |
+| Record page | A model call grouped with the tool calls it asked for; the runs list filtered by agent and date. |
 | Studio | An empty lab says what to do first; coverage questions suggested from the documents; a side-by-side diff of two snapshots' entries. |
 | Terminal | `aliquot init`; colour that respects `NO_COLOR`; `aliquot kb` merged into `aliquot`. |
 | Docs | A tutorial from a lab's handbook to a published agent, with a screenshot at each step; a deployment page for research IT. |

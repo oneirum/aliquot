@@ -122,6 +122,8 @@ Members ask on the chat page. An answer names the entry it came from and says wh
 
 **Record** under an answer opens the run's record. It starts with a summary: the outcome, the time, model calls, tokens, tool calls by name, knowledge base entries retrieved and refusals. Below it, every event in order, each marked by shape as well as name (run, model call, tool call, refused), with its data class and whether the hash chain holds. **Download JSON** saves the record, so a PI or an IRB reader can keep it without running anything. `pnpm aliquot record <run-id>` prints the same record and summary in a terminal.
 
+**Runs** at the top of every page lists the newest runs with their outcome and refusal count, and narrows to the runs that had a refusal or failed, so a PI can go straight to what was refused. On a record that refused something, **Only refusals** hides the other events. The chat thread stays put when you open a record and come back.
+
 <p align="center">
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="docs/images/record-dark.png">
@@ -331,7 +333,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - Data classes, the single egress decision, the static boundary scanner and the runtime network seal.
 - Knowledge bases: compile through the gateway, the coverage gate, `kb_search` and `kb_read`, snapshot diff, URL sources from listed lab hosts.
 - The studio: agent and knowledge base forms, revisions with diff and restore, a test thread, publish checks, a list of the deployed tools and five roles.
-- A chat page for members, a record page for each run, and `pnpm aliquot record` and `pnpm aliquot runs` in a terminal, with `--json` for scripts.
+- A chat page for members, a runs list that filters to refusals, a record page for each run, and `pnpm aliquot record` and `pnpm aliquot runs` in a terminal, with `--json` for scripts.
 - Claude Code and Codex as confined agent engines, on macOS.
 - Research tools, built into core: OpenAlex, PubMed, arXiv and Europe PMC search, open-access full text, DOI lookup with open copies, citation walks, datasets by class, and `run_code` for R and Python in a container.
 - Native Anthropic Messages and OpenAI Responses clients, and per-class model routing.
