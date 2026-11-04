@@ -9,11 +9,16 @@
  * egress check. The fake searches, reads the top entry and quotes it: it
  * shows the harness, not answer quality.
  *
- *   node scripts/demo.ts [--port 3000] [--studio]
+ * --slack adds the Slack door: [surfaces.slack] in lab.toml and `aliquot slack`
+ * beside the web door. It takes SLACK_APP_TOKEN and SLACK_BOT_TOKEN from the
+ * environment, or from --slack-env (default ~/.config/aliquot/slack.env).
+ *
+ *   node scripts/demo.ts [--port 3000] [--studio] [--slack [--slack-env FILE]]
  */
 
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -21,7 +26,15 @@ import { startFakeModel } from "../test/fake-model.ts";
 import { freshDatabase } from "../test/db.ts";
 import { ensurePostgres, processes, waitLine } from "./procs.ts";
 
-const { values } = parseArgs({ options: { port: { type: "string", default: process.env.LABH_DEMO_PORT ?? "3000" }, studio: { type: "boolean", default: false } } });
+const { values } = parseArgs({
+  options: {
+    port: { type: "string", default: process.env.LABH_DEMO_PORT ?? "3000" },
+    studio: { type: "boolean", default: false },
+    slack: { type: "boolean", default: false },
+    "slack-env": { type: "string", default: join(homedir(), ".config/aliquot/slack.env") },
+  },
+});
+const slackTokens = values.slack ? readSlackTokens(values["slack-env"]) : null;
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const work = join(root, ".demo");
 rmSync(work, { recursive: true, force: true });
@@ -34,8 +47,9 @@ const step = (line: string) => console.log(`  ${line}`);
 console.log("\nAliquot demo: the synthetic lab0 lab\n");
 
 await ensurePostgres(root);
-const { url: dbUrl } = await freshDatabase("labh_demo");
-step("database labh_demo created");
+const dbName = process.env.LABH_DEMO_DB ?? "labh_demo";
+const { url: dbUrl } = await freshDatabase(dbName);
+step(`database ${dbName} created`);
 
 const compiler = await startFakeModel("scripted-1", "compile");
 const agentModel = await startFakeModel("hosted-demo-1", "cite");
@@ -84,6 +98,7 @@ writeFileSync(
     'kind = "studio"',
     'placement = "lab"',
     'token_env = "DEMO_STUDIO_TOKEN"',
+    ...(slackTokens ? ["[surfaces.slack]", 'kind = "slack"', 'placement = "approved"', 'token_env = "DEMO_SLACK_TOKEN"'] : []),
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['${restricted.pattern}']`,
@@ -94,7 +109,7 @@ writeFileSync(
 );
 
 const payloadKey = randomBytes(32).toString("hex");
-const shared = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, DEMO_STUDIO_TOKEN: randomBytes(32).toString("hex") };
+const shared = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, DEMO_STUDIO_TOKEN: randomBytes(32).toString("hex"), DEMO_SLACK_TOKEN: randomBytes(32).toString("hex") };
 const ps = processes(root, work, { ...shared, LABH_PAYLOAD_KEY: payloadKey });
 
 ps.startWorker(cfg, "demo");
@@ -126,13 +141,20 @@ if (values.studio) {
   step("studio running");
 }
 
+if (slackTokens) {
+  // The Slack door gets the two Slack tokens and its surface token, and nothing else: no database, no payload key.
+  const proc = processes(root, work, { PATH: shared.PATH, HOME: shared.HOME, ALIQUOT_SURFACE_TOKEN: shared.DEMO_SLACK_TOKEN, ...slackTokens }).start("slack", "aliquot.ts", ["slack", "--door", base]);
+  await waitLine(proc, /Socket Mode connected/, 30_000);
+  step("Slack door connected");
+}
+
 const tries = ["Which freezer rack holds the aliquots?", restricted.message];
 const chat = `${base}/?try=${tries.map(encodeURIComponent).join("|")}`;
 console.log(`
 Open the chat page:
 
   ${chat}
-${studio ? `\nThe studio:\n\n  ${studio}\n` : ""}
+${studio ? `\nThe studio:\n\n  ${studio}\n` : ""}${slackTokens ? "\nIn Slack, mention the app in a channel it was added to, or send it a DM.\n" : ""}
 Then try:
 
   1. "${tries[0]}"
@@ -149,3 +171,18 @@ Logs are in ${work}. Press Ctrl-C to stop.
 `);
 
 await new Promise(() => {});
+
+/** SLACK_APP_TOKEN and SLACK_BOT_TOKEN from the environment, else from the env file. Never printed. */
+function readSlackTokens(file: string): { SLACK_APP_TOKEN: string; SLACK_BOT_TOKEN: string } {
+  const found: Record<string, string | undefined> = { SLACK_APP_TOKEN: process.env.SLACK_APP_TOKEN, SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN };
+  if ((!found.SLACK_APP_TOKEN || !found.SLACK_BOT_TOKEN) && existsSync(file)) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      const m = /^\s*(?:export\s+)?(SLACK_APP_TOKEN|SLACK_BOT_TOKEN)\s*=\s*["']?([^"'\s]+)["']?\s*$/.exec(line);
+      if (m) found[m[1]!] ??= m[2]!;
+    }
+  }
+  const where = `the environment or ${file}`;
+  if (!found.SLACK_APP_TOKEN?.startsWith("xapp-")) throw new Error(`--slack needs SLACK_APP_TOKEN (xapp-...) in ${where}; see docs/slack.md`);
+  if (!found.SLACK_BOT_TOKEN?.startsWith("xoxb-")) throw new Error(`--slack needs SLACK_BOT_TOKEN (xoxb-...) in ${where}; see docs/slack.md`);
+  return { SLACK_APP_TOKEN: found.SLACK_APP_TOKEN, SLACK_BOT_TOKEN: found.SLACK_BOT_TOKEN };
+}

@@ -65,6 +65,8 @@ ALIQUOT_SURFACE_TOKEN=<value of ALIQUOT_SLACK_TOKEN> SLACK_BOT_TOKEN=xoxb-... SL
 
 `aliquot slack` will not start without `ALIQUOT_SURFACE_TOKEN`. Without it the door would take Slack for the web surface, whose placement is the lab's own.
 
+To try the app on the synthetic lab0 lab, `pnpm demo --slack` adds `[surfaces.slack]` and starts the Slack door beside the web door. It reads `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN` from the environment, or from `~/.config/aliquot/slack.env` (`--slack-env` names another file), and prints "Slack door connected" once Socket Mode is up.
+
 ## In a thread
 
 - A reply in the thread that mentions Aliquot is a new question in that thread. Each question is answered on its own; the earlier answers in the thread are not sent with it.

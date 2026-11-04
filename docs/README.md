@@ -20,7 +20,7 @@ What changed in each release is in [`CHANGELOG.md`](../CHANGELOG.md).
 | Command | What it does |
 |---|---|
 | `pnpm run doctor` | Checks this machine and prints the fix for each problem. Changes nothing. |
-| `pnpm demo` | Runs the synthetic lab0 lab: Postgres, a published handbook, the worker and the web door. `--studio` adds the studio. |
+| `pnpm demo` | Runs the synthetic lab0 lab: Postgres, a published handbook, the worker and the web door. `--studio` adds the studio, `--slack` the Slack door ([slack.md](slack.md)). `LABH_DEMO_PORT` and `LABH_DEMO_DB` move it off port 3000 and the `labh_demo` database. |
 | `pnpm demo:agent --backend claude-code` | The same lab on a real Claude Code or Codex login, for a developer's machine. `--research` adds a data and literature question. |
 | `pnpm aliquot runs` | Lists the newest runs: start time, agent version, outcome, event count, chain check. |
 | `pnpm aliquot record <run-id>` | Prints one run's record and checks its hash chain. Exit 3 means the chain is broken. |
