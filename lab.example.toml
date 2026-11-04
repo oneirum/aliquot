@@ -41,7 +41,20 @@ name = "Mettu Lab"                     # shown at the top of the chat and record
 
 [surfaces.web]
 placement = "lab"
-port = 3000
+port = 3000                              # no token: on this machine only until the sign-on release
+
+# Every other surface names the env var that holds its bearer token (32 characters or more, openssl rand -hex 32).
+# The door shows a surface nothing above its placement's chat ceiling; anything higher gets the record link only.
+[surfaces.acp]                           # aliquot ask and aliquot acp with ALIQUOT_SURFACE_TOKEN set to this token
+kind = "acp"
+placement = "zdr"                        # D1 at most: T3 Code keeps a copy of every thread
+token_env = "ALIQUOT_ACP_TOKEN"
+
+# Slack's servers keep a copy of every answer, so a Slack surface may be approved at most, never lab or institution.
+# [surfaces.slack]
+# kind = "slack"
+# placement = "approved"
+# token_env = "ALIQUOT_SLACK_TOKEN"
 
 [hosts]
 "api.openalex.org" = "public"            # a tool reaches only the hosts its manifest names; a host unlisted here is public (D0)

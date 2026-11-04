@@ -28,9 +28,28 @@ With `--json`, each line is one event:
 
 Exit codes: 0 answered, 1 refused or not answered, 2 a usage problem or a door that cannot be reached. Without `--json`, the answer goes to stdout followed by `record  <url>`, and the run id and tools go to stderr.
 
-`--ceiling D0|D1|D2|D3` is for a caller that keeps its own copy of the answer. An answer whose class ranks above the ceiling comes back as `withheld: true` with no text, and the reader opens the record instead. The door has already applied its own surface's placement. The ceiling is a second, stricter limit, set by the caller.
+`ALIQUOT_SURFACE_TOKEN` names the surface the question comes from (see Surfaces below). Without it, `aliquot ask` and `aliquot acp` speak as the web surface. `withheld: true` with no text means the answer ranked above what the surface or the caller may keep, and the reader opens the record instead. A token the door does not know is one line on stderr naming `ALIQUOT_SURFACE_TOKEN`, and exit 2.
 
-The web door has no sign-in yet. Until the sign-on release (0.8), it trusts the member id it is given, and it stays on `127.0.0.1` like the chat page. So `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`).
+`--ceiling D0|D1|D2|D3` is a stricter promise on the caller's side, for a caller that keeps its own copy of the answer. The door already withholds anything above its surface's placement. An answer above the ceiling is withheld the same way.
+
+The web door has no member sign-in yet. Until the sign-on release, it trusts the member id it is given, and it stays on `127.0.0.1` like the chat page. So `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`).
+
+## Surfaces
+
+Each way into the door is a surface, `[surfaces.<id>]` in `lab.toml`, with a kind and a placement. The placement sets the surface's ceiling, the highest class the door shows it. Above that, the door posts the record link only. The run record names the surface each run came from.
+
+| Surface | Kind | Placement | Ceiling | Reaches the door with |
+|---|---|---|---|---|
+| `web` | `web` | `lab` by default | D3 | No token. The chat page, and `aliquot ask` or `aliquot acp` without `ALIQUOT_SURFACE_TOKEN`. |
+| `acp` | `acp` | `zdr`, as `aliquot init` writes it | D1 | `ALIQUOT_SURFACE_TOKEN` set to the value of `ALIQUOT_ACP_TOKEN`. |
+| `slack` | `slack` | `approved` at most | D2 | Planned. Slack's servers keep a copy of every answer, so `lab.toml` refuses `lab` and `institution` for it. The door takes no Slack token. |
+| `phone` | `phone` | set by the lab | that placement's | Planned. A bearer token, like `acp`. |
+
+The chat ceilings by placement are `lab` D3, `institution` D2, `approved` D2, `zdr` D1 and `public` D0.
+
+A surface other than `web` names an environment variable in `token_env`. The token itself is never in `lab.toml`. The door reads each token when it starts and keeps only its SHA-256 hash. A token must be at least 32 characters (`openssl rand -hex 32`). When the variable is unset or shorter, that surface accepts nothing, and the door prints one line that names the variable. When two surfaces hold the same token, the door does not start. `aliquot init` writes a new `ALIQUOT_ACP_TOKEN` into a new `.env`. For an existing `.env` without one, it prints the command that adds it. Neither the compose stack nor `scripts/tmux.sh` passes `ALIQUOT_ACP_TOKEN` to the web door yet, so there the `acp` surface accepts nothing. Start the web door with the variable in its environment to serve it.
+
+A client sends the token as `Authorization: Bearer <token>`. A request with no `Authorization` header is the web surface. Any other `Authorization` value is a 401, and so is a token the door does not know, such as a Slack token or one whose variable is unset. A 401 never falls back to web. A surface reads replies and stops runs only for its own runs. A D1 surface therefore cannot read a web run's D3 reply.
 
 ## tmux
 
@@ -58,9 +77,11 @@ The worker and the web door print one line per event, prefixed with their name (
 	--ceiling
 	D1
 
+Under the provider's environment variables, add `ALIQUOT_SURFACE_TOKEN` with the value of `ALIQUOT_ACP_TOKEN` from the lab's `.env`, and mark it sensitive. As an environment variable rather than an argument, the token stays out of the command line that `ps` shows.
+
 Each T3 thread is one Aliquot thread, so a follow-up carries the earlier turns. T3 wraps a thread's first prompt in its own instructions, inside `<user_request>` tags. `aliquot acp` sends only the words inside those tags to the door. The tools the run used appear as completed steps, then the answer, then `Record: <url>`. A refusal ends the turn with the stop reason `refusal` and the door's message. Stopping the turn in T3 stops the run through the door.
 
-Set `--ceiling`. T3 Code keeps every thread's text in its own database on the machine it runs on, and with T3 Connect turned on, it sends thread titles to `relay.t3.codes` for notifications. That is a copy outside Aliquot's record and its payload key. With `--ceiling D1`, a D2 or D3 answer never enters T3: the thread gets the record link only.
+T3 Code keeps every thread's text in its own database on the machine it runs on, and with T3 Connect turned on, it sends thread titles to `relay.t3.codes` for notifications. That is a copy outside Aliquot's record and its payload key. That is why `aliquot init` places the `acp` surface at `zdr`. With the token set, the door itself keeps any D2 or D3 answer out of T3, and the thread gets the record link only. `--ceiling D1` makes the same promise on the client's side, and still holds if the token is missing and the door takes T3 for the web surface.
 
 T3 Code's phone app pairs straight to a T3 host over a LAN or Tailscale (`t3 serve --host <tailnet address>`, then `t3 pair`), with no T3 cloud in the path. Aliquot threads then show on the phone too. Push notifications are the exception, since they need T3 Connect. A T3 pairing grants a shell on the host (`terminal:operate`), so pair only your own devices to a T3 host, never a lab member's phone to the lab server. Members use the chat page.
 

@@ -63,6 +63,22 @@ tool that may stand in for a built-in under its name and version.
 | Agent worker (optional) | lab server; runs Claude Code or Codex in a macOS sandbox | the vendor's API hosts only, through a host-pinned proxy |
 | Code sandbox (optional) | a Docker container per call | none: `--network none` |
 
+### Surfaces
+
+Each way into the web door is a surface, `[surfaces.<id>]` in `lab.toml`. The door holds each surface to the chat
+ceiling of its placement. An answer above it is posted as the record link only, and the run record names the surface.
+
+| Surface | What reaches the door | Placement | Ceiling |
+|---|---|---|---|
+| `web` | the chat page, and `aliquot ask` or `aliquot acp` with no token; no sign-in until the sign-on release | `lab` by default | D3 |
+| `acp` | `aliquot acp` for T3 Code and other ACP clients, and `aliquot ask`, with the surface's bearer token | `zdr`, as `aliquot init` writes it | D1 |
+| `slack` (planned) | Slack, through its own adapter, never the web door | `approved` at most; `lab.toml` refuses `lab` and `institution` because Slack keeps a copy of every answer | D2 |
+| `phone` (planned) | the phone bridge, with its own bearer token | set by the lab | that placement's |
+
+A surface's token comes from an environment variable that `lab.toml` names, never from the file. The door keeps only
+its hash. A request with an unknown token, or any `Authorization` value other than a bearer token, is refused with a
+401 and is never treated as web. A surface reads and stops only its own runs.
+
 ### Hosted agent CLIs
 
 A lab may run Claude Code or Codex as a research agent. Aliquot treats the whole CLI as one hosted model:
@@ -124,7 +140,7 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Is data encrypted at rest? | Payloads are encrypted with AES-256-GCM under a key held outside the database. Run records hold references, not text. |
 | Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. |
 | Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
-| Single sign-on? | Not yet. The web door has no sign-in and listens on 127.0.0.1 only. |
+| Single sign-on? | Not yet. The web door has no member sign-in and listens on 127.0.0.1 only. A bearer token says which surface a request comes from, not which member sent it. |
 | Key rotation and retention? | Not yet. |
 
 ## Not covered yet
