@@ -124,6 +124,8 @@ Members ask on the chat page. An answer names the entry it came from and says wh
 
 **Runs** at the top of every page lists the newest runs with their outcome and refusal count, and narrows to the runs that had a refusal or failed, so a PI can go straight to what was refused. On a record that refused something, **Only refusals** hides the other events. The chat thread stays put when you open a record and come back.
 
+The chat page installs as an app called Aliquot, with the lab's name in its full name, and says how in one line until it is installed. Its service worker caches the page and its icons so the app opens without the network, and nothing else: answers, the runs list and records always come from the door, so none of them is kept on the device. Browsers install only from HTTPS or from the machine itself, so phones get it once the door is reachable under sign-on. `scripts/webapp-audit.ts` asks Chrome whether the page is installable; `scripts/icons.ts` renders the icons from `packages/core/assets/icon.svg`.
+
 <p align="center">
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="docs/images/record-dark.png">

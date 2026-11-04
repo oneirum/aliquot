@@ -9,6 +9,7 @@
  */
 
 import type { RecordView } from "../record-view.ts";
+import { APP_HEAD, THEME } from "./web-app.ts";
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(where)}</span>` : "");
@@ -24,7 +25,7 @@ function header(current: Page, where: string, extra = ""): string {
 const BASE_CSS = `
 :root {
   color-scheme: light dark;
-  --bg: #fbfaf8; --surface: #ffffff; --ink: #1d1c1a; --muted: #6b6862; --line: #e7e4de;
+  --bg: ${THEME.light}; --surface: #ffffff; --ink: #1d1c1a; --muted: #6b6862; --line: #e7e4de;
   --accent: #2f5d50; --accent-ink: #ffffff; --quiet: #f3f1ec;
   --warn-bg: #fdf3e1; --warn-line: #ecd3a4; --warn-ink: #6b4a12;
   --ok: #2f6b45; --bad: #9b2c2c;
@@ -33,7 +34,7 @@ const BASE_CSS = `
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #151514; --surface: #1d1d1b; --ink: #ecebe7; --muted: #9c9991; --line: #2e2d2a;
+    --bg: ${THEME.dark}; --surface: #1d1d1b; --ink: #ecebe7; --muted: #9c9991; --line: #2e2d2a;
     --accent: #8cc5b0; --accent-ink: #10201b; --quiet: #242422;
     --warn-bg: #352812; --warn-line: #6a5226; --warn-ink: #f0d7a6;
     --ok: #8fd1a5; --bad: #f0a3a3;
@@ -71,6 +72,7 @@ export function chatPage(where = ""): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ask the lab · Aliquot</title>
+${APP_HEAD}
 <style>${BASE_CSS}
 .shell { max-width: 720px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; padding: 0 20px; }
 .intro { padding: 44px 0 8px; }
@@ -79,6 +81,8 @@ export function chatPage(where = ""): string {
 .try { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
 .try:active { transform: scale(0.97); }
 @media (hover: hover) and (pointer: fine) { .try:hover { border-color: var(--muted); } }
+.install { margin: 20px 0 0; font-size: 13.5px; color: var(--muted); }
+@media (display-mode: standalone) { .install { display: none; } }
 #thread { flex: 1; padding: 20px 0 24px; display: flex; flex-direction: column; gap: 22px; }
 .turn { display: flex; flex-direction: column; gap: 10px; opacity: 1; transform: none; transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); }
 @starting-style { .turn { opacity: 0; transform: translateY(6px); } }
@@ -127,6 +131,7 @@ button.send:disabled { opacity: 0.45; cursor: default; }
   <section class="intro" id="intro">
     <h1>Ask the lab</h1>
     <div class="tries" id="tries"></div>
+    <p class="install" id="install">To open Aliquot like an app, choose Add to Home Screen or Install in the browser menu.</p>
   </section>
   <main id="thread" aria-live="polite"></main>
   <form id="ask">
@@ -153,6 +158,10 @@ for (const q of (params.get("try") || "").split("|").filter(Boolean)) {
   b.onclick = () => { $("text").value = q; sync(); $("ask").requestSubmit(); };
   $("tries").append(b);
 }
+
+// Safari keeps Add to Home Screen behind Share; iPadOS reports itself as a Mac with a touch screen.
+if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) $("install").textContent = "To open Aliquot from your Home Screen, tap Share, then Add to Home Screen.";
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
 const sync = () => {
   const t = $("text");
@@ -385,6 +394,7 @@ export function runsPage(newest: readonly RunListRow[], filter: RunFilter, limit
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Runs · Aliquot</title>
+${APP_HEAD}
 <style>${BASE_CSS}${PAGE_CSS}
 .tabs { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
 .tabs .btn { font-weight: 500; color: var(--muted); padding: 8px 12px; }
@@ -433,6 +443,7 @@ export function recordPage(view: RecordView, where = ""): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Run record · Aliquot</title>
+${APP_HEAD}
 <style>${BASE_CSS}${PAGE_CSS}
 .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
 .summary[hidden] { display: none; }
