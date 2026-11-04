@@ -50,7 +50,7 @@ svg { display: block; }
 .history { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 0 8px 16px; }
 .side .label { margin: 24px 0 8px; padding: 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .history .row { color: var(--ink-2); }
-.me { flex: none; display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 16px; font-size: 14px; line-height: 20px; }
+.me { flex: none; display: flex; align-items: center; gap: 8px; height: calc(64px + env(safe-area-inset-bottom)); padding: 0 16px env(safe-area-inset-bottom); font-size: 14px; line-height: 20px; }
 .me > span:last-child { display: grid; min-width: 0; }
 .me .where { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .avatar { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 500; }
@@ -63,7 +63,8 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .bar[data-edge] { box-shadow: 0 1px 0 var(--line); }
 .bar .title { flex: 1; min-width: 0; display: flex; gap: 8px; margin: 0; font-size: 15px; line-height: 20px; font-weight: 500; white-space: nowrap; }
 .bar .title > * { overflow: hidden; text-overflow: ellipsis; }
-.bar .title .where { flex: none; }
+.bar .title .topic { flex: 0 1000 auto; min-width: 0; }
+.bar .title .where { flex: 0 1 auto; min-width: 0; }
 .bar .title .where:has(+ .topic:not(:empty)) { color: var(--muted); font-weight: 400; }
 .bar .title .where + .topic:not(:empty)::before { content: "/"; margin-right: 8px; color: var(--muted); font-weight: 400; }
 
@@ -73,10 +74,10 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .pane:has(.intro:not([hidden]))::before { order: 1; }
 .pane:has(.intro:not([hidden]))::after { order: 3; }
 .intro h1 { order: 2; align-self: center; width: min(720px, 100% - 48px); margin: 0; font-size: 28px; line-height: 36px; font-weight: 500; letter-spacing: -0.015em; text-align: center; }
-.pane:has(.intro:not([hidden])) .compose { order: 5; position: static; padding-top: 0; padding-bottom: 8px; background: none; }
+.pane:has(.intro:not([hidden])) .compose { order: 5; position: static; padding-top: 0; padding-bottom: calc(8px + env(safe-area-inset-bottom)); background: none; }
 .tries { order: 4; align-self: center; width: min(720px, 100% - 48px); list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .tries:empty { display: none; }
-.try { height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--field); color: var(--ink); font: 500 14px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
+.try { min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--field); color: var(--ink); font: 500 14px/20px var(--sans); cursor: pointer; transition: transform 160ms var(--ease-out), border-color 160ms ease; }
 .try:active { transform: scale(0.97); }
 @media (hover: hover) and (pointer: fine) { .try:hover { border-color: var(--muted); } }
 .install { order: 6; align-self: center; width: min(720px, 100% - 48px); margin: 0; padding: 0 0 16px; font-size: 13px; line-height: 20px; color: var(--muted); text-align: center; }
@@ -93,7 +94,7 @@ body[data-side="closed"] .pane { padding-left: 0; }
 .meta > * + *::before { content: "\\00b7"; margin-right: 8px; }
 .meta .no { color: var(--ink-2); font-weight: 500; }
 .q { margin: 0 0 16px; font-size: 18px; line-height: 28px; font-weight: 500; letter-spacing: -0.005em; white-space: pre-wrap; overflow-wrap: anywhere; }
-.a { font-size: 16px; line-height: 24px; transition: opacity 200ms ease; }
+.a { font-size: 16px; line-height: 24px; overflow-wrap: anywhere; transition: opacity 200ms ease; }
 @starting-style { .a, .refusal { opacity: 0; } }
 .a > * { margin: 0 0 16px; }
 .a > :last-child { margin-bottom: 0; }
@@ -163,7 +164,8 @@ button.send:disabled { cursor: default; transform: none; }
   body[data-side="open"] .side { transform: none; box-shadow: 0 0 32px rgb(0 0 0 / 0.16); }
   .side-top { height: 56px; }
   .side-top .close { display: grid; width: 44px; height: 44px; }
-  .scrim { display: block; position: fixed; inset: 0; z-index: 2; background: rgb(0 0 0 / 0.32); opacity: 0; pointer-events: none; transition: opacity 200ms ease; }
+  .side { z-index: 5; overscroll-behavior: contain; }
+  .scrim { display: block; position: fixed; inset: 0; z-index: 4; background: rgb(0 0 0 / 0.32); opacity: 0; pointer-events: none; transition: opacity 200ms ease; }
   body[data-side="open"] .scrim { opacity: 1; pointer-events: auto; }
   .pane { padding-left: 0; }
   .bar { height: 56px; }
@@ -261,6 +263,7 @@ const setSide = (open, focus) => {
   document.body.dataset.side = open ? "open" : "closed";
   $("toggle").setAttribute("aria-expanded", String(open));
   $("side").inert = !open;
+  document.querySelector(".pane").inert = open && !wide.matches;
   if (wide.matches) { try { localStorage.setItem(SIDE, open ? "open" : "closed"); } catch {} }
   else if (focus) (open ? $("close") : $("toggle")).focus();
 };
