@@ -78,7 +78,6 @@ const webSurface = z
   .strict();
 const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp"]), placement, token_env: z.string().min(1) }).strict();
 
-/** Placements a surface kind may not take, and why. */
 const REFUSED_PLACEMENTS: Partial<Record<SurfaceKind, { readonly placements: readonly Placement[]; readonly why: string }>> = {
   slack: { placements: ["lab", "institution"], why: "Slack's servers keep a copy of every answer, so a Slack surface is placement approved at most" },
 };

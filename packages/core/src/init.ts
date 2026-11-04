@@ -111,8 +111,8 @@ ${`${labName} `.padEnd(36)}# shown at the top of the chat and record pages; unse
 placement = "lab"
 port = ${a.port}                        # the web door, on this machine only until sign-on lands
 
-# aliquot acp for T3 Code and other ACP clients. They keep a copy of every thread, so the door shows them D1 at most
-# and withholds anything above it with the record link only. The client sets ALIQUOT_SURFACE_TOKEN to this token.
+# aliquot acp for T3 Code and other ACP clients. T3 Code keeps a copy of every thread, so the door shows this surface
+# D1 at most and withholds anything above it with the record link only. The client sets ALIQUOT_SURFACE_TOKEN to this token.
 [surfaces.acp]
 kind = "acp"
 placement = "zdr"

@@ -114,7 +114,7 @@ export async function listRuns(db: Db, limit = RUNS_LISTED): Promise<RunListRow[
 /** Kinds the door serves over HTTP. Slack is reached through its own adapter, so the door takes no Slack token. */
 export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "phone"];
 /** Shorter than this, a token could be guessed, so its surface accepts nothing. */
-export const MIN_TOKEN_LENGTH = 32;
+const MIN_TOKEN_LENGTH = 32;
 
 /** sha256 hex of a token to its surface. The door keeps no token. */
 export type DoorTokens = ReadonlyMap<string, TokenSurfaceConfig>;
