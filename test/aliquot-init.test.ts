@@ -30,7 +30,7 @@ function init(l: ReturnType<typeof lab>, input: string, args: readonly string[] 
 const answers = (...lines: string[]) => `${lines.join("\n")}\n`;
 const PATTERN_PROMPT = "Participant id patterns, one regular expression per line, then an empty line [\\bP-\\d{5}\\b]:";
 
-test("init on defaults writes a lab.toml that loads and a .env with three fresh secrets, mode 600", async () => {
+test("init on defaults writes a lab.toml that loads and a .env with four fresh secrets, mode 600", async () => {
   const l = lab();
   const r = init(l, answers("Mettu Lab", "", "", "8080", "", "P-00123", "P-54321", "", "y", DIGEST));
   assert.equal(r.status, 0, r.stderr);
@@ -40,18 +40,27 @@ test("init on defaults writes a lab.toml that loads and a .env with three fresh 
 
   const c = await loadConfig(l.cfg);
   assert.deepEqual(
-    { patterns: c.participantIdPatterns.map(String), endpoints: c.endpoints.map((e) => [e.id, e.baseUrl, e.placement]), port: c.web.port, sandbox: c.sandbox?.image, key: c.store.keyEnv, db: c.databaseUrlEnv },
-    { patterns: ["/\\bP-\\d{5}\\b/"], endpoints: [["local", "http://ollama:11434/v1", "lab"]], port: 8080, sandbox: DIGEST, key: "LABH_PAYLOAD_KEY", db: "DATABASE_URL" },
+    { patterns: c.participantIdPatterns.map(String), endpoints: c.endpoints.map((e) => [e.id, e.baseUrl, e.placement]), port: c.web.port, sandbox: c.sandbox?.image, key: c.store.keyEnv, db: c.databaseUrlEnv, surfaces: c.surfaces },
+    {
+      patterns: ["/\\bP-\\d{5}\\b/"],
+      endpoints: [["local", "http://ollama:11434/v1", "lab"]],
+      port: 8080,
+      sandbox: DIGEST,
+      key: "LABH_PAYLOAD_KEY",
+      db: "DATABASE_URL",
+      surfaces: [c.web, { id: "acp", kind: "acp", placement: "zdr", tokenEnv: "ALIQUOT_ACP_TOKEN" }],
+    },
   );
   assert.ok(readFileSync(l.cfg, "utf8").startsWith("# lab.toml for Mettu Lab, written by aliquot init.\n"));
 
   const secrets = readFileSync(l.env, "utf8").split("\n").filter((s) => s && !s.startsWith("#"));
   // The sandbox is on in this lab.toml, so the env also gives the worker the Docker socket.
-  assert.deepEqual(secrets.map((s) => s.split("=")[0]), ["POSTGRES_PASSWORD", "LABH_PAYLOAD_KEY", "PAYLOAD_SECRET", "COMPOSE_FILE", "DOCKER_GID"]);
-  assert.equal(secrets[3], "COMPOSE_FILE=compose.yaml:compose.sandbox.yaml");
+  assert.deepEqual(secrets.map((s) => s.split("=")[0]), ["POSTGRES_PASSWORD", "LABH_PAYLOAD_KEY", "PAYLOAD_SECRET", "ALIQUOT_ACP_TOKEN", "COMPOSE_FILE", "DOCKER_GID"]);
+  assert.equal(secrets[4], "COMPOSE_FILE=compose.yaml:compose.sandbox.yaml");
   assert.match(secrets[0]!, /^POSTGRES_PASSWORD=[0-9a-f]{48}$/);
   assert.match(secrets[1]!, /^LABH_PAYLOAD_KEY=[0-9a-f]{64}$/);
   assert.match(secrets[2]!, /^PAYLOAD_SECRET=[0-9a-f]{64}$/);
+  assert.match(secrets[3]!, /^ALIQUOT_ACP_TOKEN=[0-9a-f]{64}$/);
   assert.equal(statSync(l.env).mode & 0o777, 0o600);
 });
 
@@ -109,6 +118,15 @@ test("an existing .env is never touched, even with --force, and init says why", 
   assert.ok(r.stdout.split("\n").includes(`Left ${l.env} as it is. It holds LABH_PAYLOAD_KEY, and a new key would make every stored payload unreadable.`), r.stdout);
   assert.deepEqual([readFileSync(l.env, "utf8"), statSync(l.env).mode & 0o777], ["LABH_PAYLOAD_KEY=keep\n", 0o640]);
   assert.equal((await loadConfig(l.cfg)).participantIdPatterns.length, 1);
+  assert.ok(r.stdout.split("\n").includes(`${l.env} has no ALIQUOT_ACP_TOKEN, so the door takes no token for [surfaces.acp]. Add one: echo "ALIQUOT_ACP_TOKEN=$(openssl rand -hex 32)" >> ${l.env}`), r.stdout);
+});
+
+test("an existing .env that already holds ALIQUOT_ACP_TOKEN gets no line about it", () => {
+  const l = lab();
+  writeFileSync(l.env, `LABH_PAYLOAD_KEY=keep\nALIQUOT_ACP_TOKEN=${"a".repeat(64)}\n`);
+  const r = init(l, "", ["--yes", "--sample", "P-00123"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.includes("ALIQUOT_ACP_TOKEN"), false, r.stdout);
 });
 
 test("--yes takes the defaults with --pattern and --sample, and a failing sample exits 1 writing nothing", () => {

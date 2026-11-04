@@ -14,9 +14,13 @@ interface Script {
   message: { status: number; body: unknown };
   events: unknown[];
   replies: unknown[];
+  /** The door does not know the presented token: every route answers 401. */
+  unauthorized?: boolean;
 }
 let script: Script;
 const posted: { path: string; body: any }[] = [];
+/** The Authorization header of every request the door saw, in order. */
+const authorized: { path: string; auth: string | undefined }[] = [];
 
 function answered(cls: string, text: string, extra: unknown[] = []): Script {
   return {
@@ -43,6 +47,11 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(b));
   };
+  authorized.push({ path: url.pathname, auth: req.headers.authorization });
+  if (script.unauthorized) {
+    res.writeHead(401, { "content-type": "application/json", "www-authenticate": "Bearer" });
+    return res.end(JSON.stringify({ error: "unknown surface token" }));
+  }
   if (req.method === "POST") {
     const b = await body(req);
     posted.push({ path: url.pathname, body: b });
@@ -58,8 +67,8 @@ await once(server, "listening");
 const door = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 after(() => server.close());
 
-function aliquot(args: readonly string[], input = ""): Promise<{ status: number | null; stdout: string; stderr: string }> {
-  const child = spawn(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", ...args], { cwd: root, env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1" } });
+function aliquot(args: readonly string[], input = "", env: Record<string, string> = {}): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const child = spawn(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", ...args], { cwd: root, env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1", ...env } });
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (c) => (stdout += c));
@@ -131,9 +140,50 @@ test("ask without a user, or with a ceiling that is not a class, is a usage erro
   assert.equal((await aliquot(["ask", "--door", door, "--user", "m", "--ceiling", "D9", "q"])).status, 2);
 });
 
+const TOKEN = "f".repeat(64);
+const linkOnly = (cls: string): Script => ({
+  message: { status: 202, body: { t: "enqueued", runId: RUN, agent: "a", duplicate: false } },
+  events: [
+    { seq: 0, event: { t: "run.started", surface: "acp" } },
+    { seq: 1, event: { t: "reply.posted", mode: "link-only", surfaceMessageId: "1" } },
+    { seq: 2, event: { t: "run.finished", outcome: "answered", answer: { hash: "h", cls, bytes: 1 } } },
+  ],
+  replies: [{ kind: "reply", text: `This answer contains restricted data. Open it here: ${door}/runs/${RUN}`, at: "2026-11-03T00:00:00.000Z" }],
+});
+
+test("ask sends ALIQUOT_SURFACE_TOKEN as a Bearer header on every request, and no header without it", async () => {
+  script = answered("D0", "At -80 C.");
+  const from = authorized.length;
+  assert.equal((await aliquot(["ask", "--door", door, "--user", "member-1", "q"], "", { ALIQUOT_SURFACE_TOKEN: TOKEN })).status, 0);
+  const tokened = authorized.slice(from);
+  assert.deepEqual([...new Set(tokened.map((a) => a.path))], ["/message", `/runs/${RUN}/events`, "/replies"]);
+  assert.deepEqual([...new Set(tokened.map((a) => a.auth))], [`Bearer ${TOKEN}`]);
+  const plain = authorized.length;
+  assert.equal((await aliquot(["ask", "--door", door, "--user", "member-1", "q"])).status, 0);
+  assert.deepEqual([...new Set(authorized.slice(plain).map((a) => a.auth))], [undefined]);
+});
+
+test("a door that refuses the token is one line naming ALIQUOT_SURFACE_TOKEN and exit 2", async () => {
+  script = { ...answered("D0", "unused"), unauthorized: true };
+  const r = await aliquot(["ask", "--door", door, "--user", "member-1", "--json", "q"], "", { ALIQUOT_SURFACE_TOKEN: TOKEN });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, "");
+  assert.equal(r.stderr, "the door refused ALIQUOT_SURFACE_TOKEN (401: unknown surface token). Set it to the token of a surface the door serves, or unset it to ask as the web surface.\n");
+  assert.equal(r.stderr.includes(TOKEN), false);
+});
+
+test("a reply the door posted link-only comes back withheld, with the record link and no notice text", async () => {
+  script = linkOnly("D2");
+  const r = await aliquot(["ask", "--door", door, "--user", "member-1", "--json", "who enrolled"], "", { ALIQUOT_SURFACE_TOKEN: TOKEN });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r.stdout).at(-1), { t: "finished", runId: RUN, outcome: "answered", answer: null, cls: "D2", withheld: true, refusal: null, recordUrl: `${door}/runs/${RUN}` });
+  const person = await aliquot(["ask", "--door", door, "--user", "member-1", "who enrolled"], "", { ALIQUOT_SURFACE_TOKEN: TOKEN });
+  assert.equal(person.stdout, `The answer is D2, above what this surface may show. Read it in the record.\nrecord  ${door}/runs/${RUN}\n`);
+});
+
 /** aliquot acp as an ACP client drives it: one JSON-RPC message per line each way. */
-function acp(args: readonly string[] = []) {
-  const child = spawn(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", "acp", "--door", door, "--user", "member-1", ...args], { cwd: root, env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1" } });
+function acp(args: readonly string[] = [], env: Record<string, string> = {}) {
+  const child = spawn(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/aliquot.ts", "acp", "--door", door, "--user", "member-1", ...args], { cwd: root, env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1", ...env } });
   const msgs: any[] = [];
   let buf = "";
   child.stdout.on("data", (c) => {
@@ -267,4 +317,15 @@ test("an ACP method Aliquot does not implement is a JSON-RPC method-not-found er
   const r = await a.request("session/load", {});
   await a.close();
   assert.equal(r.error.code, -32601);
+});
+
+test("acp sends ALIQUOT_SURFACE_TOKEN as a Bearer header, and a link-only reply reaches the client as the record link only", async () => {
+  script = linkOnly("D2");
+  const from = authorized.length;
+  const a = acp([], { ALIQUOT_SURFACE_TOKEN: TOKEN });
+  const sessionId = (await a.request("session/new", {})).result.sessionId;
+  await a.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "who enrolled" }] });
+  await a.close();
+  assert.deepEqual([...new Set(authorized.slice(from).map((x) => x.auth))], [`Bearer ${TOKEN}`]);
+  assert.deepEqual(updates(a.msgs, "agent_message_chunk").map((u) => u.content.text), [`The answer is D2, above what this client may keep. Read it in the record: ${door}/runs/${RUN}`]);
 });

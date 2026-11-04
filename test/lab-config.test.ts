@@ -59,3 +59,54 @@ test("lab.example.toml names the literature hosts and the contact env var, and i
   assert.deepEqual(c.datasets, [{ id: "cohort-2024", path: "/srv/lab/data/cohort-2024", cls: "D2", description: "Wave 1 survey export, one row per participant" }]);
   assert.deepEqual(c.sandbox, { image: `aliquot-sandbox@sha256:${digest}`, digest, cpus: 1, memoryMb: 1024, timeoutMs: 60000, socket: "/var/run/docker.sock" });
 });
+
+const acp = '[surfaces.acp]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "ALIQUOT_ACP_TOKEN"\n';
+const web = { id: "web", kind: "web", placement: "lab", port: 3000, baseUrl: "http://localhost:3000", channel: null };
+
+test("[surfaces.<id>] lists every surface, web included; without [surfaces.web] web is lab on port 3000", () => {
+  assert.deepEqual(parseConfig(base, "/l/lab.toml").surfaces, [web]);
+  const c = parseConfig(`${base}${acp}`, "/l/lab.toml");
+  assert.deepEqual(c.surfaces, [web, { id: "acp", kind: "acp", placement: "zdr", tokenEnv: "ALIQUOT_ACP_TOKEN" }]);
+  assert.equal(c.surfaces[0], c.web);
+  const own = parseConfig(`${base}[surfaces.web]\nplacement = "institution"\nport = 8080\nbase_url = "https://aliquot.lab.edu"\nchannel = "flow"\n`, "/l/lab.toml");
+  assert.deepEqual(own.web, { id: "web", kind: "web", placement: "institution", port: 8080, baseUrl: "https://aliquot.lab.edu", channel: "flow" });
+  assert.equal(parseConfig(`${base}[surfaces.web]\nkind = "web"\n`, "/l/lab.toml").web.kind, "web");
+});
+
+test("each surface rule refuses its entry with one line naming the surface", () => {
+  const refused: [string, string, RegExp][] = [
+    ["an id with a capital", '[surfaces.Acp]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.Acp\] .*lowercase/],
+    ["an id with a colon, which would split the run key", '[surfaces."a:b"]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.a:b\] /],
+    ["a non-web surface without kind", '[surfaces.acp]\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.acp\] .*kind/],
+    ["a kind Aliquot does not know", '[surfaces.teams]\nkind = "teams"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.teams\] .*kind/],
+    ["kind web at another id", '[surfaces.door2]\nkind = "web"\nplacement = "lab"\n', /^lab\.toml: \[surfaces\.door2\] .*web/],
+    ["another kind at id web", '[surfaces.web]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.web\] .*web/],
+    ["token_env on web, which the door would ignore", '[surfaces.web]\nplacement = "lab"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.web\] .*token_env/],
+    ["an unknown key on web", "[surfaces.web]\nports = 3000\n", /^lab\.toml: \[surfaces\.web\] .*ports/],
+    ["a non-web surface without token_env", '[surfaces.acp]\nkind = "acp"\nplacement = "zdr"\n', /^lab\.toml: \[surfaces\.acp\] .*token_env/],
+    ["a non-web surface without placement", '[surfaces.acp]\nkind = "acp"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.acp\] .*placement/],
+    ["a web-only key on a non-web surface", '[surfaces.acp]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\nport = 3001\n', /^lab\.toml: \[surfaces\.acp\] .*port/],
+    ["slack in lab", '[surfaces.slack]\nkind = "slack"\nplacement = "lab"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.slack\] .*Slack/],
+    ["slack at institution", '[surfaces.slack]\nkind = "slack"\nplacement = "institution"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.slack\] .*Slack/],
+    ["two surfaces naming one token_env", `${acp}[surfaces.phone]\nkind = "phone"\nplacement = "zdr"\ntoken_env = "ALIQUOT_ACP_TOKEN"\n`, /^lab\.toml: \[surfaces\.phone\] .*ALIQUOT_ACP_TOKEN.*acp/],
+  ];
+  for (const [what, toml, message] of refused) {
+    assert.throws(() => parseConfig(`${base}${toml}`, "/l/lab.toml"), (err: Error) => message.test(err.message) && !err.message.includes("\n"), what);
+  }
+  const slack = parseConfig(`${base}[surfaces.slack]\nkind = "slack"\nplacement = "approved"\ntoken_env = "SLACK_TOKEN"\n`, "/l/lab.toml");
+  assert.deepEqual(slack.surfaces.at(-1), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "SLACK_TOKEN" });
+});
+
+test("a channel floor may name any surface id, digits and dashes included", () => {
+  assert.deepEqual(parseConfig(`${base}[channel_floors]\n"acp-2:lab" = "D2"\n`, "/l/lab.toml").channelFloors, { "acp-2:lab": "D2" });
+});
+
+test("lab.example.toml serves acp at zdr, and its commented slack surface parses once uncommented", () => {
+  const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
+  const text = readFileSync(path, "utf8");
+  assert.deepEqual(parseConfig(text, path).surfaces.find((s) => s.id === "acp"), { id: "acp", kind: "acp", placement: "zdr", tokenEnv: "ALIQUOT_ACP_TOKEN" });
+  const at = text.indexOf("# [surfaces.slack]");
+  const end = text.indexOf("\n\n", at);
+  const slack = `${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(end)}`;
+  assert.deepEqual(parseConfig(slack, path).surfaces.find((s) => s.id === "slack"), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "ALIQUOT_SLACK_TOKEN" });
+});
