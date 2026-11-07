@@ -206,6 +206,7 @@ A terminal, tmux, T3 Code or a lab's own orchestrator can reach Aliquot's agents
 | T3 Code, Zed or another ACP client | `aliquot acp`, added as a local ACP command: each question a thread, ending with the record link |
 | A member's own Claude Code, Codex or Cursor | `aliquot mcp`, added as a stdio MCP server: one tool, `ask`, on the member's own subscription ([docs/harnesses.md](docs/harnesses.md)) |
 | Slack | `aliquot slack` (`docker compose --profile slack up -d`): mention Aliquot in a channel or send it a DM, and the answer posts in the thread with its record link. Socket Mode, so no public URL. The app manifest and setup are in [docs/slack.md](docs/slack.md) |
+| Microsoft Teams | `aliquot teams` (`docker compose --profile teams up -d`): mention Aliquot in a channel or group chat, or message it directly, and the answer posts in the thread with its record link. Only activities the Bot Framework signed for the lab's app and tenant are read. The app manifest and the steps for the campus Teams admin are in [docs/teams.md](docs/teams.md); `pnpm demo --teams` runs it against a stand-in for Teams |
 
 `--ceiling D1` keeps an answer above D1 out of a client that stores its own copy, such as T3 Code's thread history. The client gets the record link instead.
 
@@ -235,7 +236,7 @@ A terminal, tmux, T3 Code or a lab's own orchestrator can reach Aliquot's agents
 
 Ollama, vLLM or any OpenAI-compatible server, plus native Anthropic Messages, OpenAI Responses and Amazon Bedrock Converse clients, and the campus contracts most universities buy: Azure OpenAI (including deployment URLs with `api-version`), Claude in Microsoft Foundry, and Bedrock signed with AWS Signature Version 4 in Aliquot itself, with no AWS SDK. An agent can send each data class to a different model.
 
-An endpoint says whether it is under a business associate agreement (`baa = true`) and where the vendor keeps the data (`region = "us"`). A message carrying PHI is refused at any hosted endpoint without `baa = true`, and export-controlled or CUI content at any hosted endpoint whose region is not `us`, before a request leaves. The chat page, Slack and the record all name the rule. Anthropic's BAA covers its first-party API and Claude in Microsoft Foundry ([Anthropic](https://privacy.anthropic.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers)), Microsoft is a business associate for Azure ([Microsoft](https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us)), and Amazon Bedrock is HIPAA-eligible ([AWS](https://aws.amazon.com/compliance/hipaa-eligible-services-reference/)). Each of those needs the institution's own agreement with the vendor; `baa = true` records that the lab has one, it does not create one.
+An endpoint says whether it is under a business associate agreement (`baa = true`) and where the vendor keeps the data (`region = "us"`). A message or knowledge base carrying PHI is refused at any hosted endpoint without `baa = true`, and export-controlled or CUI content at any hosted endpoint whose region is not `us`, before a request leaves. The chat page, Slack and the record all name the rule. Anthropic's BAA covers its first-party API and Claude in Microsoft Foundry ([Anthropic](https://privacy.anthropic.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers)), Microsoft is a business associate for Azure ([Microsoft](https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us)), and Amazon Bedrock is HIPAA-eligible ([AWS](https://aws.amazon.com/compliance/hipaa-eligible-services-reference/)). Each of those needs the institution's own agreement with the vendor; `baa = true` records that the lab has one, it does not create one.
 
 <details>
 <summary>Protocols, sampling and per-class routing</summary>
@@ -355,7 +356,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
-- **0.6, ask where the lab already talks:** the Slack door is built ([docs/slack.md](docs/slack.md)); left are a router across several agents (today a channel is bound to one agent) and Teams after a lab asks.
+- **0.6, ask where the lab already talks:** the Slack and Teams doors are built ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)); left is a router across several agents (today a channel is bound to one agent).
 - **0.7, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
 - **0.8, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.

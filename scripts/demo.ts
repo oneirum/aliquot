@@ -13,7 +13,13 @@
  * beside the web door. It takes SLACK_APP_TOKEN and SLACK_BOT_TOKEN from the
  * environment, or from --slack-env (default ~/.config/aliquot/slack.env).
  *
- *   node scripts/demo.ts [--port 3000] [--studio] [--slack [--slack-env FILE]]
+ * --teams adds the Teams door: [surfaces.teams] at institution in lab.toml and
+ * `aliquot teams` beside the web door, answering a stand-in for Teams and the
+ * Bot Framework (scripts/fake-teams.ts), because a real Teams app needs the
+ * tenant's admin (docs/teams.md). It asks the two questions below in a Teams
+ * channel thread and prints what the thread shows.
+ *
+ *   node scripts/demo.ts [--port 3000] [--studio] [--slack [--slack-env FILE]] [--teams]
  */
 
 import { randomBytes } from "node:crypto";
@@ -23,6 +29,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { startFakeModel } from "../test/fake-model.ts";
+import { APP_ID, APP_SECRET, startFakeTeams, TENANT } from "./fake-teams.ts";
 import { freshDatabase } from "../test/db.ts";
 import { ensurePostgres, processes, waitLine } from "./procs.ts";
 
@@ -31,6 +38,7 @@ const { values } = parseArgs({
     port: { type: "string", default: process.env.LABH_DEMO_PORT ?? "3000" },
     studio: { type: "boolean", default: false },
     slack: { type: "boolean", default: false },
+    teams: { type: "boolean", default: false },
     "slack-env": { type: "string", default: join(homedir(), ".config/aliquot/slack.env") },
   },
 });
@@ -99,6 +107,7 @@ writeFileSync(
     'placement = "lab"',
     'token_env = "DEMO_STUDIO_TOKEN"',
     ...(slackTokens ? ["[surfaces.slack]", 'kind = "slack"', 'placement = "approved"', 'token_env = "DEMO_SLACK_TOKEN"'] : []),
+    ...(values.teams ? ["[surfaces.teams]", 'kind = "teams"', 'placement = "institution"', 'token_env = "DEMO_TEAMS_TOKEN"'] : []),
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['${restricted.pattern}']`,
@@ -109,7 +118,7 @@ writeFileSync(
 );
 
 const payloadKey = randomBytes(32).toString("hex");
-const shared = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, DEMO_STUDIO_TOKEN: randomBytes(32).toString("hex"), DEMO_SLACK_TOKEN: randomBytes(32).toString("hex") };
+const shared = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, DEMO_STUDIO_TOKEN: randomBytes(32).toString("hex"), DEMO_SLACK_TOKEN: randomBytes(32).toString("hex"), DEMO_TEAMS_TOKEN: randomBytes(32).toString("hex") };
 const ps = processes(root, work, { ...shared, LABH_PAYLOAD_KEY: payloadKey });
 
 ps.startWorker(cfg, "demo");
@@ -149,12 +158,29 @@ if (slackTokens) {
 }
 
 const tries = ["Which freezer rack holds the aliquots?", restricted.message];
+
+let teamsThread = "";
+if (values.teams) {
+  // The Teams door gets the Microsoft app's settings and its surface token, and nothing else: no database, no payload key.
+  const teams = await startFakeTeams();
+  const proc = processes(root, work, { PATH: shared.PATH, HOME: shared.HOME, ALIQUOT_SURFACE_TOKEN: shared.DEMO_TEAMS_TOKEN, MICROSOFT_APP_ID: APP_ID, MICROSOFT_APP_PASSWORD: APP_SECRET, MICROSOFT_APP_TENANT_ID: TENANT, ALIQUOT_TEAMS_OPENID: teams.openid, ALIQUOT_TEAMS_LOGIN: teams.login }).start("teams", "aliquot.ts", ["teams", "--door", base, "--listen", "127.0.0.1:0"]);
+  const endpoint = (await waitLine(proc, /listening on (http:\/\/\S+\/api\/messages)/, 30_000)).replace(/^.*listening on /, "");
+  step(`Teams door listening on ${endpoint}, answering a stand-in for Teams`);
+  const lines: string[] = [];
+  for (const question of tries) {
+    const a = teams.activity(question);
+    if ((await teams.deliver(endpoint, a)) !== 200) throw new Error("the Teams door refused the stand-in's signed activity");
+    const answer = await teams.answerTo(a.id, 60_000);
+    lines.push(`  Member:  @Aliquot ${question}`, ...answer.split("\n").map((l, i) => (i === 0 ? `  Aliquot: ${l}` : `           ${l}`)), "");
+  }
+  teamsThread = `\nIn a Teams channel thread (the stand-in), the two questions below went like this:\n\n${lines.join("\n")}`;
+}
 const chat = `${base}/?try=${tries.map(encodeURIComponent).join("|")}`;
 console.log(`
 Open the chat page:
 
   ${chat}
-${studio ? `\nThe studio:\n\n  ${studio}\n` : ""}${slackTokens ? "\nIn Slack, mention the app in a channel it was added to, or send it a DM.\n" : ""}
+${studio ? `\nThe studio:\n\n  ${studio}\n` : ""}${slackTokens ? "\nIn Slack, mention the app in a channel it was added to, or send it a DM.\n" : ""}${teamsThread}
 Then try:
 
   1. "${tries[0]}"

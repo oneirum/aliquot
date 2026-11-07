@@ -50,6 +50,8 @@ const gateway = createGateway(
   [
     { id: "local", baseUrl: compiler.url, placement: "lab", supportsLogprobs: false },
     { id: "hosted", baseUrl: hosted.url, placement: "zdr", supportsLogprobs: false },
+    // A campus service with no business associate agreement on file: D3 may go there, PHI may not.
+    { id: "campus", baseUrl: hosted.url, placement: "institution", supportsLogprobs: false, region: "us" },
   ],
   DEFAULT_POLICY,
   fetch,
@@ -164,6 +166,17 @@ test("a KB mixing D1 and D3 sources on a hosted compiler is refused whole, befor
   const { outcome } = await compile(def);
   assert.equal(hosted.requests - before, 0, "not even the D1 sources were sent");
   assert.deepEqual(outcome, { t: "refused", cls: "D3", refusal: { code: "class-above-ceiling", payload: "D3", ceiling: "D1" } });
+});
+
+test("a PHI source aimed at an institution compiler without baa is refused at the gateway and never sent", async () => {
+  const before = hosted.requests;
+  const def = await definition("kb.json", (d) => {
+    d.sources = [{ sourceId: "clinic", kind: "file", location: "clinic-note.md", cls: "D3", licence: "internal-only" }];
+    d.compiler = { endpointId: "campus", modelId: "hosted-2" };
+  });
+  const { outcome } = await compile(def);
+  assert.deepEqual(outcome, { t: "refused", cls: "D3", refusal: { code: "phi-needs-baa", endpointId: "campus" } });
+  assert.equal(hosted.requests - before, 0, "the MRN never reached the campus endpoint");
 });
 
 test("a URL source goes through the HTTP choke point: refused on a public host before any request, read on a lab host", async () => {

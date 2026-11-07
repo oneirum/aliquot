@@ -100,11 +100,14 @@ test("the gate's stand-in predicate marks PHI, export-controlled and CUI", () =>
   const marks = (t: string) => marksOf(classifyText(t, "D1", []).detections);
   assert.deepEqual(marks("MRN 0012345 came back"), ["phi"]);
   assert.deepEqual(marks("PHI: the visit notes"), ["phi"]);
-  assert.deepEqual(marks("This drawing is ITAR"), ["export-controlled"]);
-  assert.deepEqual(marks("EXPORT CONTROLLED technical data"), ["export-controlled"]);
+  assert.deepEqual(marks("ITAR: rig drawing 7"), ["export-controlled"]);
+  assert.deepEqual(marks("EXPORT CONTROLLED: technical data"), ["export-controlled"]);
   assert.deepEqual(marks("CUI//SP-PRVCY"), ["cui"]);
+  assert.deepEqual(marks("Notes from Tuesday\nCUI\nThe test plan"), ["cui"]);
   assert.deepEqual(marks("What are the office hours? phi and cui are letters"), []);
-  assert.equal(classifyText("CUI banner", "D1", []).cls, "D2", "a CUI banner raises the class too");
+  assert.deepEqual(marks("Does this dataset contain PHI? Is the drawing ITAR or CUI?"), [], "naming a regime is not a banner");
+  assert.deepEqual(marks("Never paste PHI into chat."), []);
+  assert.equal(classifyText("CUI//SP-CTI", "D1", []).cls, "D1", "a banner sets a mark, not a class");
 });
 
 // On the wire -------------------------------------------------------------------------------------------------------
@@ -136,6 +139,9 @@ test("a global. inference profile is not in the US even at an endpoint that says
   assert.equal(regionOf({ protocol: "bedrock-converse", region: "us" }, "us-gov.anthropic.claude-x-v1:0"), "us");
   assert.equal(regionOf({ protocol: "bedrock-converse" }, "us.anthropic.claude-x-v1:0"), null, "nor supplies an undeclared one");
   assert.equal(regionOf({ protocol: "bedrock-converse", region: "eu" }, IN_REGION), "eu");
+  assert.equal(regionOf({ protocol: "bedrock-converse", region: "us" }, "ca.anthropic.claude-x-v1:0"), null, "a geography the code does not know is not us");
+  assert.equal(regionOf({ protocol: "bedrock-converse", region: "us" }, "arn:aws:bedrock:eu-central-1:123456789012:application-inference-profile/abc"), null);
+  assert.equal(regionOf({ protocol: "bedrock-converse", region: "us" }, "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc"), "us");
   assert.equal(regionOf({ protocol: "openai-chat", region: "us" }, "global.thing"), "us", "only Bedrock ids carry a geography");
   const before = bedrock.paths.length;
   const out = await gateway.complete(target("bedrock-us", "global.anthropic.claude-opus-5-5-v1:0"), asked("CUI//SP-CTI: what does section 2 say?"), memoryRecorder(), opts);
@@ -241,6 +247,8 @@ test("lab.toml: a bedrock-converse endpoint needs aws_region and models, and tak
   bad(`aws_region = "us-east-1"`, /only protocol = "bedrock-converse"/);
   bad(`protocol = "bedrock-converse"\naws_region = "eu-west-1"\nmodels = ["m"]\nregion = "us"`, /signs for eu-west-1/);
   bad(`protocol = "bedrock-converse"\naws_region = "us-east-1"\nmodels = ["global.anthropic.claude-opus-5-5-v1:0"]\nregion = "us"`, /may run outside the US/);
+  bad(`protocol = "bedrock-converse"\naws_region = "us-east-1"\nmodels = ["arn:aws:bedrock:eu-west-1:1:application-inference-profile/x"]\nregion = "us"`, /may run outside the US/);
+  bad(`api_version = "2024-10-21"`, /without models/);
 });
 
 // Knowledge bases -----------------------------------------------------------------------------------------------------

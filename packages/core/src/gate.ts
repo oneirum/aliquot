@@ -46,10 +46,12 @@ const DETECTORS: readonly { readonly kind: DetectionKind; readonly cls: DataClas
   { kind: "phone", cls: "D2", pattern: /\b(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g },
   { kind: "email", cls: "D2", pattern: /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g },
   { kind: "review-marker", cls: "R", pattern: /\bREVIEW[- ]CONFIDENTIAL\b/gi },
-  // Handling banners. Case-sensitive where the lowercase word is ordinary ("phi" the letter, "cui" in Romanian).
-  { kind: "phi-marker", cls: "D3", pattern: /\bPHI\b/g },
-  { kind: "export-marker", cls: "D2", pattern: /\bITAR\b|\bEXPORT[- ]CONTROLLED\b/gi },
-  { kind: "cui-marker", cls: "D2", pattern: /\bCUI\b/g },
+  // Handling banners: the marking at the start of a line, alone or followed by ":" or "//" ("CUI//SP-PRVCY"), in
+  // capitals. A sentence that only names the regime ("does this contain PHI?") is not a banner. They set a mark,
+  // not a class: D0 never raises the message, so a lab's classes are as before.
+  { kind: "phi-marker", cls: "D0", pattern: /^[ \t]*PHI(?=[ \t]*(?::|\/\/|$))/gm },
+  { kind: "export-marker", cls: "D0", pattern: /^[ \t]*(?:ITAR|EXPORT[- ]CONTROLLED)(?=[ \t]*(?::|\/\/|$))/gm },
+  { kind: "cui-marker", cls: "D0", pattern: /^[ \t]*CUI(?=[ \t]*(?::|\/\/|$))/gm },
 ];
 
 /**

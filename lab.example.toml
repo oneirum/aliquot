@@ -52,9 +52,8 @@ placement = "lab"                        # lab hardware: up to D3
 # models = ["us.anthropic.claude-sonnet-5"]
 
 # Campus contracts. baa = true says PHI may go to the endpoint: a business associate agreement covers it, or the
-# covered entity runs it. Without it a message carrying PHI (an MRN, a date of birth, a PHI banner) is refused there
-# before any request. PHI is D3, so it reaches only lab and institution placements anyway; baa decides which
-# institution endpoints. region says where the vendor keeps the data. Export-controlled and CUI content goes only to
+# covered entity runs it. Without it a message carrying PHI (an MRN, a date of birth, a PHI: banner) is refused there
+# before any request. region says where the vendor keeps the data. Export-controlled and CUI content goes only to
 # an endpoint with region = "us"; an endpoint without region counts as outside the US. Lab hardware needs neither.
 # [endpoints.azure]
 # base_url = "https://your-resource.openai.azure.com/openai/v1"
@@ -133,6 +132,14 @@ token_env = "ALIQUOT_STUDIO_TOKEN"
 # kind = "slack"
 # placement = "approved"
 # token_env = "ALIQUOT_SLACK_TOKEN"
+
+# Microsoft keeps every Teams message in the institution's own tenant, so a Teams surface may be institution at most,
+# never lab. Use approved instead when your institution has not approved Teams for D2 data.
+# docs/teams.md: the Azure app registration, the tenant admin's steps, and docker compose --profile teams up -d.
+# [surfaces.teams]
+# kind = "teams"
+# placement = "institution"
+# token_env = "ALIQUOT_TEAMS_TOKEN"
 
 [hosts]
 "api.openalex.org" = "public"            # a tool reaches only the hosts its manifest names; a host unlisted here is public (D0)

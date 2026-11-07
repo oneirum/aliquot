@@ -357,14 +357,19 @@ function converseMessages(parts: readonly ChatPart[], target: ModelTarget): Conv
   for (const p of parts) {
     if (p.role === "system") continue;
     const role = p.role === "assistant" ? "assistant" : "user";
-    let last = out.at(-1);
-    if (last?.role !== role) out.push((last = { role, content: [] }));
-    if ("toolCalls" in p) {
-      const replayed = stateFor(p, "bedrock-converse", target) as Record<string, unknown>[] | null;
-      last.content.push(...(replayed ?? [...(p.text?.value ? [{ text: p.text.value }] : []), ...p.toolCalls.value.map((c) => ({ toolUse: { toolUseId: c.id, name: c.name, input: c.args } }))]));
-    } else if (p.role === "tool") {
-      last.content.push({ toolResult: { toolUseId: p.callId, content: [{ text: p.content.value }], status: p.failed ? "error" : "success" } });
-    } else if (p.content.value) last.content.push({ text: p.content.value });
+    const blocks: Record<string, unknown>[] =
+      "toolCalls" in p
+        ? ((stateFor(p, "bedrock-converse", target) as Record<string, unknown>[] | null) ?? [...(p.text?.value ? [{ text: p.text.value }] : []), ...p.toolCalls.value.map((c) => ({ toolUse: { toolUseId: c.id, name: c.name, input: c.args } }))])
+        : p.role === "tool"
+          ? [{ toolResult: { toolUseId: p.callId, content: [{ text: p.content.value }], status: p.failed ? "error" : "success" } }]
+          : p.content.value
+            ? [{ text: p.content.value }]
+            : [];
+    // Converse refuses a message with no content blocks, so an empty part opens no message.
+    if (!blocks.length) continue;
+    const last = out.at(-1);
+    if (last?.role === role) last.content.push(...blocks);
+    else out.push({ role, content: blocks });
   }
   return out;
 }

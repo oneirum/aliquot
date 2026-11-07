@@ -9,7 +9,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { coveredModelRefusal, DATA_CLASSES, describeRefusal, PLACEMENTS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
-import { AUTH_HEADERS, type ModelEndpoint } from "./gateway.ts";
+import { AUTH_HEADERS, regionOf, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
@@ -53,7 +53,7 @@ const agentBackend = z.union([
   devLogin,
 ]);
 
-export const SURFACE_KINDS = ["web", "slack", "phone", "acp", "mcp", "studio"] as const;
+export const SURFACE_KINDS = ["web", "slack", "teams", "phone", "acp", "mcp", "studio"] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 export interface WebSurfaceConfig {
@@ -81,10 +81,11 @@ const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
 const webSurface = z
   .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
   .strict();
-const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
+const tokenSurface = z.object({ kind: z.enum(["slack", "teams", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
 
 const REFUSED_PLACEMENTS: Partial<Record<SurfaceKind, { readonly placements: readonly Placement[]; readonly why: string }>> = {
   slack: { placements: ["lab", "institution"], why: "Slack's servers keep a copy of every answer, so a Slack surface is placement approved at most" },
+  teams: { placements: ["lab"], why: "Microsoft keeps a copy of every Teams message in the institution's tenant, so a Teams surface is placement institution at most" },
 };
 
 function parseSurface(id: string, raw: unknown): SurfaceConfig {
@@ -236,9 +237,10 @@ export function parseConfig(text: string, path: string): LabConfig {
       for (const k of AWS_FIELDS) if (k in e) fail(`has ${k}, which only protocol = "bedrock-converse" reads`);
     }
     if (e.region === "us" && e.protocol === "bedrock-converse") {
-      const abroad = (Array.isArray(e.models) ? e.models : []).filter((m) => typeof m === "string" && /^(eu|apac|jp|au|global)\./.test(m));
-      if (abroad.length) fail(`says region = "us" but serves ${abroad.join(", ")}, an inference profile that may run outside the US; use the us. profile`);
+      const abroad = (Array.isArray(e.models) ? e.models : []).filter((m) => typeof m === "string" && regionOf({ protocol: "bedrock-converse", region: "us" }, m) !== "us");
+      if (abroad.length) fail(`says region = "us" but serves ${abroad.join(", ")}, which may run outside the US; use a model id or a us. inference profile`);
     }
+    if (typeof e.api_version === "string" && !Array.isArray(e.models)) fail("has api_version (an Azure deployment URL) without models; a deployment has no model list, so name the id it answers with");
     for (const m of Array.isArray(e.models) ? e.models : []) {
       const covered = typeof m === "string" && typeof e.placement === "string" ? coveredModelRefusal(m, e.placement as Placement) : null;
       if (covered) throw new Error(`lab.toml: endpoint ${id}: ${describeRefusal(covered)}; give it the placement that 30-day retention allows`);

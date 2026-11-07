@@ -27,3 +27,21 @@ test("a session token is sent and signed", () => {
   assert.equal(h["x-amz-security-token"], "tok");
   assert.match(h.authorization!, /SignedHeaders=host;x-amz-date;x-amz-security-token,/);
 });
+
+test("a Bedrock Converse request with a colon in the model id and a session token matches AWS's own signer", () => {
+  // Produced once by @smithy/signature-v4 5.3.5 (the AWS SDK's signer) for this exact request and pinned here; the
+  // signer is not a dependency. It sends x-amz-content-sha256, so this request carries it too. The path's %3A is
+  // encoded again in the canonical URI (%253A), which a root-path vector cannot show.
+  const body = JSON.stringify({ messages: [{ role: "user", content: [{ text: "What are the office hours?" }] }], inferenceConfig: { maxTokens: 64 } });
+  const h = signV4({
+    method: "POST",
+    url: new URL("https://bedrock-runtime.us-east-1.amazonaws.com/model/us.anthropic.claude-opus-5-5-v1%3A0/converse"),
+    headers: { "content-type": "application/json", "x-amz-content-sha256": "6cd2d99f09870a7830b4ace5028dff58a582059a9d833be3c4c640eb93bb2918" },
+    body,
+    region: "us-east-1",
+    service: "bedrock",
+    credentials: { ...credentials, sessionToken: "session-token-example" },
+    now: new Date("2026-11-07T04:00:00Z"),
+  });
+  assert.equal(h.authorization, "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261107/us-east-1/bedrock/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token, Signature=730560242e6599b81f0a90f210dbd22a00b31791ff57c90a68e4ecf839a02e12");
+});

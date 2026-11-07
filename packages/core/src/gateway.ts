@@ -73,17 +73,28 @@ export interface ModelEndpoint {
 }
 
 /**
- * Where a call's data is kept: the region lab.toml declares, unless the model id says otherwise. A Bedrock
- * cross-region inference profile names its geography in the id's prefix and may serve the request from any region
- * in it (docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html), so a prefix that is not the
- * declared region, global. above all, makes the region unknown. A prefix never supplies a region the lab did not declare.
+ * Where a call's data is kept: the region lab.toml declares, unless the Bedrock model id says otherwise, and never a
+ * region the lab did not declare. A Bedrock id is one of three shapes:
+ *   provider.model (anthropic.claude-...-v1:0)   a foundation model served in the endpoint's own region
+ *   geo.provider.model (us., eu., global. ...)    a cross-region inference profile, served anywhere in geo
+ *                                                 (docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html)
+ *   arn:aws...:bedrock:<region>:...               the region in the ARN (an application inference profile may still
+ *                                                 route further, so only a us- ARN at a us endpoint counts as us)
+ * A geography that is not the declared region, global. above all, and any other shape, make the region unknown.
  */
 export function regionOf(e: Pick<ModelEndpoint, "region" | "protocol">, modelId: string): string | null {
   const declared = e.region ?? null;
-  if (e.protocol !== "bedrock-converse") return declared;
-  const prefix = /^(us-gov|us|eu|apac|jp|au|global)\./.exec(modelId)?.[1];
-  if (!prefix) return declared;
-  return (prefix === "us-gov" ? "us" : prefix) === declared ? declared : null;
+  if (e.protocol !== "bedrock-converse" || declared === null) return declared;
+  const geoOf = (code: string) => (code === "us" || code === "us-gov" ? "us" : code);
+  let geo: string | null;
+  const arn = /^arn:aws[\w-]*:bedrock:([a-z0-9-]+):/.exec(modelId);
+  if (arn) geo = arn[1]!.startsWith("us-") ? "us" : null;
+  else {
+    const parts = modelId.split(".");
+    if (parts.length === 2) return declared;
+    geo = parts.length >= 3 && /^[a-z-]+$/.test(parts[0]!) ? geoOf(parts[0]!) : null;
+  }
+  return geo === declared ? declared : null;
 }
 
 /** The destination a call to target goes to: its placement, contract and region from lab.toml. */

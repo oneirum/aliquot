@@ -133,16 +133,23 @@ when it loads.
 
 | Mark | Set by | Rule at a model endpoint off lab hardware | Refusal code |
 |---|---|---|---|
-| PHI | an MRN, a date of birth, or a `PHI` banner (also raises the message to D3) | refused unless `baa = true` | `phi-needs-baa` |
-| Export-controlled | `ITAR` or `EXPORT CONTROLLED` (raises to D2) | refused unless `region = "us"` | `export-needs-us` |
-| CUI | a `CUI` banner (raises to D2) | refused unless `region = "us"` | `export-needs-us` |
+| PHI | an MRN or a date of birth (both D3), or a `PHI` banner | refused unless `baa = true` | `phi-needs-baa` |
+| Export-controlled | an `ITAR` or `EXPORT CONTROLLED` banner | refused unless `region = "us"` | `export-needs-us` |
+| CUI | a `CUI` banner, such as `CUI//SP-PRVCY` | refused unless `region = "us"` | `export-needs-us` |
 
-PHI is D3, so it reaches only `lab` and `institution` placements in any case; `baa` decides which institution
-endpoints. Lab hardware needs neither field, because no third party holds the content there. A mark stays on
+A banner is the marking at the start of a line, alone or followed by `:` or `//`, in capitals. A sentence that only
+names the regime ("does this contain PHI?") is not one. A banner sets the mark and leaves the class as it was.
+
+PHI found by an MRN or a date of birth is D3, so it reaches only `lab` and `institution` placements in any case, and
+`baa` decides which institution endpoints. PHI marked only by a banner, or found in a knowledge base whose steward
+declared a lower class, keeps that class, so `baa` is what stops it at an approved or zero-retention endpoint. Lab hardware needs neither field, because no third party holds the content there. A mark stays on
 everything derived from the content, like the class, and is stored with it: a stored payload's marks are part of its
 address and of its encryption's associated data, so a record entry stripped of its marks does not decrypt. A refusal
 happens before any request leaves, is recorded as `egress.refused` with its code, and the chat reply, the Slack reply
-and the record page each name the rule. For Bedrock, a model id's inference-profile prefix that disagrees with the
+and the record page each name the rule. The rules apply to model endpoints only: an answer derived from PHI that a
+model on lab hardware or under a BAA wrote still goes to the surface that asked, Slack included, under the surface's
+class ceiling alone. Keep PHI work on surfaces the institution's agreements cover. A knowledge base compile is a
+model call like any other, so a PHI source is refused at a compiler endpoint without `baa = true`. For Bedrock, a model id's inference-profile prefix that disagrees with the
 declared region makes the region unknown: a `global.` profile may run in any region, so it is never treated as `us`. Hosted agent
 CLIs (Claude Code, Codex) have no `baa` or `region` yet, so marked content reaches one only on lab hardware.
 
