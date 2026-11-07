@@ -34,6 +34,7 @@ import { appendAudit, auditRecorder, type AuditEvent, type CallContext } from ".
 import { DATA_CLASSES, join, Labelled, type DataClass, type EgressRefusal } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { classifyText } from "./gate.ts";
+import { classById, classify, residencyRuleText, ruleText, type Policy } from "./policy.ts";
 import { describeOutcome, Prompt, type ExactModelId, type ModelGateway, type ModelResult, type ModelTarget } from "./gateway.ts";
 import { contentHash, type Addresser, type PayloadHash, type Sha256, type SnapshotId } from "./hash.ts";
 import { buildBm25, hashEntry, LICENCES, loadManifest, saveSnapshot, searchBm25, snapshotId, SOURCE_KINDS, type CoverageResult, type HashedEntry, type KbEntry, type KbSnapshot, type LoadedSnapshot, type SourceRef } from "./kb.ts";
@@ -171,6 +172,10 @@ export interface SourceDeps {
   readonly actor: string;
   /** lab.toml's participant-id patterns. A source whose text matches one is D3 whatever its declared class. */
   readonly labPatterns: readonly RegExp[];
+  /** lab.toml's data classes. Absent means the default policy over labPatterns. A source in a class whose model_tier is none is refused. */
+  readonly classes?: Policy;
+  /** The region lab.toml gives the compiler's endpoint, for a source in a class with a residency rule. */
+  readonly endpointRegion?: (endpointId: string) => string | null;
   /** Reads a PDF in the sandbox container (Sandbox.readPdf). Absent when lab.toml has no [sandbox], and in the studio, which has no Docker socket. */
   readonly pdf?: (bytes: Uint8Array, name: string) => Promise<string>;
 }
@@ -186,10 +191,35 @@ export async function readSources(def: KbDefinition, files: SourceFiles, deps: S
     def.sources.map(async (s) => {
       const text = s.kind === "file" ? await readFileSource(s.location, files, deps.pdf) : await readUrlSource(def.kbId, s.sourceId, s.location, deps);
       // The declared class is a floor: the gate's detectors and the lab's id patterns can only raise it.
-      const cls = classifyText(text, s.cls, deps.labPatterns).cls;
+      const cls = deps.classes ? await sourceLevel(def, s.sourceId, text, s.cls, deps.classes, deps) : classifyText(text, s.cls, deps.labPatterns).cls;
       return { ref: { ...s, cls, contentHash: deps.address(cls, text) }, text };
     }),
   );
+}
+
+/** A KB source whose data class no model may read. Thrown before any compile job exists, after the audit stream records it. */
+export class SourceClassRefused extends Error {
+  readonly dataClass: string;
+  constructor(sourceId: string, text: string, dataClass: string) {
+    super(`source ${sourceId}: ${text}`);
+    this.name = "SourceClassRefused";
+    this.dataClass = dataClass;
+  }
+}
+
+/** The source's level under the lab's classes. A class whose model_tier is none refuses it: the compiler is a model too. */
+async function sourceLevel(def: KbDefinition, sourceId: string, text: string, declared: DataClass, policy: Policy, deps: SourceDeps): Promise<DataClass> {
+  const c = classify(policy, { t: "entry", text, declared });
+  const rule = classById(policy, c.class);
+  const endpointId = def.compiler.endpointId;
+  const region = deps.endpointRegion?.(endpointId) ?? null;
+  const outside = rule.residency !== null && region !== rule.residency;
+  if (rule.modelTier !== "none" && !outside) return c.level;
+  const detectors = [...new Set(c.spans.filter((x) => x.class === c.class).map((x) => x.detector))];
+  const classRule = rule.modelTier === "none" ? ruleText(rule) : residencyRuleText(rule);
+  await appendAudit(deps.db, deps.actor, { t: "kb.source-refused", kbId: def.kbId, sourceId, dataClass: c.class, level: c.level, rule: c.rule, classRule, detectors });
+  const why = rule.modelTier === "none" ? "No model may read it, so it cannot be compiled into a knowledge base." : `The compiler's endpoint ${endpointId} ${region ? `is in region ${region}` : "names no region"}.`;
+  throw new SourceClassRefused(sourceId, `data class ${c.class}${detectors.length ? ` (detector ${detectors.join(", ")})` : ""}; rule ${classRule}. ${why}`, c.class);
 }
 
 async function readFileSource(name: string, files: SourceFiles, pdf: SourceDeps["pdf"]): Promise<string> {

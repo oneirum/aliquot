@@ -32,6 +32,44 @@ A message gets its class at the gate (`packages/core/src/gate.ts`), which runs b
 gate checks built-in patterns and the lab's own participant id patterns from `lab.toml`. A knowledge base's class is
 declared by its steward. The compile step raises that class when its source text matches a pattern.
 
+### Classes a lab declares
+
+The five levels above are what every egress decision reads. On top of them a lab declares data classes in `lab.toml`
+(`[classes.<id>]`, `packages/core/src/policy.ts`). Each class sits at one level, and `lab.toml` fails to load when a
+class asks for less protection than its level enforces, so a class can only add rules. The five built-in classes are
+always there and, with no `[classes]` table, behave exactly as Aliquot did before classes existed.
+
+| Class | Level | Model tier | Record of a refused message | Detectors | Where it comes from |
+|---|---|---|---|---|---|
+| `public` | D0 | hosted | text | none (a channel's floor) | built in |
+| `internal` | D1 | hosted | text | none (the default floor) | built in |
+| `confidential` | D2 | hosted (approved placement) | text | phone, email | built in |
+| `restricted` | D3 | local (lab or institution) | text | SSN, MRN, date of birth, the lab's participant ids | built in |
+| `review-confidential` | R | none under `refuse`, local under `lab-only` | keyed hash | REVIEW-CONFIDENTIAL marker | built in |
+| `phi` | D3 | none | keyed hash, 30 days | HIPAA Safe Harbor identifiers (45 CFR 164.514(b)(2)) | example in `fixtures/policy/classes.toml` |
+| `controlled_access` | D3 | none | keyed hash, 365 days | DUA marker: `DUA:` lines, dbGaP `phs` accessions, EGA ids | example; NIH NOT-OD-25-081 |
+| `export_controlled` | D3 | local, residency `us` | text | ITAR, EAR99, ECCN, USML markings | example |
+
+What each tier means, and where it is enforced:
+
+- **hosted**: the level's ceiling decides which placements may read it (the table above).
+- **local**: the level is D3 or R, which the ceilings admit only at lab and institution placements. A run on a hosted
+  model is refused at the gateway before the request, and its notice names the class.
+- **none**: the door refuses the message before a run exists, so no model at any placement receives it. The refusal is
+  an audit event (`gate.refused`) holding the class, the rule, the detectors, the retention, and the text, its keyed
+  hash or nothing, as the class's `record` says. A knowledge base source in such a class is refused before its compile
+  job exists (`kb.source-refused`), because the compiler is a model too.
+- **residency**: a class with `residency = "us"` is read only by an endpoint whose `[endpoints.<id>]` says
+  `region = "us"`. An endpoint with no region is in none. Checked at the door against the agent's model and at
+  knowledge base compile against the compiler.
+
+Safe Harbor identifiers covered by a pattern: names after a label (patient, name), street addresses and ZIP codes,
+dates tied to an admission, discharge, death, service or birth, ages over 89, phone and fax numbers, email addresses,
+SSNs, MRNs, health plan, account, certificate and licence numbers, VINs and licence plates, device serials, URLs (not
+scholarly hosts such as doi.org or PubMed), IP addresses and labelled biometric ids. Full-face photographs are not
+text and are not checked. "Any other unique identifying number" is the lab's own participant id patterns. Patterns
+miss what they do not match: see "Not covered yet".
+
 ## Where each class may go
 
 Each destination has a placement, which the lab declares in `lab.toml`. The table of ceilings is code, not
@@ -164,14 +202,43 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Does participant data leave our hardware? | Not unless the lab declares a destination as lab or institution placement. A D3 item is refused for every other destination, and the refusal is recorded. |
 | Which third parties receive data? | Only the endpoints and hosts listed in `lab.toml`, each at most at its ceiling. The quickstart lists none. |
 | Is data encrypted at rest? | Payloads are encrypted with AES-256-GCM under a key held outside the database. Run records hold references, not text. |
-| Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. |
+| Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. With `[anchor]` set, the worker also signs the head of the audit stream and of each closed run every few minutes, with a key the database never holds, into an append-only log; `aliquot verify --anchors` then shows whether anyone with database access rewrote a row after it was anchored, and names the seq. Keep the log, and the key, off the database host: see [Anchors](#anchors). |
 | Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
 | Single sign-on? | Not yet. The web door has no member sign-in and listens on 127.0.0.1 only. A bearer token says which surface a request comes from, not which member sent it. |
 | Key rotation and retention? | Not yet. |
 
+## Anchors
+
+The hash chains show a row that changed, unless whoever changed it also recomputed every later hash, which anyone
+with write access to Postgres can do. Anchors move the proof out of the database.
+
+1. `aliquot init --anchor-key /secure/aliquot/anchor.key` writes the key (mode 600) and an `[anchor]` table. It needs
+   write access to that file too, and prints the exact `node --permission ...` command when it lacks it. An existing
+   lab can instead add `[anchor]` from `lab.example.toml` and any Ed25519 PKCS#8 PEM key
+   (`openssl genpkey -algorithm ed25519 -out anchor.key`). Set `LABH_ANCHOR_KEY_FILE` to the key's path for the
+   worker, and start the worker with `--allow-fs-write=<the [anchor] path>`; without either it refuses to start.
+2. The worker appends one signed line every `every_minutes` (default 15) and logs it as `anchor {...}`. `aliquot anchor`
+   appends one by hand and prints it on stdout.
+3. `aliquot verify --anchors` checks every line. Research IT can run it with only the public half of the key
+   (`--public-key`), so the private key need never leave the worker's host.
+
+Where to keep the log: somewhere the database administrator cannot rewrite. The best is write-once storage (an S3
+bucket with Object Lock, a WORM volume) or the institution's SIEM, fed by forwarding each line from the worker's log
+or from `aliquot anchor` on a timer. A copy on another host also works, because every line names the one before it,
+so a line removed from any copy shows. Keep an offline copy of the key, and of its public half with the IRB file: an
+anchor verifies only against the key that signed it. Aliquot makes no network call for any of this, and uses no
+public timestamping service.
+
+What anchors do not cover: a change made before the next anchor is written (at most `every_minutes`), a run that is
+still open, and lines cut from the end of the only copy of the log, which leaves an older log that still verifies. That
+last one is why the lines belong somewhere the database administrator cannot write as well. Redaction and retention delete payload bodies but keep their hashes, so anchored runs still verify
+after either.
+
 ## Not covered yet
 
-- **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A lab must add its
+- **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A name without a
+  label ("John Smith was admitted") is not found by `phi-name`; a lab with free-text PHI should set its PHI channels'
+  floor to D3 rather than rely on detectors. Detector accuracy at scale is measured by the trust harness, not here. A lab must add its
   own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,
   and refuses a pattern that matches ordinary text or no sample id.
 - **No sign-on.** Keep the web door on the machine until sign-on lands.

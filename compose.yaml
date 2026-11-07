@@ -42,6 +42,7 @@ services:
       <<: *app-env
       ALIQUOT_STUDIO_TOKEN: ${ALIQUOT_STUDIO_TOKEN:-}
       ALIQUOT_SLACK_TOKEN: ${ALIQUOT_SLACK_TOKEN:-}    # the [surfaces.slack] token, so the door knows the Slack door
+      ALIQUOT_TEAMS_TOKEN: ${ALIQUOT_TEAMS_TOKEN:-}    # the [surfaces.teams] token, so the door knows the Teams door
     ports: ["${LABH_BIND:-127.0.0.1}:${LABH_WEB_PORT:-3000}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
@@ -96,6 +97,24 @@ services:
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
     command: ["node", "--disable-warning=ExperimentalWarning", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/aliquot.ts", "slack", "--door", "http://web:3000", "--links", "${ALIQUOT_LINKS:-http://localhost:3000}"]
+
+  # docker compose --profile teams up -d: the Teams door (docs/teams.md). It holds the Microsoft app's id, secret and
+  # tenant and the teams surface's token, and no database or payload key. The Bot Framework posts to it, so the lab's
+  # TLS proxy forwards https://<public name>/api/messages to LABH_TEAMS_BIND:LABH_TEAMS_PORT.
+  teams:
+    image: aliquot-app:0.5.1
+    build: .
+    profiles: [teams]
+    restart: unless-stopped
+    depends_on:
+      web: { condition: service_healthy }
+    environment:
+      ALIQUOT_SURFACE_TOKEN: ${ALIQUOT_TEAMS_TOKEN:-}
+      MICROSOFT_APP_ID: ${MICROSOFT_APP_ID:-}
+      MICROSOFT_APP_PASSWORD: ${MICROSOFT_APP_PASSWORD:-}
+      MICROSOFT_APP_TENANT_ID: ${MICROSOFT_APP_TENANT_ID:-}
+    ports: ["${LABH_TEAMS_BIND:-127.0.0.1}:${LABH_TEAMS_PORT:-3978}:3978"]
+    command: ["node", "--disable-warning=ExperimentalWarning", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/aliquot.ts", "teams", "--door", "http://web:3000", "--links", "${ALIQUOT_LINKS:-http://localhost:3000}", "--listen", "0.0.0.0:3978"]
 
   ollama:
     image: ollama/ollama

@@ -4,7 +4,8 @@
  * call intake(), and implement Surface so the worker can reply.
  *
  * intake() order, all in one place:
- *   1. gate                         -> refuse with a user-facing message, or admit with class
+ *   1. gate                         -> refuse with a user-facing message, or admit with class;
+ *                                      a refusal by a data class is recorded in the audit stream
  *   2. thread has an active background run -> write a steer inbox item, done      (later unit)
  *   3. channel bound to a study     -> frozen hash (router off)                   (later unit)
  *      else watched-channel post    -> shouldReply, maybe drop                    (later unit)
@@ -14,10 +15,12 @@
  */
 
 import { z } from "zod";
-import { resolveAgent, versionHash, type AgentDocument, type Catalog } from "./agent.ts";
-import { decideEgress, type DataClass, type EgressPolicy, type Labelled, type Placement, type SurfaceId } from "./dataclass.ts";
+import { modelFor, resolveAgent, versionHash, type AgentDocument, type Catalog } from "./agent.ts";
+import { decideEgress, join, rank, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
-import { gate, type GateDeps, type InboundMessage } from "./gate.ts";
+import { appendAudit, type AuditEvent } from "./audit.ts";
+import { gateClassified, type GateDeps, type InboundMessage } from "./gate.ts";
+import { classById, residencyRefusal, residencyRuleText, retentionOf, ruleText, type Classification, type Policy } from "./policy.ts";
 import type { AgentVersionHash } from "./hash.ts";
 import { ENGINES, type Engine, type Queue } from "./queue.ts";
 import type { PayloadRef, PayloadStore, RunId, ThreadKey, Trigger } from "./record.ts";
@@ -27,7 +30,12 @@ export type IntakeResult =
   | { readonly t: "steered"; readonly runId: RunId }
   | { readonly t: "asked-user"; readonly choices: readonly string[] }
   | { readonly t: "ignored"; readonly reason: "watched-no" | "own-message" }
-  | { readonly t: "refused"; readonly userFacing: string };
+  | {
+      readonly t: "refused";
+      readonly userFacing: string;
+      /** The data class that refused it, the rule it applied and the audit event that records it, when a class refused. */
+      readonly dataClass?: { readonly id: string; readonly level: DataClass; readonly rule: string; readonly classRule: string; readonly audit: number };
+    };
 
 const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number() });
 
@@ -47,6 +55,7 @@ export const runJobPayloadSchema = z.object({
   input: ref,
   history: z.array(ref),
   studyId: z.string().nullable(),
+  dataClass: z.object({ id: z.string(), rule: z.string(), retentionDays: z.number().nullable() }).optional(),
 });
 
 export interface RunJobPayload {
@@ -61,6 +70,8 @@ export interface RunJobPayload {
   readonly input: PayloadRef;
   readonly history: readonly PayloadRef[];
   readonly studyId: string | null;
+  /** The message's data class at the gate, so a refusal later in the run can name it, and the retention job can read it. */
+  readonly dataClass?: { readonly id: string; readonly rule: string; readonly retentionDays: number | null };
 }
 
 /** A jobs row whose payload is not a run job. Nothing can be journaled for it, so the worker fails the job without a run record. */
@@ -89,6 +100,8 @@ export interface IntakeDeps {
   readonly catalog: () => Promise<Catalog>;
   /** The agent for a channel: the published head bound to it, else the deployment's fixture. The router replaces this for unbound channels. */
   readonly agentFor: (channel: InboundMessage["channel"]) => Promise<AgentDocument | undefined>;
+  /** The region lab.toml gives a model endpoint, for a class with a residency rule. Absent, or null for an endpoint, means no region: such a class is refused. */
+  readonly endpointRegion?: (endpointId: string) => string | null;
 }
 
 export async function intake(msg: InboundMessage, deps: IntakeDeps): Promise<IntakeResult> {
@@ -105,10 +118,27 @@ export async function intakeTest(msg: InboundMessage, draft: AgentDocument, deps
 }
 
 async function admit(msg: InboundMessage, doc: AgentDocument, key: string, trigger: (member: string) => Trigger, deps: IntakeDeps): Promise<IntakeResult> {
-  const admitted = await gate(msg, deps.gate);
-  if (admitted.t === "refuse") return { t: "refused", userFacing: admitted.userFacing };
+  const { result: admitted, classification, policy } = await gateClassified(msg, deps.gate);
+  if (admitted.t === "refuse") return admitted.dataClass && admitted.text ? recordClassRefusal(msg, admitted.dataClass, admitted.text, admitted.userFacing, ruleText(classById(policy, admitted.dataClass.class)), policy, deps) : { t: "refused", userFacing: admitted.userFacing };
   const resolved = resolveAgent(doc, await deps.catalog());
   if (!resolved.ok) return { t: "refused", userFacing: `The agent cannot run: ${resolved.issues.map((i) => i.message).join("; ")}` };
+  if (classification && admitted.t === "admit") {
+    const rule = classById(policy, classification.class);
+    const endpointId = modelFor(resolved.agent, classification.level).endpointId;
+    const refusal = residencyRefusal(rule, classification, endpointId, deps.endpointRegion?.(endpointId) ?? null);
+    if (refusal) return recordClassRefusal(msg, classification, admitted.text, refusal, residencyRuleText(rule), policy, deps);
+    // A knowledge base at or above a residency class's level may hold that class, and a run that reads it moves to the
+    // model for the raised level. The snapshot carries a level, not a class, so this fails closed: that model's
+    // endpoint must be in the class's region before the run starts.
+    for (const c of policy.classes.filter((k) => k.residency !== null)) {
+      for (const kb of resolved.agent.knowledgeBases.filter((k) => rank(k.cls) >= rank(c.level))) {
+        const id = modelFor(resolved.agent, join(kb.cls, classification.level)).endpointId;
+        const held: Classification = { class: c.id, level: kb.cls, rule: `knowledge-base:${kb.kbId}`, spans: [] };
+        const r = residencyRefusal(c, held, id, deps.endpointRegion?.(id) ?? null);
+        if (r) return recordClassRefusal(msg, held, admitted.text, `${r.replace(/^Not sent\. Data class ([^;]+);/, `Not sent. Knowledge base ${kb.kbId} is at ${kb.cls} and may hold data class $1;`)}`, residencyRuleText(c), policy, deps);
+      }
+    }
+  }
   const hash = versionHash(resolved.agent);
   await deps.db.query("insert into agent_versions (hash, agent_id, body) values ($1, $2, $3) on conflict (hash) do nothing", [hash, resolved.agent.agentId, JSON.stringify(resolved.agent)]);
   const input = await deps.store.put(admitted.text);
@@ -124,9 +154,38 @@ async function admit(msg: InboundMessage, doc: AgentDocument, key: string, trigg
     input,
     history: [],
     studyId: null,
+    ...(classification ? { dataClass: { id: classification.class, rule: classification.rule, retentionDays: retentionOf(policy, classification.class) } } : {}),
   };
   const job = await deps.queue.enqueue({ kind: "run", key }, thread, payload);
   return { t: "enqueued", runId: job.id as RunId, agent: hash, duplicate: !job.created };
+}
+
+/**
+ * A class refused the message before any run: at the gate (model_tier none), or at intake because the agent's model
+ * endpoint is outside the class's residency. No run exists, so the audit stream is the record: the class, the rule, the detectors, and what the class's record mode keeps of the text.
+ */
+async function recordClassRefusal(msg: InboundMessage, c: Classification, text: Labelled<string>, userFacing: string, classRule: string, policy: Policy, deps: IntakeDeps): Promise<IntakeResult> {
+  const rule = classById(policy, c.class);
+  const kept: Extract<AuditEvent, { t: "gate.refused" }>["kept"] =
+    rule.record === "text" ? { t: "text", ref: await deps.store.put(text) }
+    : rule.record === "hash" ? { t: "hash", hash: deps.store.address(c.level, msg.text) }
+    : { t: "none" };
+  const row = await appendAudit(deps.db, `door:${msg.channel.surface}`, {
+    t: "gate.refused",
+    surface: msg.channel.surface,
+    channel: msg.channel.channelId,
+    thread: msg.threadId,
+    message: msg.messageId,
+    member: msg.platformUserId,
+    dataClass: c.class,
+    level: c.level,
+    rule: c.rule,
+    classRule,
+    detectors: [...new Set(c.spans.filter((s) => s.class === c.class).map((s) => s.detector))],
+    kept,
+    retentionDays: rule.retentionDays,
+  });
+  return { t: "refused", userFacing: `${userFacing} Recorded as audit event ${row.seq}.`, dataClass: { id: c.class, level: c.level, rule: c.rule, classRule, audit: row.seq } };
 }
 
 /** A run names a surface this deployment does not serve. Terminal, and no reply can be posted anywhere. */

@@ -7,6 +7,7 @@
 
 import { AgentUnavailable, LOOP_CONTRACT, versionHash, type Deployed, type ResolvedAgent } from "./agent.ts";
 import { RETRIEVAL_ALGORITHM } from "./kb.ts";
+import { anchorLoop, type AnchorSigner } from "./anchor.ts";
 import { boot, type Core } from "./boot.ts";
 import { runCompileJob } from "./kb-compile.ts";
 import { drive, type LoopDeps } from "./loop.ts";
@@ -59,6 +60,8 @@ export interface WorkerOptions {
   readonly agentSession?: LoopDeps["agentSession"];
   readonly agentClis?: ReadonlyMap<string, string>;
   readonly confinement?: Deployed["confinement"];
+  /** [anchor]: the worker signs a checkpoint of the chains now and every everyMs, alongside its jobs. */
+  readonly anchor?: { readonly signer: AnchorSigner; readonly everyMs: number };
 }
 
 const pgBlip = () => Object.assign(new Error("Connection terminated unexpectedly"), { code: "ECONNRESET" });
@@ -100,9 +103,11 @@ function withFault(journal: RunJournal, fault: Fault, blips: { left: number }, l
 
 export async function startWorker(configPath: string, opts: WorkerOptions): Promise<void> {
   const core = await boot(configPath, process.env, { tools: opts.tools ?? [] });
+  const anchoring = opts.anchor ? anchorLoop(core.db, opts.anchor.signer, opts.anchor.everyMs, opts.signal, opts.log) : null;
   try {
     await workOn(core, opts);
   } finally {
+    await anchoring;
     await core.close();
   }
 }
@@ -177,6 +182,7 @@ export async function workOn(core: Core, opts: WorkerOptions): Promise<void> {
         kb: core.kb,
         surfaces: core.surfaces,
         policy: core.config.policy,
+        classes: core.config.classes,
         loadAgent,
         deployed,
         clock: { now: () => Date.now() },

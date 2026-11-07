@@ -88,6 +88,7 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     channelFloor: async (c) => config.channelFloors[`${c.surface}:${c.channelId}`] ?? "D1",
     labPatterns: config.participantIdPatterns,
     policy: config.policy,
+    classes: config.classes,
   };
   return {
     config,
@@ -97,7 +98,7 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     http: createHttpEgress({ policy: config.policy, hosts: config.hosts }),
     catalog,
     agents,
-    intake: { db, store, queue: createQueue(db), gate, catalog, agentFor: async (channel) => (await publishedAgentFor(db, channel)) ?? agents[0] },
+    intake: { db, store, queue: createQueue(db), gate, catalog, agentFor: async (channel) => (await publishedAgentFor(db, channel)) ?? agents[0], endpointRegion: (id) => endpoints.get(id)?.region ?? null },
     fixtureSnapshots,
     registry,
     close: () => db.end(),

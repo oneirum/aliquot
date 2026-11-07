@@ -102,6 +102,14 @@ token_env = "ALIQUOT_STUDIO_TOKEN"
 # placement = "approved"
 # token_env = "ALIQUOT_SLACK_TOKEN"
 
+# Microsoft keeps every Teams message in the institution's own tenant, so a Teams surface may be institution at most,
+# never lab. Use approved instead when your institution has not approved Teams for D2 data.
+# docs/teams.md: the Azure app registration, the tenant admin's steps, and docker compose --profile teams up -d.
+# [surfaces.teams]
+# kind = "teams"
+# placement = "institution"
+# token_env = "ALIQUOT_TEAMS_TOKEN"
+
 [hosts]
 "api.openalex.org" = "public"            # a tool reaches only the hosts its manifest names; a host unlisted here is public (D0)
 "eutils.ncbi.nlm.nih.gov" = "public"     # pubmed_search
@@ -134,6 +142,15 @@ contact_email_env = "LABH_CONTACT_EMAIL"
 review_confidential = "refuse"           # or "lab-only"
 participant_id_patterns = ["\\bP-\\d{5}\\b"]   # anything matching is D3
 
+# Data classes on top of the five built-ins (public, internal, confidential, restricted, review-confidential).
+# See README "Data classes" and fixtures/policy/classes.toml for PHI, controlled-access and export-controlled examples.
+# [classes.phi]
+# model_tier = "none"          # hosted, local or none
+# record = "hash"              # what the record keeps of a refused message: text, hash or none
+# retention_days = 30
+# detectors = ["hipaa-safe-harbor"]
+# message = "This message carries a HIPAA identifier. Remove it, or ask the lab's honest broker."
+
 # An agent published in the studio answers in the channels it names (surface:channel, for example web:lab).
 # Until the router arrives, the fixture agent answers in every other channel. Knowledge bases come from fixtures.
 [agents]
@@ -141,3 +158,10 @@ fixtures = ["fixtures/agent.json"]
 
 [knowledge_bases]
 fixtures = ["fixtures/kb.json"]
+
+# Signed checkpoints of the audit stream and every run record, outside the database (docs/for-research-it-and-irb.md,
+# Anchors). The worker appends one line every every_minutes, signed with the Ed25519 key in the file LABH_ANCHOR_KEY_FILE
+# names, and needs --allow-fs-write for this path. aliquot init --anchor-key writes a key and this table.
+# [anchor]
+# path = "anchors.log"                 # relative to this file unless absolute; ship it to write-once storage
+# every_minutes = 15

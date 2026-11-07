@@ -13,6 +13,7 @@ import { AUTH_HEADERS, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
+import { buildPolicy, ceilingOfStore, MODEL_TIERS, RECORD_MODES, type Policy } from "./policy.ts";
 
 const placement = z.enum(PLACEMENTS);
 
@@ -53,7 +54,7 @@ const agentBackend = z.union([
   devLogin,
 ]);
 
-export const SURFACE_KINDS = ["web", "slack", "phone", "acp", "mcp", "studio"] as const;
+export const SURFACE_KINDS = ["web", "slack", "teams", "phone", "acp", "mcp", "studio"] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 export interface WebSurfaceConfig {
@@ -81,10 +82,11 @@ const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
 const webSurface = z
   .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
   .strict();
-const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
+const tokenSurface = z.object({ kind: z.enum(["slack", "teams", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
 
 const REFUSED_PLACEMENTS: Partial<Record<SurfaceKind, { readonly placements: readonly Placement[]; readonly why: string }>> = {
   slack: { placements: ["lab", "institution"], why: "Slack's servers keep a copy of every answer, so a Slack surface is placement approved at most" },
+  teams: { placements: ["lab"], why: "Microsoft keeps a copy of every Teams message in the institution's tenant, so a Teams surface is placement institution at most" },
 };
 
 function parseSurface(id: string, raw: unknown): SurfaceConfig {
@@ -135,6 +137,7 @@ const schema = z.object({
     z.object({
       base_url: z.string().url(),
       placement,
+      region: z.string().regex(/^[a-z]{2}$/, "a region is a two-letter country code, such as us").optional(),
       api_key_env: z.string().optional(),
       api_key_file: z.string().min(1).optional(),
       auth_header: z.enum(AUTH_HEADERS).optional(),
@@ -149,6 +152,23 @@ const schema = z.object({
   hosts: z.record(z.string(), placement).default({}),
   policy: z.object({ review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"), participant_id_patterns: z.array(z.string()).default([]) }).default({ review_confidential: "refuse", participant_id_patterns: [] }),
   agents: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
+  /** [classes.<id>]: the lab's data classes over the five built-ins (policy.ts). */
+  classes: z
+    .record(
+      z.string(),
+      z
+        .object({
+          level: z.enum(DATA_CLASSES).optional(),
+          model_tier: z.enum(MODEL_TIERS).optional(),
+          record: z.enum(RECORD_MODES).optional(),
+          retention_days: z.number().int().min(0).optional(),
+          residency: z.string().regex(/^[a-z]{2}$/, "residency is a two-letter country code, such as us").optional(),
+          detectors: z.array(z.string()).optional(),
+          message: z.string().trim().min(1).optional(),
+        })
+        .strict(),
+    )
+    .default({}),
   /**
    * "surface:channel" -> the class every message there starts at. Unlisted channels start at D1. Detectors only raise it.
    * A floor below D1 is allowed only for the channel [surfaces.web] channel binds, because anywhere else the sender names the channel.
@@ -174,6 +194,7 @@ const schema = z.object({
     .optional(),
   research: z.object({ contact_email_env: z.string().min(1).optional() }).strict().default({}),
   lab: z.object({ name: z.string().trim().min(1).optional() }).strict().default({}),
+  anchor: z.object({ path: z.string().min(1), every_minutes: z.number().int().positive().default(15) }).strict().optional(),
 });
 
 export interface LabConfig {
@@ -189,6 +210,8 @@ export interface LabConfig {
   readonly hosts: Readonly<Record<string, Placement>>;
   readonly policy: EgressPolicy;
   readonly participantIdPatterns: readonly RegExp[];
+  /** The data classes: the built-ins merged with [classes]. With no [classes] table, the behaviour before classes existed. */
+  readonly classes: Policy;
   /** Absolute paths. This build reads agents and knowledge bases from fixture files; the studio replaces the agent list. */
   readonly agentFixtures: readonly string[];
   readonly kbFixtures: readonly string[];
@@ -199,6 +222,8 @@ export interface LabConfig {
   readonly contactEmailEnv: string | null;
   /** [lab] name: what the web pages show as the lab's name, or null to show the machine's hostname. */
   readonly labName: string | null;
+  /** [anchor]: the append-only log signed checkpoints of the hash chains go to (absolute), and how often the worker writes one. */
+  readonly anchor: { readonly path: string; readonly everyMinutes: number } | null;
 }
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
@@ -233,6 +258,14 @@ export function parseConfig(text: string, path: string): LabConfig {
   const lowered = Object.entries(c.channel_floors).filter(([key, cls]) => rank(cls) < rank("D1") && key !== `web:${bound}`);
   if (lowered.length)
     throw new Error(`lab.toml: channel_floors ${lowered.map(([k]) => k).join(", ")} is below D1, which only the channel [surfaces.web] channel binds may be; the sender names any other channel`);
+  const egress: EgressPolicy = { reviewConfidential: c.policy.review_confidential };
+  const participantIdPatterns = c.policy.participant_id_patterns.map((p) => new RegExp(p));
+  const classes = buildPolicy(c.classes, egress, participantIdPatterns);
+  for (const k of classes.classes) {
+    if (k.modelTier !== "none" || k.record !== "text") continue;
+    const refusal = ceilingOfStore(k.level, c.store.placement, egress);
+    if (refusal) throw new Error(`lab.toml: [classes.${k.id}] has record = "text", but ${refusal}; use record = "hash" or "none"`);
+  }
   return {
     path,
     databaseUrlEnv: c.database.url_env,
@@ -241,6 +274,7 @@ export function parseConfig(text: string, path: string): LabConfig {
       id,
       baseUrl: e.base_url,
       placement: e.placement,
+      ...(e.region ? { region: e.region } : {}),
       ...(e.api_key_env ? { apiKeyEnv: e.api_key_env } : {}),
       ...(e.api_key_file ? { apiKeyFile: resolve(dir, e.api_key_file) } : {}),
       ...(e.auth_header ? { authHeader: e.auth_header } : {}),
@@ -264,8 +298,9 @@ export function parseConfig(text: string, path: string): LabConfig {
     web: surfaces[0],
     surfaces,
     hosts: Object.fromEntries(Object.entries(c.hosts).map(([h, p]) => [h.toLowerCase(), p])),
-    policy: { reviewConfidential: c.policy.review_confidential },
-    participantIdPatterns: c.policy.participant_id_patterns.map((p) => new RegExp(p)),
+    policy: egress,
+    participantIdPatterns,
+    classes,
     agentFixtures: c.agents.fixtures.map((f) => resolve(dir, f)),
     kbFixtures: c.knowledge_bases.fixtures.map((f) => resolve(dir, f)),
     channelFloors: c.channel_floors,
@@ -273,6 +308,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
+    anchor: c.anchor ? { path: resolve(dir, c.anchor.path), everyMinutes: c.anchor.every_minutes } : null,
   };
 }
 
