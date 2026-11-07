@@ -114,7 +114,7 @@ test("a run with no price prints its tokens and no price, never zero", () => {
   const table = formatUsageTable(rows, "project");
   assert.match(table, /^\(no project\) +1 +1 +5000 +700  no price$/m);
   assert.doesNotMatch(table, /0\.00/);
-  assert.match(formatUsageCsv(rows, "project"), /^\(no project\),1,1,5000,700,,,no price$/m);
+  assert.match(formatUsageCsv(rows, "project"), /^\(no project\),1,1,5000,700,,,,no price$/m);
 
   const v = recordView(runId(5), RUNS[4]!, config.prices);
   assert.deepEqual(v.summary.cost, { amounts: [], unpricedCalls: 1 });
@@ -128,6 +128,12 @@ test("the record summary shows the run's cost when lab.toml has prices, and noth
   const bare = recordView(runId(2), RUNS[1]!);
   assert.equal(bare.summary.cost, null);
   assert.doesNotMatch(formatRecordView(bare), /cost/);
+});
+
+test("a priced total under half a cent reads <0.01 in the table, and its exact amount in CSV, so it never looks free", () => {
+  const rows = usageRows(callsOf(run(8, "2026-10-05T00:00:00.000Z", "GRANT-A", "alice", [big(60, 30)])), config.prices, "project");
+  assert.match(formatUsageTable(rows, "project"), /^GRANT-A +1 +1 +60 +30  USD <0\.01$/m);
+  assert.match(formatUsageCsv(rows, "project"), /^GRANT-A,1,1,60,30,USD,0\.00,0\.000630,yes$/m);
 });
 
 test("by endpoint, member and agent group the same calls", () => {
@@ -203,7 +209,7 @@ function describeCli(): void {
     assert.deepEqual(out.brokenChains, []);
     const c = aliquot(["usage", "--from", "2026-10-01", "--to", "2026-10-31", "--by", "member", "--csv"]);
     assert.equal(c.status, 0, c.stderr);
-    assert.equal(c.stdout.split("\n")[0], "member,runs,calls,tokens_in,tokens_out,currency,amount,priced");
+    assert.equal(c.stdout.split("\n")[0], "member,runs,calls,tokens_in,tokens_out,currency,amount,amount_exact,priced");
   });
 
   test("aliquot usage refuses a bad range or grouping as a usage problem", () => {

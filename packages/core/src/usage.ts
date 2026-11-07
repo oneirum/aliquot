@@ -163,8 +163,14 @@ export function usageTotal(rows: readonly UsageRow[]): UsageRow {
   };
 }
 
+/** Cents, except that a cost below half a cent reads <0.01, so a priced call never looks free. */
+function centsCell(c: Cost): string | null {
+  if (!c.priced.size) return null;
+  return [...c.priced].map(([cur, u]) => `${cur} ${u > 0n && u < 5_000_000_000n ? "<0.01" : formatAmount(u, 2)}`).join(" + ");
+}
+
 function costCell(c: Cost): string {
-  const priced = formatCost(c, 2);
+  const priced = centsCell(c);
   if (!c.unpriced.calls) return priced ?? "-";
   const none = `no price for ${c.unpriced.calls} ${c.unpriced.calls === 1 ? "call" : "calls"}`;
   return priced ? `${priced}; ${none}` : "no price";
@@ -183,15 +189,19 @@ export function formatUsageTable(rows: readonly UsageRow[], by: GroupBy): string
 /** One row per group and currency; a group's unpriced tokens get their own row with an empty amount. */
 export function formatUsageCsv(rows: readonly UsageRow[], by: GroupBy): string {
   const q = (s: string) => (/[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s);
-  const out = [`${by},runs,calls,tokens_in,tokens_out,currency,amount,priced`];
+  const out = [`${by},runs,calls,tokens_in,tokens_out,currency,amount,amount_exact,priced`];
   for (const r of rows) {
-    for (const [cur, u] of r.cost.priced) out.push([q(r.key), r.runs, r.calls, r.input, r.output, cur, formatAmount(u, 2), "yes"].join(","));
-    if (r.cost.unpriced.calls) out.push([q(r.key), r.runs, r.cost.unpriced.calls, r.cost.unpriced.input, r.cost.unpriced.output, "", "", "no price"].join(","));
+    for (const [cur, u] of r.cost.priced) out.push([q(r.key), r.runs, r.calls, r.input, r.output, cur, formatAmount(u, 2), formatAmount(u, 6), "yes"].join(","));
+    if (r.cost.unpriced.calls) out.push([q(r.key), r.runs, r.cost.unpriced.calls, r.cost.unpriced.input, r.cost.unpriced.output, "", "", "", "no price"].join(","));
   }
   return out.join("\n");
 }
 
 export function usageJson(rows: readonly UsageRow[], by: GroupBy, range: { from: string; to: string }): unknown {
-  const cost = (c: Cost) => ({ priced: Object.fromEntries([...c.priced].map(([cur, u]) => [cur, formatAmount(u, 2)])), unpriced: c.unpriced });
+  const cost = (c: Cost) => ({
+    priced: Object.fromEntries([...c.priced].map(([cur, u]) => [cur, formatAmount(u, 2)])),
+    exact: Object.fromEntries([...c.priced].map(([cur, u]) => [cur, formatAmount(u, 6)])),
+    unpriced: c.unpriced,
+  });
   return { by, from: range.from, to: range.to, rows: rows.map((r) => ({ ...r, cost: cost(r.cost) })), total: (({ key: _, ...t }) => ({ ...t, cost: cost(t.cost) }))(usageTotal(rows)) };
 }
