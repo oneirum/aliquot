@@ -202,3 +202,14 @@ export function scopeKb(kb: KbReader, kbOf: (snapshot: SnapshotId) => string | u
     },
   };
 }
+
+/**
+ * A finished run's knowledge bases as its member may see them on `today`, for a page that reopens what the run read:
+ * an entry a DUA refuses the member now, once it expired included, does not open. knowledgeBases is the run's agent
+ * version's; null when it cannot be loaded, and then no snapshot opens at all while any DUA is declared.
+ */
+export function runKb(kb: KbReader, knowledgeBases: readonly { readonly kbId: string; readonly snapshot: SnapshotId }[] | null, duas: readonly Dua[], events: readonly StoredEvent[], today: string): KbReader {
+  if (!duas.length) return kb;
+  if (knowledgeBases === null) return { ...kb, has: async () => false };
+  return scopeKb(kb, (snapshot) => knowledgeBases.find((b) => b.snapshot === snapshot)?.kbId, duaAccess(duas, memberOf(events), today), []);
+}

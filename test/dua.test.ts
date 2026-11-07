@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseConfig } from "../packages/core/src/config.ts";
 import { DEFAULT_POLICY, Labelled } from "../packages/core/src/dataclass.ts";
-import { duaAccess, duaRefusal, type Dua } from "../packages/core/src/dua.ts";
+import { duaAccess, duaRefusal, runKb, type Dua } from "../packages/core/src/dua.ts";
+import { citedEntry } from "../packages/core/src/surfaces/web-source.ts";
 import { keyedAddresser } from "../packages/core/src/hash.ts";
 import { createKbReader, memorySnapshots, snapshotFromFixture } from "../packages/core/src/kb.ts";
 import type { RunEvent, RunId, Trigger } from "../packages/core/src/record.ts";
@@ -169,4 +170,18 @@ test("dataset_list and run_code follow the DUA: an unnamed member sees why, not 
   const ran = await call(ana, "run_code", { language: "python", code: "print(1)", datasets: ["cohort-visits"] });
   assert.deepEqual(ran.body, { mounted: ["cohort-visits"] }, "the member the DUA names gets the mount");
   assert.equal(ran.cls, "D3");
+});
+
+test("the chat's Source chip reopens a cited DUA entry only while the DUA admits the run's member", async () => {
+  const consent = release.entries.find((e) => e.path === "release/consent-groups.md")!;
+  const events = [
+    { event: { t: "run.started", trigger: member("ana@lab0.example") } },
+    { event: { t: "tool.completed", retrieved: [{ snapshot: release.snapshot.id, entries: [consent.hash], truncated: false }] } },
+  ] as never;
+  const kb = createKbReader(memorySnapshots([release]));
+  const open = (today: string, kbs: typeof env.knowledgeBases | null = env.knowledgeBases) => citedEntry(events, "release/consent-groups.md", runKb(kb, kbs, config.duas, events, today));
+  assert.equal((await open("2027-06-30")).t, "entry", "on the DUA's last day it opens");
+  assert.equal((await open("2027-07-01")).t, "missing", "after it expires it does not, though the run read it");
+  assert.equal((await open("2027-06-30", null)).t, "missing", "with the run's agent unknown, nothing opens while DUAs are declared");
+  assert.equal((await citedEntry(events, "release/consent-groups.md", runKb(kb, null, [], events, "2030-01-01"))).t, "entry", "a lab with no DUA reads as before");
 });

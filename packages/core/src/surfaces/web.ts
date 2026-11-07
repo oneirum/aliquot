@@ -57,6 +57,8 @@ import { SignOnRefused, type SignOn } from "./signon.ts";
 import { chatPage } from "./web-chat.ts";
 import { recordPage, runsPage, signInPage, type RunFilter, type RunListRow } from "./web-pages.ts";
 import { citedEntry, sourceChip, sourcePage, sourceStatus } from "./web-source.ts";
+import { runKb, utcDay } from "../dua.ts";
+import { loadVersion } from "../publish.ts";
 import { appAsset, appManifest, SERVICE_WORKER, type AssetDir } from "./web-app.ts";
 
 export const WEB_SURFACE = "web" as SurfaceId;
@@ -389,7 +391,10 @@ export function createWebHandler(
         if (runPath[2] === "source" || runPath[2] === "source.json") {
           const path = url.searchParams.get("path");
           if (!kb || !path) throw new HttpError(404, "not found");
-          const cited = await citedEntry(events, path, kb);
+          // Opened as the run's member may see it today, so an entry whose DUA has since expired no longer opens.
+          const started = events.find((e) => e.event.t === "run.started")?.event;
+          const agent = deps.duas?.length && started?.t === "run.started" ? await loadVersion(db, started.agent).catch(() => null) : null;
+          const cited = await citedEntry(events, path, runKb(kb, agent?.knowledgeBases ?? null, deps.duas ?? [], events, utcDay(Date.now())));
           // Sign-on off, the door cannot tell who is asking, so it shows what any member may see.
           const role: Role = viewer.t === "member" ? viewer.role : "member";
           if (runPath[2] === "source.json") return send(req, res, 200, sourceChip(cited, role), NO_STORE);
