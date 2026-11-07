@@ -15,7 +15,7 @@
 
 import { z } from "zod";
 import { resolveAgent, versionHash, type AgentDocument, type Catalog } from "./agent.ts";
-import { decideEgress, type DataClass, type EgressPolicy, type Labelled, type Placement, type SurfaceId } from "./dataclass.ts";
+import { decideEgress, MARKS, type DataClass, type EgressPolicy, type Labelled, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { gate, type GateDeps, type InboundMessage } from "./gate.ts";
 import type { AgentVersionHash } from "./hash.ts";
@@ -29,7 +29,8 @@ export type IntakeResult =
   | { readonly t: "ignored"; readonly reason: "watched-no" | "own-message" }
   | { readonly t: "refused"; readonly userFacing: string };
 
-const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number() });
+const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number(), marks: z.array(z.enum(MARKS)).optional() });
+type RefJson = z.infer<typeof ref>;
 
 /** What a run job carries. Written by intake, read by drive() to write run.started. */
 export const runJobPayloadSchema = z.object({
@@ -76,7 +77,7 @@ export function parseRunJobPayload(json: unknown): RunJobPayload {
   const parsed = runJobPayloadSchema.safeParse(json);
   if (!parsed.success) throw new MalformedJob(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const p = parsed.data;
-  const ref = (r: { hash: string; cls: string; bytes: number }): PayloadRef => ({ hash: r.hash as PayloadRef["hash"], cls: r.cls as DataClass, bytes: r.bytes });
+  const ref = (r: RefJson): PayloadRef => ({ hash: r.hash as PayloadRef["hash"], cls: r.cls as DataClass, bytes: r.bytes, ...(r.marks?.length ? { marks: r.marks } : {}) });
   return { ...p, agent: p.agent as AgentVersionHash, thread: p.thread as ThreadKey, input: ref(p.input), history: p.history.map(ref) };
 }
 

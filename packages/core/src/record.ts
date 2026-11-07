@@ -21,7 +21,7 @@
 
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import type { Db } from "./db.ts";
-import { decideEgress, describeRefusal, join, Labelled, type DataClass, type EgressPolicy, type EgressRefusal, type Placement } from "./dataclass.ts";
+import { decideEgress, describeRefusal, join, Labelled, type DataClass, type EgressPolicy, type EgressRefusal, type Mark, type Placement } from "./dataclass.ts";
 import { canonicalJson, keyedAddresser, sha256, type Addresser, type AgentVersionHash, type EntryHash, type PayloadHash, type Sha256, type SnapshotId, type ToolHash } from "./hash.ts";
 import type { RouteDecision } from "./router.ts";
 import type { ModelTarget } from "./gateway.ts";
@@ -35,6 +35,8 @@ export interface PayloadRef {
   readonly hash: PayloadHash;
   readonly cls: DataClass;
   readonly bytes: number;
+  /** Present only when the content carries marks, so a ref without them is the ref every older record has. */
+  readonly marks?: readonly Mark[];
 }
 
 export type Trigger =
@@ -357,6 +359,8 @@ const GCM_TAG_BYTES = 16;
 /** HKDF info for the cipher subkey. Fixed for the life of the data; the address subkey's is in hash.ts. */
 const CIPHER_INFO = "labh:payload:cipher:v1";
 
+const aadOf = (hash: string, marks: readonly Mark[]) => (marks.length ? `${hash}\n${marks.join(",")}` : hash);
+
 export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
   if (config.key.length !== 32) throw new Error("payload key must be 32 bytes");
   const cipherKey = Buffer.from(hkdfSync("sha256", config.key, "", CIPHER_INFO, 32));
@@ -369,10 +373,13 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
       const plaintext = Buffer.from(canonicalJson(content.value), "utf8");
       // Keyed: the address is in events that leave the store (the run record, the web API), so an unkeyed
       // digest would let anyone confirm a guessed body (a participant id) against it.
-      const hash = address(content.cls, content.value) as string as PayloadHash;
+      // Marks are part of the address and of the cipher's associated data, so a ref whose marks were removed names no
+      // row, or fails to decrypt: the content cannot come back out of the store under fewer rules than it went in.
+      const marks = content.marks.length ? content.marks : null;
+      const hash = address(marks ? `${content.cls}+${marks.join(",")}` : content.cls, content.value) as string as PayloadHash;
       const nonce = randomBytes(12);
       const cipher = createCipheriv("aes-256-gcm", cipherKey, nonce);
-      cipher.setAAD(Buffer.from(hash));
+      cipher.setAAD(Buffer.from(aadOf(hash, marks ?? [])));
       const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
       // The same bytes at the same class are one row already; at another class the address differs.
       await db.query(
@@ -380,7 +387,7 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
          on conflict (hash) do nothing`,
         [hash, content.cls, ciphertext, nonce, config.keyId, plaintext.length],
       );
-      return { hash, cls: content.cls, bytes: plaintext.length };
+      return { hash, cls: content.cls, bytes: plaintext.length, ...(marks ? { marks } : {}) };
     },
     async get(ref) {
       const res = await db.query<{ cls: DataClass; ciphertext: Buffer | null; nonce: Buffer | null; key_id: string | null }>(
@@ -393,10 +400,10 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
       if (!row.ciphertext || !row.nonce) return { redacted: true, hash: ref.hash, cls: ref.cls };
       if (row.key_id !== config.keyId) throw new PayloadUnavailable(ref.hash, "key-mismatch");
       const decipher = createDecipheriv("aes-256-gcm", cipherKey, row.nonce);
-      decipher.setAAD(Buffer.from(ref.hash));
+      decipher.setAAD(Buffer.from(aadOf(ref.hash, ref.marks ?? [])));
       decipher.setAuthTag(row.ciphertext.subarray(row.ciphertext.length - GCM_TAG_BYTES));
       const plaintext = Buffer.concat([decipher.update(row.ciphertext.subarray(0, row.ciphertext.length - GCM_TAG_BYTES)), decipher.final()]);
-      return Labelled.stamp(JSON.parse(plaintext.toString("utf8")) as unknown, ref.cls, `store:${ref.hash}`);
+      return Labelled.stamp(JSON.parse(plaintext.toString("utf8")) as unknown, ref.cls, `store:${ref.hash}`, ref.marks ?? []);
     },
     async sweepRetention() {
       throw new Error("retention sweep is not part of this build");

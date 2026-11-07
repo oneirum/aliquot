@@ -29,6 +29,7 @@ import { boot } from "../packages/core/src/boot.ts";
 import { loadConfig } from "../packages/core/src/config.ts";
 import { loadEvents, verifyChain, type PayloadRef, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { startFakeModel } from "../test/fake-model.ts";
+import { startFakeAzureOpenAI, startFakeBedrock, TEST_AWS } from "../test/fake-cloud.ts";
 import { freshDatabase } from "../test/db.ts";
 import type { ProbeReport } from "../test/plants/probe.ts";
 import { describe, PLANTS, plantedOverlay, scanBoundaries } from "./boundaries.ts";
@@ -485,6 +486,68 @@ try {
       return `fetch taken at module load inside a planted kb_search: 3 tool.failed thrown ("network is sealed"), run answered, hosted requests ${before} -> ${hosted.requests}; probe tool: ${report.refused.length} routes refused, 0 leaked, permission model denies child, worker and addon`;
     } finally {
       await core.close();
+    }
+  });
+
+  await check("check 13: campus contracts: Azure OpenAI and Bedrock answer with a citation; PHI and export-controlled content never reach the wrong endpoint", async () => {
+    const BEDROCK_MODEL = "us.anthropic.claude-opus-5-5-v1:0";
+    const azure = await startFakeAzureOpenAI({ deployment: "gpt-4o", apiVersion: "2024-10-21", apiKey: "azure-slice-key", modelId: "gpt-4o-2024-11-20" });
+    const bedrock = await startFakeBedrock({ region: "us-east-1", models: [BEDROCK_MODEL, "anthropic.claude-opus-5-5-v1:0"] });
+    // Its own process set: check 8 asserts the shared worker env holds no hosted credential, and these are hosted.
+    const cloud = processes(root, work, { ...childEnv, AZURE_OPENAI_API_KEY: "azure-slice-key", AWS_ACCESS_KEY_ID: TEST_AWS.accessKeyId, AWS_SECRET_ACCESS_KEY: TEST_AWS.secretAccessKey });
+    const endpointLines = [
+      "[endpoints.azure]", `base_url = "${azure.url}/openai/deployments/gpt-4o"`, 'placement = "institution"', 'api_version = "2024-10-21"', 'auth_header = "api-key"', 'api_key_env = "AZURE_OPENAI_API_KEY"', 'models = ["gpt-4o-2024-11-20"]', "baa = true", 'region = "us"',
+      "[endpoints.azure-nobaa]", `base_url = "${azure.url}/openai/deployments/gpt-4o"`, 'placement = "institution"', 'api_version = "2024-10-21"', 'auth_header = "api-key"', 'api_key_env = "AZURE_OPENAI_API_KEY"', 'models = ["gpt-4o-2024-11-20"]', 'region = "us"',
+      "[endpoints.bedrock]", `base_url = "${bedrock.url}"`, 'placement = "institution"', 'protocol = "bedrock-converse"', 'aws_region = "us-east-1"', `models = ["${BEDROCK_MODEL}"]`, "baa = true", 'region = "us"',
+      "[endpoints.bedrock-eu]", `base_url = "${bedrock.url}"`, 'placement = "institution"', 'protocol = "bedrock-converse"', 'aws_region = "eu-west-1"', 'models = ["anthropic.claude-opus-5-5-v1:0"]', "baa = true", 'region = "eu"',
+    ];
+    const cloudConfig = (name: string, endpointId: string, modelId: string): string => {
+      const path = config(`cloud-${name}`, {}, agentFixture(`cloud-${name}`, { model: { endpointId, modelId, params: { temperature: 0, maxOutputTokens: 512 } } }));
+      writeFileSync(path, readFileSync(path, "utf8").replace("[surfaces.web]", `${endpointLines.join("\n")}\n[surfaces.web]`));
+      return path;
+    };
+    const ask = async (name: string, endpointId: string, modelId: string, text: string) => {
+      const cfg = cloudConfig(name, endpointId, modelId);
+      const web = await cloud.startWeb(cfg);
+      cloud.startWorker(cfg, `W13-${name}`);
+      const { runId } = await sendMessage(web.base, `t13-${name}`, `m13-${name}`, text);
+      const events = await waitForFinish(runId, 30000);
+      const posted = await replies(runId);
+      await cloud.stopAll();
+      return { events, reply: posted[0]?.text ?? "" };
+    };
+    try {
+      const cited: string[] = [];
+      for (const [name, endpointId, modelId, fake] of [["azure", "azure", "gpt-4o-2024-11-20", azure], ["bedrock", "bedrock", BEDROCK_MODEL, bedrock]] as const) {
+        const before = fake.paths.length;
+        const { events, reply } = await ask(name, endpointId, modelId, "What are the office hours?");
+        assert.deepEqual(finishedOutcome(events), ["answered"], `${name}: ${reply}`);
+        const source = /\n\s*Source:\s*(\S+)\s*$/.exec(reply)?.[1];
+        assert.ok(source, `${name} answered with a citation: ${reply}`);
+        assert.equal(fake.paths.length - before, 3, `${name}: search, read, answer`);
+        assert.equal(fake.rejected, 0, `${name}: every request authenticated (api-key, SigV4)`);
+        cited.push(`${name} -> Source: ${source}`);
+      }
+      const refusals: string[] = [];
+      for (const [name, endpointId, modelId, fake, text, code, rule] of [
+        ["azure-nobaa", "azure-nobaa", "gpt-4o-2024-11-20", azure, "PHI: did the visit note for MRN 0012345 change the dose?", "phi-needs-baa", /business associate agreement, and azure-nobaa is not marked baa = true/],
+        ["bedrock-eu", "bedrock-eu", "anthropic.claude-opus-5-5-v1:0", bedrock, "EXPORT CONTROLLED: what does the rig drawing show?", "export-needs-us", /in the US, and bedrock-eu is in region eu/],
+      ] as const) {
+        const before = fake.paths.length;
+        const { events, reply } = await ask(name, endpointId, modelId, text);
+        assert.deepEqual(finishedOutcome(events), ["refused"]);
+        const refused = events.find((e) => e.event.t === "egress.refused")?.event;
+        assert.ok(refused && refused.t === "egress.refused" && refused.refusal.code === code, JSON.stringify(refused));
+        assert.equal(events.some((e) => e.event.t === "model.requested"), false, "no model.requested was journaled");
+        assert.equal(fake.paths.length, before, `${name}: zero requests on the wire`);
+        assert.match(reply, rule, "the reply names the rule");
+        refusals.push(`${name} -> ${code}, requests ${before} -> ${fake.paths.length}`);
+      }
+      return `${cited.join("; ")}; ${refusals.join("; ")}`;
+    } finally {
+      await cloud.stopAll();
+      await azure.close();
+      await bedrock.close();
     }
   });
 

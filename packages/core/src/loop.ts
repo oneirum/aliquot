@@ -19,7 +19,7 @@
  */
 
 import { AgentUnavailable, instructionsOf, modelFor, UnrunnableAgent, verifyRunnable, type Deployed, type ResolvedAgent } from "./agent.ts";
-import { Labelled, type EgressPolicy } from "./dataclass.ts";
+import { describeRefusal, Labelled, type EgressPolicy, type EgressRefusal } from "./dataclass.ts";
 import { MalformedJob, parseRunJobPayload, postReply, SurfaceUnknown, type Surface } from "./frontdoor.ts";
 import { Prompt, type ChatPart, type ModelGateway } from "./gateway.ts";
 import type { AgentVersionHash } from "./hash.ts";
@@ -201,6 +201,16 @@ const NOTICES: Record<Notice, string> = {
 };
 
 /**
+ * A refusal by a mark's rule names the rule, so the member knows which endpoint to ask for, not only that it was
+ * refused. The sentence names an endpoint id and a mark, never the content, so the notice stays D0.
+ */
+function noticeText(notice: Notice, refusal: EgressRefusal | null): string {
+  if (notice !== "refused" || !refusal || (refusal.code !== "phi-needs-baa" && refusal.code !== "export-needs-us")) return NOTICES[notice];
+  const rule = describeRefusal(refusal);
+  return `${NOTICES.refused} ${rule[0]!.toUpperCase()}${rule.slice(1)}.`;
+}
+
+/**
  * The shell. Writes run.started from the job on first claim, loads the agent
  * by hash, then loops fold -> next -> execute until finish or park. Each
  * execute writes its requested event before IO and its terminal event after,
@@ -288,7 +298,7 @@ export async function drive(job: LeasedJob, journal: RunJournal, deps: LoopDeps)
           if (action.body.t === "answer") {
             const body = await journal.get(action.body.ref);
             answer = Labelled.derive(String(body.value), [body], "loop:answer");
-          } else answer = Labelled.stamp(NOTICES[action.body.notice], "D0", "loop:notice");
+          } else answer = Labelled.stamp(noticeText(action.body.notice, state.refused), "D0", "loop:notice");
           await postNotice(known, state, answer, journal, deps);
           return null;
         }

@@ -9,7 +9,7 @@
  * - R content under policy "refuse" is refused here and stored only as a hash.
  */
 
-import { join, Labelled, type DataClass, type EgressPolicy } from "./dataclass.ts";
+import { join, Labelled, unionMarks, type DataClass, type EgressPolicy, type Mark } from "./dataclass.ts";
 import type { MemberId, Audience } from "./agent.ts";
 
 export interface ChannelRef {
@@ -30,7 +30,7 @@ export interface InboundMessage {
   readonly at: string;
 }
 
-export type DetectionKind = "ssn" | "mrn" | "dob" | "phone" | "email" | "participant-id" | "review-marker";
+export type DetectionKind = "ssn" | "mrn" | "dob" | "phone" | "email" | "participant-id" | "review-marker" | "phi-marker" | "export-marker" | "cui-marker";
 
 export interface Detection {
   readonly kind: DetectionKind;
@@ -46,7 +46,23 @@ const DETECTORS: readonly { readonly kind: DetectionKind; readonly cls: DataClas
   { kind: "phone", cls: "D2", pattern: /\b(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g },
   { kind: "email", cls: "D2", pattern: /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g },
   { kind: "review-marker", cls: "R", pattern: /\bREVIEW[- ]CONFIDENTIAL\b/gi },
+  // Handling banners. Case-sensitive where the lowercase word is ordinary ("phi" the letter, "cui" in Romanian).
+  { kind: "phi-marker", cls: "D3", pattern: /\bPHI\b/g },
+  { kind: "export-marker", cls: "D2", pattern: /\bITAR\b|\bEXPORT[- ]CONTROLLED\b/gi },
+  { kind: "cui-marker", cls: "D2", pattern: /\bCUI\b/g },
 ];
+
+/**
+ * The stand-in for "what regime is this content under". A medical record number or a date of birth is a HIPAA
+ * identifier that only a health record carries, so either marks PHI, as does a PHI banner. This is the seam
+ * aliquot-policy fills: its classify() class phi maps to the mark phi, export-controlled to export-controlled, cui
+ * to cui, and this function goes.
+ */
+const MARK_OF: Partial<Record<DetectionKind, Mark>> = { mrn: "phi", dob: "phi", "phi-marker": "phi", "export-marker": "export-controlled", "cui-marker": "cui" };
+
+export function marksOf(detections: readonly Detection[]): readonly Mark[] {
+  return unionMarks(detections.flatMap((d) => (MARK_OF[d.kind] ? [MARK_OF[d.kind]!] : [])));
+}
 
 export type GateResult =
   | {
@@ -90,5 +106,5 @@ export async function gate(msg: InboundMessage, deps: GateDeps): Promise<GateRes
     return { t: "refuse", reason: "review-confidential", userFacing: "This message carries review-confidential content, which this lab does not let agents read." };
   }
   const origin = detections.length ? `gate:${detections.map((d) => d.kind).join(",")}` : `gate:floor`;
-  return { t: "admit", member: member.id, audiences: member.audiences, cls, detections, text: Labelled.stamp(msg.text, cls, origin) };
+  return { t: "admit", member: member.id, audiences: member.audiences, cls, detections, text: Labelled.stamp(msg.text, cls, origin, marksOf(detections)) };
 }

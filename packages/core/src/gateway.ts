@@ -11,9 +11,10 @@
  *   5. returned model id !== target.modelId  -> refused-model-mismatch (refuse, never swap)
  *   6. recorder.record(model.completed | model.failed)
  *
- * Three wire protocols, chosen per endpoint: OpenAI-compatible chat completions
- * (OpenRouter, Ollama, vLLM and most institution-hosted servers), Anthropic
- * Messages and OpenAI Responses. The body mappings are pure functions in
+ * Four wire protocols, chosen per endpoint: OpenAI-compatible chat completions
+ * (OpenRouter, Ollama, vLLM, Azure OpenAI and most institution-hosted servers),
+ * Anthropic Messages (also Claude in Microsoft Foundry), OpenAI Responses and
+ * Bedrock Converse, signed with SigV4 here. The body mappings are pure functions in
  * gateway-wire.ts; callers see Prompt, ModelResult and Distribution only.
  */
 
@@ -22,6 +23,7 @@ import { describeFailure, type CallFailure, type CallRecorder, type ToolCallRef 
 import { ADAPTERS, type Protocol, type WireCompletion } from "./gateway-wire.ts";
 import { readFile } from "node:fs/promises";
 import { platformFetch } from "./seal.ts";
+import { signV4, type AwsCredentials } from "./sigv4.ts";
 
 export type ExactModelId = string & { readonly __exactModel: true };
 
@@ -60,6 +62,33 @@ export interface ModelEndpoint {
   readonly protocol?: Protocol;
   /** Send temperature and top_p. Absent: sent on openai-chat, not sent on the native protocols, whose current models refuse them. */
   readonly sampling?: boolean;
+  /** PHI may come here: a business associate agreement covers it, or the covered entity runs it. Absent: false. */
+  readonly baa?: boolean;
+  /** Where the vendor keeps the data ("us", "eu"). Absent: unknown, which export-controlled and CUI content treat as not us. */
+  readonly region?: string;
+  /** Azure OpenAI deployment URLs: sent as ?api-version= on every request. */
+  readonly apiVersion?: string;
+  /** bedrock-converse: the AWS region it signs for and the env vars holding the keys. */
+  readonly aws?: { readonly region: string; readonly accessKeyIdEnv: string; readonly secretAccessKeyEnv: string; readonly sessionTokenEnv: string };
+}
+
+/**
+ * Where a call's data is kept: the region lab.toml declares, unless the model id says otherwise. A Bedrock
+ * cross-region inference profile names its geography in the id's prefix and may serve the request from any region
+ * in it (docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html), so a prefix that is not the
+ * declared region, global. above all, makes the region unknown. A prefix never supplies a region the lab did not declare.
+ */
+export function regionOf(e: Pick<ModelEndpoint, "region" | "protocol">, modelId: string): string | null {
+  const declared = e.region ?? null;
+  if (e.protocol !== "bedrock-converse") return declared;
+  const prefix = /^(us-gov|us|eu|apac|jp|au|global)\./.exec(modelId)?.[1];
+  if (!prefix) return declared;
+  return (prefix === "us-gov" ? "us" : prefix) === declared ? declared : null;
+}
+
+/** The destination a call to target goes to: its placement, contract and region from lab.toml. */
+export function modelDestination(e: ModelEndpoint, modelId: string): ModelDestination {
+  return { kind: "model", endpointId: e.id, placement: e.placement, baa: e.baa ?? false, region: regionOf(e, modelId) };
 }
 
 export interface ToolSpec {
@@ -213,8 +242,18 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
       throw new GatewayError("network", `api_key_file ${e.apiKeyFile} could not be read (${(err as NodeJS.ErrnoException).code ?? "error"})`, true);
     }
   };
+  const awsCredentials = (e: ModelEndpoint): AwsCredentials => {
+    const a = e.aws!;
+    const accessKeyId = process.env[a.accessKeyIdEnv];
+    const secretAccessKey = process.env[a.secretAccessKeyEnv];
+    // Not retryable: the same environment gives the same answer.
+    if (!accessKeyId || !secretAccessKey) throw new GatewayError("network", `${a.accessKeyIdEnv} and ${a.secretAccessKeyEnv} must both be set to sign for Bedrock`, false);
+    const sessionToken = process.env[a.sessionTokenEnv];
+    return { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
+  };
   const headers = async (e: ModelEndpoint): Promise<Record<string, string>> => {
     const h: Record<string, string> = { "content-type": "application/json" };
+    if (e.protocol === "bedrock-converse") return h;
     if (e.protocol === "anthropic-messages") h["anthropic-version"] = "2023-06-01";
     const key = await keyOf(e);
     if (!key) return h;
@@ -223,18 +262,25 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
     else h[shape] = key;
     return h;
   };
-  const urlOf = (e: ModelEndpoint, path: string) => `${e.baseUrl.replace(/\/$/, "")}${path}`;
+  const urlOf = (e: ModelEndpoint, path: string) => {
+    const url = `${e.baseUrl.replace(/\/$/, "")}${path}`;
+    return e.apiVersion ? `${url}${url.includes("?") ? "&" : "?"}api-version=${encodeURIComponent(e.apiVersion)}` : url;
+  };
 
   /** The provider client. The only place a request leaves for a model, and it needs the route the egress decision produced. */
   const send = async (route: AuthorizedRoute, target: ModelTarget, prompt: Prompt, signal: AbortSignal): Promise<WireCompletion> => {
     const e = endpointOf(route.endpointId);
     const adapter = ADAPTERS[e.protocol ?? "openai-chat"];
-    const sendHeaders = await headers(e);
+    const url = urlOf(e, adapter.completionPath(target));
+    const body = JSON.stringify(adapter.request(target, prompt, e));
     let res: Response;
     try {
+      const plain = await headers(e);
+      const sendHeaders = e.protocol === "bedrock-converse" ? signV4({ method: "POST", url: new URL(url), headers: plain, body, region: e.aws!.region, service: "bedrock", credentials: awsCredentials(e), now: new Date() }) : plain;
       // Never followed: Node's fetch replays the body and x-api-key across a 307 to another origin.
-      res = await fetchImpl(urlOf(e, adapter.completionPath), { method: "POST", headers: sendHeaders, body: JSON.stringify(adapter.request(target, prompt, e)), signal, redirect: "manual" });
+      res = await fetchImpl(url, { method: "POST", headers: sendHeaders, body, signal, redirect: "manual" });
     } catch (err) {
+      if (err instanceof GatewayError) throw err;
       const aborted = (err as { name?: string }).name === "AbortError" || signal.aborted;
       throw aborted ? new GatewayError("aborted", null, true) : new GatewayError("network", (err as Error).message, true);
     }
@@ -255,7 +301,7 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
   return {
     async complete(target, prompt, rec, opts) {
       const e = endpointOf(target.endpointId);
-      const destination = { kind: "model", endpointId: e.id, placement: e.placement } as const;
+      const destination = modelDestination(e, target.modelId);
       if (!Prompt.is(prompt)) {
         const refusal = { code: "unlabelled" } as const;
         await rec.record({ t: "egress.refused", destination: `model:${e.id}`, payload: "unverified", refusal });
@@ -330,7 +376,8 @@ export function createGateway(endpoints: readonly ModelEndpoint[], policy: Egres
     admit(content, backendId) {
       const b = backends.get(backendId);
       if (!b) throw new Error(`agent backend ${backendId} is not configured`);
-      return decideEgress(content, { kind: "model", endpointId: b.id, placement: b.placement }, policy);
+      // An agent CLI has no baa or region in lab.toml yet, so PHI and export-controlled content go to one only on lab hardware.
+      return decideEgress(content, { kind: "model", endpointId: b.id, placement: b.placement, baa: false, region: null }, policy);
     },
   };
 }

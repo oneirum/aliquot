@@ -31,7 +31,7 @@ import { extname, join as joinPath } from "node:path";
 import { z } from "zod";
 import { parseExactModelId } from "./agent.ts";
 import { appendAudit, auditRecorder, type AuditEvent, type CallContext } from "./audit.ts";
-import { DATA_CLASSES, join, Labelled, type DataClass, type EgressRefusal } from "./dataclass.ts";
+import { DATA_CLASSES, join, Labelled, MARKS, type DataClass, type EgressRefusal } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { classifyText } from "./gate.ts";
 import { describeOutcome, Prompt, type ExactModelId, type ModelGateway, type ModelResult, type ModelTarget } from "./gateway.ts";
@@ -296,7 +296,7 @@ export async function requestCompile(deps: { readonly queue: Queue; readonly sto
   return { jobId: r.id, key, created: r.created };
 }
 
-const refSchema = z.object({ hash: z.string(), cls: z.enum(DATA_CLASSES), bytes: z.number() });
+const refSchema = z.object({ hash: z.string(), cls: z.enum(DATA_CLASSES), bytes: z.number(), marks: z.array(z.enum(MARKS)).optional() });
 const compileJobSchema = z.object({
   definition: z.object({
     kbId: z.string(),

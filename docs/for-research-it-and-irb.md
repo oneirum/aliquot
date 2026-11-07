@@ -118,6 +118,44 @@ ceiling for a personal subscription. What a member types into their own tool bef
 tool's terms, not Aliquot's. The lab's data-handling rules have to cover it. Aliquot cannot prevent a member from
 copying text by hand from a page they are allowed to read.
 
+Each model endpoint in `lab.toml` also records the contract it runs under. Two fields decide where content under a
+legal regime may go, on top of its class:
+
+| Field | Values | Default | What it decides |
+|---|---|---|---|
+| `placement` | `lab`, `institution`, `approved`, `zdr`, `public` | none (required) | The highest class the endpoint may receive (the table above) |
+| `baa` | `true`, `false` | `false` | Whether PHI may go there. `true` records that a business associate agreement covers the endpoint, or that the covered entity runs it. Aliquot does not check the agreement exists. |
+| `region` | a lowercase code, such as `us` or `eu` | unknown | Where the vendor keeps the data. Export-controlled and CUI content go only to `us`; unknown counts as outside the US. |
+
+What marks content today is a stand-in until the data classification policy layer lands: the same patterns
+(`marksOf` in `packages/core/src/gate.ts`) run over each message at the gate and over each knowledge base's entries
+when it loads.
+
+| Mark | Set by | Rule at a model endpoint off lab hardware | Refusal code |
+|---|---|---|---|
+| PHI | an MRN, a date of birth, or a `PHI` banner (also raises the message to D3) | refused unless `baa = true` | `phi-needs-baa` |
+| Export-controlled | `ITAR` or `EXPORT CONTROLLED` (raises to D2) | refused unless `region = "us"` | `export-needs-us` |
+| CUI | a `CUI` banner (raises to D2) | refused unless `region = "us"` | `export-needs-us` |
+
+PHI is D3, so it reaches only `lab` and `institution` placements in any case; `baa` decides which institution
+endpoints. Lab hardware needs neither field, because no third party holds the content there. A mark stays on
+everything derived from the content, like the class, and is stored with it: a stored payload's marks are part of its
+address and of its encryption's associated data, so a record entry stripped of its marks does not decrypt. A refusal
+happens before any request leaves, is recorded as `egress.refused` with its code, and the chat reply, the Slack reply
+and the record page each name the rule. For Bedrock, a model id's inference-profile prefix that disagrees with the
+declared region makes the region unknown: a `global.` profile may run in any region, so it is never treated as `us`. Hosted agent
+CLIs (Claude Code, Codex) have no `baa` or `region` yet, so marked content reaches one only on lab hardware.
+
+Anthropic's BAA covers its first-party API and Claude in Microsoft Foundry, with 30-day retention for Covered
+Models ([Anthropic](https://privacy.anthropic.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers)).
+Microsoft becomes a business associate when a covered entity uses Azure
+([Microsoft](https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us)). Amazon Bedrock is on
+AWS's list of HIPAA-eligible services ([AWS](https://aws.amazon.com/compliance/hipaa-eligible-services-reference/)).
+Aliquot reaches Azure OpenAI through `openai-chat` (a deployment URL with `api_version`, or the v1 URL), Claude in
+Foundry through `anthropic-messages`, and Bedrock through `bedrock-converse`, which signs each request with AWS
+Signature Version 4 in Aliquot's own code (`packages/core/src/sigv4.ts`, checked against AWS's published test
+vectors), so no AWS SDK runs in the worker.
+
 ### Tools
 
 Aliquot runs eleven built-in tools, all part of its own code: knowledge base search and read, seven literature tools
@@ -179,5 +217,9 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
   separate user, a container or a VM).
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.
 - **IRB and consent checks against knowledge base sources are not built.**
+- **PHI, export-controlled and CUI marks are found by the same patterns as classes.** Messages and knowledge bases
+  are marked (a knowledge base carries every mark any of its entries has, found from the entry text when it loads).
+  A dataset read by `run_code` is not, so a dataset of PHI is guarded by its class alone. The data classification
+  policy layer replaces the patterns with the lab's own classes.
 
 Aliquot has been tested on a synthetic lab with synthetic data. It has not yet been used by a real lab.

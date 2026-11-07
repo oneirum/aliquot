@@ -143,6 +143,13 @@ const schema = z.object({
       logprobs: z.boolean().default(false),
       protocol: z.enum(PROTOCOLS).default("openai-chat"),
       sampling: z.boolean().optional(),
+      baa: z.boolean().default(false),
+      region: z.string().regex(/^[a-z]{2,8}$/, "region is a lowercase code such as us or eu").optional(),
+      api_version: z.string().min(1).optional(),
+      aws_region: z.string().regex(/^[a-z]{2}(-[a-z]+)+-\d+$/, "aws_region is an AWS region such as us-east-1").optional(),
+      aws_access_key_id_env: z.string().min(1).default("AWS_ACCESS_KEY_ID"),
+      aws_secret_access_key_env: z.string().min(1).default("AWS_SECRET_ACCESS_KEY"),
+      aws_session_token_env: z.string().min(1).default("AWS_SESSION_TOKEN"),
     }),
   ),
   surfaces: z.record(z.string(), z.unknown()).default({}),
@@ -219,6 +226,19 @@ export function parseConfig(text: string, path: string): LabConfig {
     if ("api_key_env" in e && "api_key_file" in e) fail("names both api_key_env and api_key_file; the key comes from one of them");
     if ("auth_header" in e && !AUTH_HEADERS.includes(e.auth_header as never)) fail(`auth_header must be one of ${AUTH_HEADERS.join(", ")}`);
     if (Array.isArray(e.models) && e.models.length === 0) fail("has models = [], so it serves nothing; list its exact ids or remove models to ask the provider");
+    const AWS_FIELDS = ["aws_region", "aws_access_key_id_env", "aws_secret_access_key_env", "aws_session_token_env"];
+    if (e.protocol === "bedrock-converse") {
+      if (typeof e.aws_region !== "string") fail('has protocol = "bedrock-converse" without aws_region, the region it signs requests for');
+      if (!Array.isArray(e.models)) fail('has protocol = "bedrock-converse" without models; Bedrock has no list to ask, so name the exact model or inference profile ids');
+      for (const k of ["api_key_env", "api_key_file", "auth_header", "api_version"]) if (k in e) fail(`has ${k}, but bedrock-converse signs every request with the AWS keys in aws_access_key_id_env and aws_secret_access_key_env`);
+      if (e.region === "us" && typeof e.aws_region === "string" && !e.aws_region.startsWith("us-")) fail(`says region = "us" but signs for ${e.aws_region}`);
+    } else {
+      for (const k of AWS_FIELDS) if (k in e) fail(`has ${k}, which only protocol = "bedrock-converse" reads`);
+    }
+    if (e.region === "us" && e.protocol === "bedrock-converse") {
+      const abroad = (Array.isArray(e.models) ? e.models : []).filter((m) => typeof m === "string" && /^(eu|apac|jp|au|global)\./.test(m));
+      if (abroad.length) fail(`says region = "us" but serves ${abroad.join(", ")}, an inference profile that may run outside the US; use the us. profile`);
+    }
     for (const m of Array.isArray(e.models) ? e.models : []) {
       const covered = typeof m === "string" && typeof e.placement === "string" ? coveredModelRefusal(m, e.placement as Placement) : null;
       if (covered) throw new Error(`lab.toml: endpoint ${id}: ${describeRefusal(covered)}; give it the placement that 30-day retention allows`);
@@ -249,6 +269,12 @@ export function parseConfig(text: string, path: string): LabConfig {
       supportsLogprobs: e.logprobs,
       protocol: e.protocol,
       ...(e.sampling !== undefined ? { sampling: e.sampling } : {}),
+      ...(e.baa ? { baa: true } : {}),
+      ...(e.region ? { region: e.region } : {}),
+      ...(e.api_version ? { apiVersion: e.api_version } : {}),
+      ...(e.protocol === "bedrock-converse" && e.aws_region
+        ? { aws: { region: e.aws_region, accessKeyIdEnv: e.aws_access_key_id_env, secretAccessKeyEnv: e.aws_secret_access_key_env, sessionTokenEnv: e.aws_session_token_env } }
+        : {}),
     })),
     agentBackends: Object.entries(c.agent_backends).map(([id, b]) => ({
       id,
