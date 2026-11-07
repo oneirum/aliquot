@@ -44,7 +44,7 @@ const CORPUS = [
 
 /** Corpus lines holding a form the gate before classes missed, and what the default policy now adds. */
 const NEWLY_CAUGHT: Readonly<Record<string, { cls: DataClass; kinds: readonly string[] }>> = {
-  "Patient: John Smith was admitted 03/04/2026 to 12 Main Street, WI 53706": { cls: "D3", kinds: ["phi-date"] },
+  "Patient: John Smith was admitted 03/04/2026 to 12 Main Street, WI 53706": { cls: "D3", kinds: ["phi-date-person"] },
 };
 
 test("the default policy finds everything the gate found before classes, and only the trust harness's missed forms besides", () => {
@@ -76,8 +76,8 @@ test("the restricted class catches each form the trust harness found answered, a
     "Lab1-0042 and lab1 0043 and LAB1\u20140044 and LAB10045",
     "Policy number Q7-1100299 covers the visit",
     "Driver's license number: S530-4417-2201",
-    "discharged 4/1/2026 after the scan",
-    "the session ran from 192.168.0.20",
+    "he was discharged 4/1/2026 after the scan",
+    "the participant's session ran from 192.168.0.20",
     "a full-face photo of the participant is in the share",
     "Ms. Alvarez's blood pressure was 150/95",
     "Ana Ruiz lives at 22 Elm Street, Verona",
@@ -93,6 +93,8 @@ test("the restricted class catches each form the trust harness found answered, a
     "Mr. Fix-It visits on Friday to service the fume hood.",
     "Deliveries go to 1500 Highland Avenue, loading dock B.",
     "Firmware 10.4.2 is on the plate reader.",
+    "The freezer died on 3/4/2026 and was discharged on 03/04/2026 from service.",
+    "The LIMS server is at 192.168.1.10.",
     "The wiki is at http://10.0.4.12:8080/handbook and the worker on 127.0.0.1.",
     "lab1 members meet in room 3120.",
     "What does DOB stand for on the intake form?",
@@ -101,9 +103,9 @@ test("the restricted class catches each form the trust harness found answered, a
     assert.equal(level(text), "D1", text);
   // An area the SSA never issues (000, 666, 9xx) is not an SSN even after a label.
   assert.equal(level("SSN 900-12-3456"), "D1");
-  // A handbook that lists instrument addresses moves phi-ip out of restricted in lab.toml, as with any built-in detector.
-  const moved = buildPolicy({ internal: { detectors: ["phi-ip"] } }, DEFAULT_POLICY, lab1);
-  assert.equal(classify(moved, { t: "entry", text: "The plate reader PC is at 10.0.4.12.", declared: "D1" }).level, "D1");
+  // A lab whose handbook trips one anyway moves it out of restricted in lab.toml, as with any built-in detector.
+  const moved = buildPolicy({ internal: { detectors: ["phi-ip-person"] } }, DEFAULT_POLICY, lab1);
+  assert.equal(classify(moved, { t: "entry", text: "Her lab PC is at 10.0.4.12.", declared: "D1" }).level, "D1");
   assert.equal(classify(moved, { t: "entry", text: "LAB1-0042 used the plate reader PC.", declared: "D1" }).level, "D3");
 });
 
@@ -149,6 +151,8 @@ test("every Safe Harbor detector finds its identifier and leaves ordinary lab te
     "phi-name-health": "Mr. Hassan's heart rate was 48",
     "phi-name-address": "Daniel Reyes at 1420 Willow Lane",
     "phi-photo": "full-face photograph in folder P042",
+    "phi-date-person": "she was admitted 05/02/2026",
+    "phi-ip-person": "the participant logged in from 10.42.7.19",
     "phi-address": "lives at 1210 West Dayton Street",
     "phi-zip": "zip code 53706",
     "phi-date": "discharged on Mar 4, 2026",
@@ -203,7 +207,7 @@ test("a policy the lattice would not enforce does not load, and each error names
 
 test("a detector a lab class names leaves the built-in class that held it", () => {
   const p = buildPolicy({ phi: { model_tier: "none", detectors: ["ssn", "mrn"] } }, DEFAULT_POLICY, labPatterns);
-  assert.deepEqual(p.classes.find((c) => c.id === "restricted")!.detectors, ["dob", "participant-id", "phi-name-health", "phi-name-address", "phi-date", "phi-health-plan", "phi-license", "phi-ip", "phi-photo"]);
+  assert.deepEqual(p.classes.find((c) => c.id === "restricted")!.detectors, ["dob", "participant-id", "phi-name-health", "phi-name-address", "phi-date-person", "phi-health-plan", "phi-license", "phi-ip-person", "phi-photo"]);
   assert.equal(classify(p, { t: "message", text: "ssn 123-45-6789", floor: "D1" }).class, "phi");
 });
 

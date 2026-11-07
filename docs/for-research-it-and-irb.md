@@ -45,7 +45,7 @@ always there. With no `[classes]` table they find everything the gate found befo
 | `public` | D0 | hosted | text | none (a channel's floor) | built in |
 | `internal` | D1 | hosted | text | none (the default floor) | built in |
 | `confidential` | D2 | hosted (approved placement) | text | phone, email | built in |
-| `restricted` | D3 | local (lab or institution) | text | SSN (dashes, spaces, or nine digits after a label; not a part, lot or order number), MRN, date of birth (numeric or spelled out, after DOB, "date of birth" or "born"), the lab's participant ids (also in any case, with a space, en dash or no separator, and fewer digits), admission and discharge dates, health plan and licence numbers, IP addresses, a full-face photo reference, a name beside a health reading (Mr., Mrs., Ms.), a person's home address | built in |
+| `restricted` | D3 | local (lab or institution) | text | SSN (dashes, spaces, or nine digits after a label; not a part, lot or order number), MRN, date of birth (numeric or spelled out, after DOB, "date of birth" or "born"), the lab's participant ids (also in any case, with a space, en dash or no separator, and fewer digits), admission and discharge dates and IP addresses in a sentence about a person, health plan and licence numbers, a full-face photo reference, a name beside a health reading (Mr., Mrs., Ms.), a person's home address | built in |
 | `review-confidential` | R | none under `refuse`, local under `lab-only` | keyed hash | REVIEW-CONFIDENTIAL marker | built in |
 | `phi` | D3 | none | keyed hash, 30 days | HIPAA Safe Harbor identifiers (45 CFR 164.514(b)(2)) | example in `fixtures/policy/classes.toml` |
 | `controlled_access` | D3 | none | keyed hash, 365 days | DUA marker: `DUA:` lines, dbGaP `phs` accessions, EGA ids | example; NIH NOT-OD-25-081 |
@@ -382,8 +382,10 @@ after either.
 
 - **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A name without a
   label or a date ("John Smith was admitted"), or a reading with no honorific ("Hassan's heart rate was 48"), is not
-  found. The built-in detectors also run over knowledge base sources, so a handbook that lists instrument IP addresses
-  compiles at D3; such a lab moves the detector in `lab.toml` (`[classes.internal] detectors = ["phi-ip"]`). A lab with
+  found. The built-in detectors also run over knowledge base sources. A dated incident or an instrument's IP address
+  counts only in a sentence that names or points at a person (a pronoun, an honorific, "participant", a first and last
+  name); a handbook that trips one anyway moves the detector in `lab.toml` (`[classes.internal] detectors =
+  ["phi-ip-person"]`). A lab with
   free-text PHI should set its PHI channels'
   floor to D3 rather than rely on detectors. Detector accuracy at scale is measured by the trust harness, not here. A lab must add its
   own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,

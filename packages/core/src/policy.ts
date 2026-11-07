@@ -91,11 +91,20 @@ const MONTH = String.raw`(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec
 /** 04/12/1958, 7-3-1961, 1958-04-12, April 12, 1958, 3 March 1961. */
 const DATE = String.raw`(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|${MONTH}\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+${MONTH},?\s+\d{4})`;
 
+let endsOf: { readonly text: string; readonly ends: readonly number[] } = { text: "", ends: [] };
+/** Where sentences end in a text, kept for the last text scanned: classify() asks once per match of the same text. */
+function sentenceEnds(text: string): readonly number[] {
+  // A full stop ends a sentence unless it closes an honorific: "Mrs. Lin, admitted 05/02/2026" is one sentence.
+  if (endsOf.text !== text) endsOf = { text, ends: [...text.matchAll(/(?<!\b(?:Mr|Mrs|Ms|Mx|Dr|St))[.?!](?=\s)|\n/g)].map((m) => m.index) };
+  return endsOf.ends;
+}
+
 /** The sentence a match sits in, up to the match and from it on: detectors that need a second identifier look here. */
 function sentenceAround(text: string, index: number, length: number): { readonly before: string; readonly after: string } {
-  const start = Math.max(text.lastIndexOf(". ", index), text.lastIndexOf("? ", index), text.lastIndexOf("\n", index)) + 1;
-  const ends = [". ", "? ", "\n"].map((e) => text.indexOf(e, index + length)).filter((i) => i >= 0);
-  return { before: text.slice(start, index), after: text.slice(index + length, ends.length ? Math.min(...ends) : text.length) };
+  const ends = sentenceEnds(text);
+  const start = (ends.findLast((e) => e < index) ?? -1) + 1;
+  const end = ends.find((e) => e >= index + length) ?? text.length;
+  return { before: text.slice(start, index), after: text.slice(index + length, end) };
 }
 
 /** Words that make a 3-2-4 digit group a part, lot or order number rather than an SSN, unless an SSN label is also near. */
@@ -142,7 +151,7 @@ const PUBLIC_LINK_HOSTS = /^(?:[a-z0-9-]+\.)*(?:doi\.org|ncbi\.nlm\.nih\.gov|eur
  * to one, and "any other unique identifying number" is the lab's own
  * participant-id patterns.
  */
-export const DETECTORS: Readonly<Record<string, Detector>> = {
+const BASE_DETECTORS: Readonly<Record<string, Detector>> = {
   ssn: {
     patterns: [/\b\d{3}[- ]\d{2}[- ]\d{4}\b/g, /\b(?:SSN|SS#|social(?:\s+security)?(?:\s+(?:number|no\.?|#))?)(?:\s+(?:is|was))?[:#\s]*\d{9}\b/gi],
     safeHarbor: "(G) Social Security numbers",
@@ -220,6 +229,32 @@ export const DETECTORS: Readonly<Record<string, Detector>> = {
   "export-marker": { patterns: [/\b(?:ITAR|EAR99|export[- ]controlled)\b/gi, /\bECCN[:#\s]*\d[A-E]\d{3}\b/gi, /\bUSML\s+Category\s+[IVXL]+\b/g] },
 };
 
+/** Someone named or pointed at in the sentence: a pronoun, an honorific, a role, a participant id shape or a first and last name. */
+const PERSON_WORD = /\b(?:he|she|him|his|her|hers|they|them|their|participant|patient|subject|pt|mr|mrs|ms|mx|miss)\b/i;
+const PERSON_NAME = /\b[A-Z]{2,}\d*[-\s]?\d{2,}\b|\b(?!(?:The|A|An|Our|This|That|My|Your|Each|Every)\b)[A-Z][a-z]+\s+[A-Z][a-z]+\b/;
+const PERSON = { test: (s: string) => PERSON_WORD.test(s) || PERSON_NAME.test(s) };
+
+/**
+ * A detector that counts only in a sentence about a person: an admission date or an IP is an identifier when it is
+ * someone's, while "the freezer died on 3/4/2026" and "the LIMS server is 192.168.1.10" are handbook text.
+ */
+function aboutPerson(d: Detector): Detector {
+  return {
+    ...d,
+    keep: (m, text, i) => {
+      if (d.keep && !d.keep(m, text, i)) return false;
+      const s = sentenceAround(text, i, m.length);
+      return PERSON.test(s.before) || PERSON.test(s.after);
+    },
+  };
+}
+
+export const DETECTORS: Readonly<Record<string, Detector>> = {
+  ...BASE_DETECTORS,
+  "phi-date-person": aboutPerson(BASE_DETECTORS["phi-date"]!),
+  "phi-ip-person": aboutPerson(BASE_DETECTORS["phi-ip"]!),
+};
+
 /** Names that expand to several detectors in a class's detectors list. */
 export const DETECTOR_GROUPS: Readonly<Record<string, readonly string[]>> = {
   "hipaa-safe-harbor": Object.entries(DETECTORS)
@@ -229,9 +264,10 @@ export const DETECTOR_GROUPS: Readonly<Record<string, readonly string[]>> = {
 
 /**
  * The built-in restricted class's detectors: the four it always had, and the Safe Harbor identifiers whose shapes
- * do not occur in a lab handbook (a person's address, not a building's; a name beside a reading of their body).
+ * do not occur in a lab handbook (a person's address, not a building's; a name beside a reading of their body; a date
+ * or an IP in a sentence about someone).
  */
-const RESTRICTED_DETECTORS = ["ssn", "mrn", "dob", "participant-id", "phi-name-health", "phi-name-address", "phi-date", "phi-health-plan", "phi-license", "phi-ip", "phi-photo"] as const;
+const RESTRICTED_DETECTORS = ["ssn", "mrn", "dob", "participant-id", "phi-name-health", "phi-name-address", "phi-date-person", "phi-health-plan", "phi-license", "phi-ip-person", "phi-photo"] as const;
 
 const REVIEW_REFUSED = "This message carries review-confidential content, which this lab does not let agents read.";
 
