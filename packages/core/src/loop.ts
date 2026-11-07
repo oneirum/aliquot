@@ -437,7 +437,9 @@ export function systemPrompt(agent: ResolvedAgent, outlines: readonly Outline[])
  */
 export async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJournal, deps: Pick<LoopDeps, "kb" | "tools">, final: boolean): Promise<Prompt> {
   const instructions = instructionsOf(agent);
-  const outlines = await Promise.all(agent.knowledgeBases.map((kb) => deps.kb.outline(kb.snapshot)));
+  // The outline as the run's member may see it: an entry a DUA refuses them is not even listed.
+  const visible = deps.tools.kbFor(journal, agent.knowledgeBases);
+  const outlines = await Promise.all(agent.knowledgeBases.map((kb) => visible.outline(kb.snapshot)));
   const systemText = systemPrompt(agent, outlines.map((o) => o.value));
   const system: ChatPart = { role: "system", content: Labelled.derive(systemText, [instructions, ...outlines], "loop:system") };
   const parts: ChatPart[] = [];

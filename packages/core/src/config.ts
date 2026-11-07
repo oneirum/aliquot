@@ -16,6 +16,7 @@ import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
 import { ROLES, type Role } from "./roles.ts";
 import { buildPolicy, ceilingOfStore, type Policy } from "./policy.ts";
 import { declaredClass, loadPreset, mergeClasses, type Preset } from "./preset.ts";
+import { parseDuas, type Dua } from "./dua.ts";
 
 const placement = z.enum(PLACEMENTS);
 const KEY_ID = /^[a-z0-9][a-z0-9_-]*$/;
@@ -249,6 +250,8 @@ const schema = z.object({
       z.object({ path: z.string().refine(isAbsolute, "must be an absolute path"), class: z.enum(DATA_CLASSES), description: z.string().min(1) }).strict(),
     )
     .default({}),
+  /** [duas.<id>]: data use agreements, which bind knowledge base entries and datasets to named members and a date (dua.ts). */
+  duas: z.record(z.string(), z.unknown()).default({}),
   sandbox: z
     .object({
       image: z.string().regex(IMAGE_BY_DIGEST, "must be pinned by digest (sha256:<64 hex> or name@sha256:<64 hex>), not a tag"),
@@ -308,6 +311,8 @@ export interface LabConfig {
   readonly kbFixtures: readonly string[];
   readonly channelFloors: Readonly<Record<string, DataClass>>;
   readonly datasets: readonly Dataset[];
+  /** [duas]: who may read each bound knowledge base, entry and dataset, and until when. Empty without the table. */
+  readonly duas: readonly Dua[];
   readonly sandbox: SandboxConfig | null;
   /** The env var whose value literature tools send as the polite-pool contact. */
   readonly contactEmailEnv: string | null;
@@ -434,6 +439,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     const refusal = ceilingOfStore(k.level, c.store.placement, egress);
     if (refusal) throw new Error(`lab.toml: [classes.${k.id}] has record = "text", but ${refusal}; use record = "hash" or "none"`);
   }
+  const datasets = Object.entries(c.datasets).map(([id, d]) => ({ id, path: resolve(d.path), cls: d.class, description: d.description }));
   return {
     path,
     databaseUrlEnv: c.database.url_env,
@@ -478,7 +484,8 @@ export function parseConfig(text: string, path: string): LabConfig {
     agentFixtures: c.agents.fixtures.map((f) => resolve(dir, f)),
     kbFixtures: c.knowledge_bases.fixtures.map((f) => resolve(dir, f)),
     channelFloors: c.channel_floors,
-    datasets: Object.entries(c.datasets).map(([id, d]) => ({ id, path: resolve(d.path), cls: d.class, description: d.description })),
+    datasets,
+    duas: parseDuas(c.duas, classes, datasets),
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,

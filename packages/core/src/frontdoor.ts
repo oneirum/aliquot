@@ -17,7 +17,8 @@
 
 import { z } from "zod";
 import { listingOf, modelFor, resolveAgent, versionHash, type AgentDocument, type AgentId, type AgentListing, type Catalog, type ResolvedAgent } from "./agent.ts";
-import { atMost, decideEgress, join, Labelled, MARKS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
+import { atMost, ceilingOf, decideEgress, join, Labelled, MARKS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
+import { duaRefusal, utcDay, type Dua } from "./dua.ts";
 import type { Db } from "./db.ts";
 import { appendAudit, type AuditEvent } from "./audit.ts";
 import { gateClassified, type GateDeps, type GateResult, type InboundMessage } from "./gate.ts";
@@ -127,6 +128,9 @@ export interface IntakeDeps {
   readonly agentsFor: (channel: InboundMessage["channel"]) => Promise<readonly AgentDocument[]>;
   /** The region lab.toml gives a model endpoint, for a class with a residency rule. Absent, or null for an endpoint, means no region: such a class is refused. */
   readonly endpointRegion?: (endpointId: string) => string | null;
+  /** lab.toml's [duas], and where each model endpoint or agent backend sits, for a knowledge base a DUA covers whole. */
+  readonly duas?: readonly Dua[];
+  readonly endpointPlacement?: (endpointId: string) => Placement | null;
 }
 
 /** pick is the agent the member chose from an earlier asked-user result for this same message. */
@@ -214,7 +218,7 @@ async function admit(msg: InboundMessage, key: string, trigger: (member: string)
     const text = admitted.text;
     const raised = { ...admitted, cls: chosen.cls, text: Labelled.derive(text.value, [text], text.origin, chosen.cls) };
     const agent = await loadVersion(deps.db, freeze.hash);
-    const refused = await residencyRefused(msg, agent, raised.text, classification, policy, deps);
+    const refused = (await residencyRefused(msg, agent, raised.text, classification, policy, deps)) ?? (await duaRefused(msg, agent, raised, policy, deps));
     if (refused) return refused;
     const run = { hash: freeze.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: freeze.studyId, route: { t: "pinned", studyId: freeze.studyId }, answeredBy: choiceOf(freeze.listing), dataClass } as const;
     return enqueueRun(msg, raised, run, key, trigger, deps);
@@ -223,7 +227,7 @@ async function admit(msg: InboundMessage, key: string, trigger: (member: string)
   const { doc } = chosen;
   const resolved = resolveAgent(doc, await deps.catalog());
   if (!resolved.ok) return { t: "refused", userFacing: `The agent cannot run: ${resolved.issues.map((i) => i.message).join("; ")}` };
-  const refused = await residencyRefused(msg, resolved.agent, admitted.text, classification, policy, deps);
+  const refused = (await residencyRefused(msg, resolved.agent, admitted.text, classification, policy, deps)) ?? (await duaRefused(msg, resolved.agent, admitted, policy, deps));
   if (refused) return refused;
   const hash = versionHash(resolved.agent);
   await deps.db.query("insert into agent_versions (hash, agent_id, body) values ($1, $2, $3) on conflict (hash) do nothing", [hash, resolved.agent.agentId, JSON.stringify(resolved.agent)]);
@@ -250,6 +254,28 @@ async function residencyRefused(msg: InboundMessage, agent: ResolvedAgent, text:
       const r = residencyRefusal(c, held, id, deps.endpointRegion?.(id) ?? null);
       if (r) return recordClassRefusal(msg, held, text, `${r.replace(/^Not sent\. Data class ([^;]+);/, `Not sent. Knowledge base ${kb.kbId} is at ${kb.cls} and may hold data class $1;`)}`, residencyRuleText(c), policy, deps);
     }
+  }
+  return null;
+}
+
+/**
+ * A member a DUA names sees its entries in the outline of every run of an agent whose knowledge base holds them, so
+ * the run is at the DUA's level from its first request and moves to the agent's model for that level. When that
+ * model's placement may not hold the level, the message is refused here, before any model request, naming the DUA
+ * and the rule. A member the DUA does not name is not refused: their run sees nothing of it (dua.ts scopeKb).
+ */
+async function duaRefused(msg: InboundMessage, agent: ResolvedAgent, admitted: Admitted, policy: Policy, deps: IntakeDeps): Promise<IntakeResult | null> {
+  for (const kb of agent.knowledgeBases) {
+    const dua = deps.duas?.find((d) => (d.knowledgeBases.includes(kb.kbId) || d.entries.some((e) => e.kbId === kb.kbId)) && !duaRefusal(d, admitted.member, utcDay(Date.now())));
+    if (!dua) continue;
+    const { endpointId } = modelFor(agent, join(kb.cls, dua.level, admitted.cls));
+    const placement = deps.endpointPlacement?.(endpointId) ?? "public";
+    const ceiling = ceilingOf("model", placement);
+    if (ceiling !== "none" && atMost(dua.level, ceiling)) continue;
+    const rule = classById(policy, dua.classId);
+    const held: Classification = { class: dua.classId, level: dua.level, rule: `dua:${dua.id}`, spans: [] };
+    const why = `Not sent. Knowledge base ${kb.kbId} holds ${dua.knowledgeBases.includes(kb.kbId) ? "data" : "entries"} bound by DUA ${dua.id}, data class ${dua.classId} at ${dua.level}, and this agent would read it on endpoint ${endpointId} at placement ${placement}; rule: a DUA's data goes only to a model on hardware its class allows (${ruleText(rule)}). Ask the lab for its agent on the lab's own model.`;
+    return recordClassRefusal(msg, held, admitted.text, why, `dua ${dua.id}: ${ruleText(rule)}`, policy, deps);
   }
   return null;
 }

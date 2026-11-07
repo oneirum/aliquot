@@ -1,0 +1,24 @@
+{
+  "kbId": "lab0-release",
+  "title": "Sleep cohort release notes",
+  "purpose": "How lab0 works with the sleep cohort's controlled-access release: methods for everyone, the release's own terms for the analysts its DUA names.",
+  "cls": "D1",
+  "irbProtocol": "SYNTH-LAB0",
+  "entries": [
+    {
+      "path": "methods/actigraphy.md",
+      "title": "Actigraphy methods",
+      "body": "Participants wear the actigraphy watch on the non-dominant wrist for 14 nights. Sleep onset is scored with the lab's validated algorithm, and nights with under 4 hours of wear are dropped before analysis."
+    },
+    {
+      "path": "release/consent-groups.md",
+      "title": "Release consent groups",
+      "body": "SENTINEL-CONSENT-7731. The sleep cohort release has two consent groups: GRU, general research use, and HMB-IRB, health, medical and biomedical research with IRB approval. Analyses of the HMB-IRB group need the protocol number on file."
+    },
+    {
+      "path": "release/linkage-keys.md",
+      "title": "Release linkage keys",
+      "body": "SENTINEL-LINKAGE-4420. The consent groups' linkage keys between the release and the lab's own visit ids are held by the data manager and never copied to a laptop."
+    }
+  ]
+}

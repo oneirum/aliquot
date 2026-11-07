@@ -1,0 +1,24 @@
+# Data use agreements for lab0's synthetic sleep cohort release. Members are member ids as runs record them: the
+# [auth] id_claim under sign-on (sub, or eppn on an InCommon campus), else the id the door is given.
+
+# The release's own terms: one entry of a knowledge base that also holds open methods notes.
+[duas.sleep-release]
+members = ["ana@lab0.example", "raj@lab0.example"]
+expires = 2027-06-30
+class = "restricted"
+entries = ["lab0-release/release/consent-groups.md"]
+
+# The linkage terms were under an earlier agreement that ended.
+[duas.sleep-linkage-2025]
+members = ["ana@lab0.example"]
+expires = 2026-01-31
+class = "restricted"
+entries = ["lab0-release/release/linkage-keys.md"]
+
+# The whole visit schedule knowledge base, and the dataset run_code mounts.
+[duas.sleep-cohort]
+members = ["ana@lab0.example"]
+expires = 2027-06-30
+class = "restricted"
+knowledge_bases = ["lab0-cohort"]
+datasets = ["cohort-visits"]
