@@ -27,7 +27,7 @@ import { loadAudit } from "../packages/core/src/audit.ts";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { loadManifest, tokenize, type KbSnapshot } from "../packages/core/src/kb.ts";
-import { createPayloadStore, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { startFakeSlack } from "../test/fake-slack.ts";
 import { APP_ID, APP_SECRET, startFakeTeams, TENANT } from "./fake-teams.ts";
@@ -67,7 +67,7 @@ const personalToken = randomBytes(32).toString("hex");
 const slackToken = randomBytes(32).toString("hex");
 const teamsToken = randomBytes(32).toString("hex");
 const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken, LAB0_SLACK_TOKEN: slackToken, LAB0_TEAMS_TOKEN: teamsToken, LABH_ANCHOR_KEY_FILE: join(work, "anchor.key") };
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(Buffer.from(payloadKey, "hex")) });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
 function agentFile(name: string, overrides: Record<string, unknown>): string {

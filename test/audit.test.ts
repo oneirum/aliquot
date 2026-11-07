@@ -5,7 +5,7 @@ import { appendAudit, auditRecorder, loadAudit, verifyAudit } from "../packages/
 import { DEFAULT_POLICY, Labelled } from "../packages/core/src/dataclass.ts";
 import { createGateway, Prompt, type ExactModelId } from "../packages/core/src/gateway.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
-import { createPayloadStore } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey } from "../packages/core/src/record.ts";
 import { freshDatabase } from "./db.ts";
 import { startFakeModel } from "./fake-model.ts";
 
@@ -15,7 +15,7 @@ after(async () => {
   await hosted.close();
   await db.end();
 });
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
 
 test("a refused out-of-run gateway call lands in the audit stream, and no request leaves", async () => {
   const gateway = createGateway([{ id: "hosted", baseUrl: hosted.url, placement: "zdr", supportsLogprobs: false }], DEFAULT_POLICY, fetch);

@@ -127,3 +127,55 @@ test("lab.example.toml's OpenRouter block parses once uncommented and routes Cla
   assert.equal(openrouter?.placement, "zdr");
   assert.deepEqual(openrouter?.providerRouting, { zdr: true, data_collection: "deny", allow_fallbacks: false, only: ["amazon-bedrock", "google-vertex"] });
 });
+
+test("[store] key_env is the one-key form: key k1, current; without it the key is LABH_PAYLOAD_KEY", () => {
+  const keys = (toml: string) => {
+    const { keyEnvs, current, classKeys } = parseConfig(`${base}${toml}`, "/l/lab.toml").store;
+    return { keyEnvs, current, classKeys };
+  };
+  assert.deepEqual(keys(""), { keyEnvs: { k1: "LABH_PAYLOAD_KEY" }, current: "k1", classKeys: {} });
+  assert.deepEqual(keys('[store]\nkey_env = "LAB_KEY"\n'), { keyEnvs: { k1: "LAB_KEY" }, current: "k1", classKeys: {} });
+  assert.deepEqual(keys('[store]\ncurrent = "k2"\n[store.keys]\nk1 = "LABH_PAYLOAD_KEY"\nk2 = "LABH_PAYLOAD_KEY_2"\nk3 = "LABH_PAYLOAD_KEY_3"\n[store.class_keys]\nD3 = "k3"\n'), {
+    keyEnvs: { k1: "LABH_PAYLOAD_KEY", k2: "LABH_PAYLOAD_KEY_2", k3: "LABH_PAYLOAD_KEY_3" },
+    current: "k2",
+    classKeys: { D3: "k3" },
+  });
+});
+
+test("each [store] key rule refuses with one line", () => {
+  const refuse = (toml: string, why: RegExp) => assert.throws(() => parseConfig(`${base}[store]\n${toml}`, "/l/lab.toml"), why);
+  refuse('key_env = "A"\n[store.keys]\nk1 = "A"\n', /names both key_env and \[store.keys\]/);
+  refuse('[store.keys]\nk1 = "A"\nk2 = "B"\n', /current is missing: name which of k1, k2 new payloads go under/);
+  refuse('current = "k9"\n[store.keys]\nk1 = "A"\n', /current = "k9" is not a key in \[store.keys\]/);
+  refuse('[store.keys]\nk1 = "A"\n[store.class_keys]\nD3 = "k3"\n', /class_keys D3 = "k3" is not a key/);
+  refuse('current = "k1"\n[store.keys]\nk1 = "A"\nk2 = "A"\n', /keys k1 and k2 both read A/);
+  refuse('[store.keys]\n"K 1" = "A"\n', /a key id is lowercase letters/);
+  refuse('currrent = "k1"\n', /currrent/);
+});
+
+test("[policy.retention] sets a floor and a purge per class, a class table over the lab-wide keys, and refuses a purge under the floor", () => {
+  const retention = (toml: string) => parseConfig(`${base}[policy.retention]\n${toml}`, "/l/lab.toml").retention;
+  assert.deepEqual(parseConfig(base, "/l/lab.toml").retention, { purgeDays: {}, keepMinDays: {} });
+  const all = { D0: 2555, D1: 2555, D2: 2555, D3: 2555, R: 2555 };
+  assert.deepEqual(retention("keep_min_days = 2555\n"), { purgeDays: {}, keepMinDays: all });
+  assert.deepEqual(retention("keep_min_days = 2555\npurge_payload_after_days = 3650\n[policy.retention.D3]\nkeep_min_days = 1095\npurge_payload_after_days = 1095\n"), {
+    purgeDays: { D0: 3650, D1: 3650, D2: 3650, D3: 1095, R: 3650 },
+    keepMinDays: { ...all, D3: 1095 },
+  });
+  assert.throws(() => retention("keep_min_days = 2555\n[policy.retention.D3]\npurge_payload_after_days = 90\n"), /purges D3 bodies after 90 days, under its keep_min_days of 2555: the purge would delete what the floor keeps/);
+  assert.throws(() => retention("purge_payload_after_days = 0\n"));
+  assert.throws(() => retention("[policy.retention.D9]\nkeep_min_days = 1\n"));
+});
+
+test("lab.example.toml's commented key and retention tables parse once uncommented", () => {
+  const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
+  const text = readFileSync(path, "utf8");
+  const at = text.indexOf('# current = "k2"');
+  const end = text.indexOf("\n\n", at);
+  const keyed = `${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[A-Za-z_0-9]+ = ).*)$/gm, "$1")}${text.slice(end)}`.replace(/^key_env = .*$/m, "");
+  assert.deepEqual(parseConfig(keyed, path).store, { placement: "lab", keyEnvs: { k1: "LABH_PAYLOAD_KEY", k2: "LABH_PAYLOAD_KEY_2", k3: "LABH_PAYLOAD_KEY_3" }, current: "k2", classKeys: { D3: "k3" } });
+  const r = text.indexOf("# [policy.retention]");
+  const rEnd = text.indexOf("\n\n", r);
+  const retained = `${text.slice(0, r)}${text.slice(r, rEnd).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(rEnd)}`;
+  assert.deepEqual(parseConfig(retained, path).retention, { purgeDays: { D0: 2555, D1: 2555, D2: 2555, D3: 1095, R: 2555 }, keepMinDays: { D0: 2555, D1: 2555, D2: 2555, D3: 1095, R: 2555 } });
+});

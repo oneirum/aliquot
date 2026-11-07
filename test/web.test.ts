@@ -16,7 +16,7 @@ import { RUN, chain, ref, started } from "./events.ts";
 
 const { db } = await freshDatabase("labh_test_web");
 const logged: string[] = [];
-const deps = {} as IntakeDeps;
+const deps = { store: { held: new Set<string>() } } as unknown as IntakeDeps;
 const { server, port } = await listenWeb(createWebHandler(db, deps, (line) => logged.push(line)), 0);
 const base = `http://127.0.0.1:${port}`;
 after(async () => {
@@ -104,7 +104,7 @@ test("both pages name the lab at the top, escaped, and carry no slogan or status
 });
 
 test("the record view of a run with no events yet is empty, running and intact", async () => {
-  assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, startedAt: null, agent: null, route: null, outcome: "running", chain: { events: 0, firstBad: null }, summary: { ms: 0, modelCalls: 0, tokens: { input: 0, output: 0 }, toolCalls: [], entriesRetrieved: 0, refused: 0, withheld: 0 }, rows: [] } });
+  assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, startedAt: null, agent: null, route: null, outcome: "running", chain: { events: 0, firstBad: null }, summary: { ms: 0, modelCalls: 0, tokens: { input: 0, output: 0 }, toolCalls: [], entriesRetrieved: 0, refused: 0, withheld: 0 }, rows: [], bodies: [] } });
 });
 
 test("a web surface bound to a channel puts every message there and refuses a body that names another", async () => {

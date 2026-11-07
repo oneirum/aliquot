@@ -93,7 +93,9 @@ The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` on
 
 **PDF sources and `run_code`** need the sandbox image: `docker build -t aliquot-sandbox sandbox`, then answer yes to init's sandbox question with the id that `docker image inspect --format '{{.Id}}' aliquot-sandbox` prints. init then adds `compose.sandbox.yaml` to `.env`, which gives the Docker socket to the worker only. A PDF is read by poppler inside that container, with no network and a read-only root. A scanned page fails with a message, because Aliquot does no OCR. The studio gets no socket, so a PDF source compiles with the kb command.
 
-**Backup and restore.** `scripts/backup.sh` writes the database dump and a copy of the payload key, with checksums. Keep the key apart from the dump: the payloads in the dump are encrypted under it, and anyone with both can read them. `scripts/restore.sh <dir>` refuses a key the backup was not made with, replaces the database, restarts the stack and checks every run's hash chain. [`docs/install.md`](docs/install.md) has the details.
+**Backup and restore.** `scripts/backup.sh` writes the database dump and a copy of every payload key the lab holds, with checksums. Keep the keys apart from the dump: the payloads in the dump are encrypted under them, and anyone with both can read them. `scripts/restore.sh <dir>` refuses when `.env` is missing one of the backup's keys and names its id, then replaces the database, restarts the stack and checks every run's hash chain. [`docs/install.md`](docs/install.md) has the details.
+
+**Keys and retention.** A data steward can rotate the payload key without a gap: `lab.toml` names keys by id, new payloads go under the current one, each stored payload is read with the key it was written under, and `aliquot keys reencrypt` moves the old ones over, in resumable batches, without changing a hash. `aliquot keys status` shows what each key holds. `[store.class_keys]` keeps D3 under a key of its own, and a process that is not given that key shows a D3 body as unavailable rather than failing. `[policy.retention]` sets a floor and a purge per class; `aliquot retention --dry-run` lists what is past the window and `--apply` deletes those bodies, clears the door's copy of the reply and keeps a tombstone with the hash, so every record still verifies and the record page says "Redacted on <date> by the lab's retention window". `pnpm walk:keys` runs the whole sequence on a synthetic lab.
 
 `scripts/compose-check.sh` proves the whole path on a machine with only Docker, and CI runs it on a clean Ubuntu runner. It brings the stack up, gets a cited answer from the lab0 handbook, reads a LaTeX PDF and a Word PDF in the sandbox, requires the scanned page to fail, then backs up, wipes the database, restores and requires the same run to verify again.
 
@@ -360,7 +362,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
 - **0.6, ask where the lab already talks:** the Slack and Teams doors are built ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)), and so is the router across several agents on one channel.
-- **0.7, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
+- **0.7, keys, retention and sign-on:** key rotation, per-class keys and the retention sweep are built (`aliquot keys`, `aliquot retention`); left is university sign-on.
 - **0.8, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.
 

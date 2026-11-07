@@ -43,7 +43,7 @@ import type { SurfaceId } from "../dataclass.ts";
 import type { Db } from "../db.ts";
 import { intake, type IntakeDeps, type Surface } from "../frontdoor.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
-import { recordView } from "../record-view.ts";
+import { recordViewOf } from "../record-view.ts";
 import type { LabConfig, SurfaceConfig, SurfaceKind, TokenSurfaceConfig } from "../config.ts";
 import { chatPage } from "./web-chat.ts";
 import { recordPage, runsPage, type RunFilter, type RunListRow } from "./web-pages.ts";
@@ -83,8 +83,8 @@ export interface WebReply {
 }
 
 export async function readReplies(db: Db, runId: RunId): Promise<WebReply[]> {
-  const rows = await db.query<{ kind: WebReply["kind"]; text: string; at: Date }>("select kind, text, at from web_messages where run_id = $1 order by id", [runId]);
-  return rows.rows.map((r) => ({ kind: r.kind, text: r.text, at: r.at.toISOString() }));
+  const rows = await db.query<{ kind: WebReply["kind"]; text: string; at: Date; redacted_at: Date | null }>("select kind, text, at, redacted_at from web_messages where run_id = $1 order by id", [runId]);
+  return rows.rows.map((r) => ({ kind: r.kind, text: r.redacted_at ? `Redacted on ${r.redacted_at.toISOString().slice(0, 10)} by the lab's retention window.` : r.text, at: r.at.toISOString() }));
 }
 
 /** How many runs the runs page lists. */
@@ -280,8 +280,9 @@ export function createWebHandler(
         const runId = uuid.safeParse(runPath[1]);
         if (!runId.success) throw new HttpError(404, "not found");
         const events = await loadEvents(db, runId.data as RunId);
-        if (!runPath[2]) return sendHtml(req, res, recordPage(recordView(runId.data, events), where), NO_STORE);
-        return send(req, res, 200, runPath[2] === "events" ? events : recordView(runId.data, events), NO_STORE);
+        if (runPath[2] === "events") return send(req, res, 200, events, NO_STORE);
+        const view = await recordViewOf(db, runId.data, events, deps.store.held);
+        return runPath[2] ? send(req, res, 200, view, NO_STORE) : sendHtml(req, res, recordPage(view, where), NO_STORE);
       }
       send(req, res, 404, { error: "not found" });
     } catch (err) {

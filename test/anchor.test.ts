@@ -11,7 +11,7 @@ import { appendAudit, auditHash, loadAudit, verifyAudit, type AuditRow } from ".
 import { DEFAULT_POLICY, Labelled } from "../packages/core/src/dataclass.ts";
 import type { Db } from "../packages/core/src/db.ts";
 import { canonicalJson, sha256, type Sha256, type SnapshotId } from "../packages/core/src/hash.ts";
-import { createPayloadStore, eventClass, eventHash, loadEvents, verifyChain, type RunEvent, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, eventClass, eventHash, loadEvents, verifyChain, type RunEvent, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 import { freshDatabase } from "./db.ts";
 import { chain, ref, started } from "./events.ts";
@@ -106,7 +106,7 @@ test("each anchor signs the audit head and every run closed since the last one, 
 });
 
 test("a redacted payload keeps its hash, so the run still verifies against its anchor (the seam unit 12's retention sweep uses)", async () => {
-  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
   const input = await store.put(Labelled.stamp("which freezer holds the wave 1 samples?", "D1", "test"));
   const runId = "00000000-0000-4000-8000-00000000000c" as RunId;
   await insertRun(chain([started(input), finished], Date.parse("2026-01-01T00:02:00.000Z"), runId));

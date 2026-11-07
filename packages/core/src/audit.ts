@@ -1,6 +1,6 @@
 /**
  * The audit stream: one hash-chained, append-only log for what happens
- * outside a run. Publishing an agent or a KB, gateway calls made before or without a run (KB compile now;
+ * outside a run. Publishing an agent or a KB, a key rotation, a re-encryption or a retention sweep, gateway calls made before or without a run (KB compile now;
  * router and publish checks later), and HTTP refusals for KB URL sources, record here through the same CallRecorder
  * a run journal implements, so a refusal is recorded in exactly one place
  * whichever side made the call.
@@ -30,7 +30,11 @@ export type AuditEvent =
   | { readonly t: "kb.compile-failed"; readonly job: string; readonly kbId: string; readonly reason: string; readonly refusal: EgressRefusal | null }
   | { readonly t: "kb.published"; readonly kbId: string; readonly snapshot: SnapshotId; readonly override?: { readonly note: string; readonly gaps: readonly string[] } }
   | { readonly t: "kb.publish-refused"; readonly kbId: string; readonly snapshot: SnapshotId; readonly gaps: readonly string[] }
-  | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string };
+  | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string }
+  /** A data steward's `aliquot keys rotate`, `aliquot keys reencrypt` and `aliquot retention --apply` (steward.ts). */
+  | { readonly t: "keys.rotated"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly held: readonly string[] }
+  | { readonly t: "keys.reencrypted"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly rows: number }
+  | { readonly t: "retention.swept"; readonly purgeDays: Readonly<Partial<Record<DataClass, number>>>; readonly keepMinDays: Readonly<Partial<Record<DataClass, number>>>; readonly asOf: string; readonly redacted: number; readonly bytes: number; readonly runs: number; readonly replies: number };
 
 export interface AuditRow {
   readonly seq: number;

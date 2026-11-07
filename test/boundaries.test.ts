@@ -60,23 +60,27 @@ test("nothing the studio's entry into core loads constructs a model gateway or a
 });
 
 /**
- * The key enters a process only through payloadKeyFromEnv, which reads the env var lab.toml's [store] key_env names
- * (config.store.keyEnv), and the boots and the store built from it. createPayloadStore's own module may load for its
- * types; a call is what holds a key.
+ * Keys enter a process only through steward.ts: payloadKeyringFromEnv and heldKeyIds read the env vars lab.toml's [store]
+ * names (config.store.keyEnvs), openPayloadStore builds the store from them, and the boots call it. createPayloadStore's
+ * own module may load for its types; a call is what holds a key.
  */
-const KEY_READERS = ["payloadKeyFromEnv", "createPayloadStore", "bootShared", "boot"];
+const KEY_READERS = ["payloadKeyringFromEnv", "heldKeyIds", "openPayloadStore", "createPayloadStore", "bootShared", "boot"];
 
 test("the studio reads no payload key: nothing its entry loads calls or declares a key reader, and no studio file names the key", async () => {
   const loaded = studioEntryFiles();
   assert.deepEqual(namedIn(loaded, KEY_READERS, { calls: true }), []);
-  assert.deepEqual(namedIn(loaded, ["payloadKeyFromEnv"], { declarations: true }), [], "the env reader is not even loaded");
-  assert.deepEqual(namedIn(loaded, ["keyEnv"], { reads: true }), [], "nothing loaded looks up the key's env var");
+  assert.deepEqual(namedIn(loaded, ["payloadKeyringFromEnv", "heldKeyIds"], { declarations: true }), [], "the env readers are not even loaded");
+  assert.deepEqual(namedIn(loaded, ["keyEnvs"], { reads: true }), [], "nothing loaded looks up the keys' env vars");
   const planted = new Map([["packages/core/src/studio.ts", `${await readFile(join(root, "packages/core/src/studio.ts"), "utf8")}\nexport { bootShared } from "./boot-shared.ts";\n`]]);
-  assert.deepEqual(namedIn(studioEntryFiles(planted), ["payloadKeyFromEnv", "keyEnv"], { calls: true, reads: true }).sort(), ["packages/core/src/boot-shared.ts: payloadKeyFromEnv", "packages/core/src/boot-shared.ts: reads .keyEnv"], "a re-export of the shared boot is caught");
+  assert.deepEqual(
+    namedIn(studioEntryFiles(planted), ["openPayloadStore", "payloadKeyringFromEnv", "keyEnvs"], { calls: true, reads: true }).sort(),
+    ["packages/core/src/boot-shared.ts: openPayloadStore", "packages/core/src/steward.ts: payloadKeyringFromEnv", "packages/core/src/steward.ts: reads .keyEnvs"],
+    "a re-export of the shared boot is caught",
+  );
   const studioFiles = execFileSync("git", ["ls-files", "packages/studio"], { cwd: root, encoding: "utf8" }).split("\n").filter((f) => /\.(ts|tsx)$/.test(f));
   assert.ok(studioFiles.length > 10, "the studio's files are listed");
   const naming: string[] = [];
-  for (const f of studioFiles) if (/LABH_PAYLOAD_KEY|\bkeyEnv\b|key_env/.test(await readFile(join(root, f), "utf8"))) naming.push(f);
+  for (const f of studioFiles) if (/LABH_PAYLOAD_KEY|\bkeyEnvs?\b|key_env|class_keys/.test(await readFile(join(root, f), "utf8"))) naming.push(f);
   assert.deepEqual(naming, []);
 });
 

@@ -9,7 +9,7 @@ import type { InboundMessage } from "../packages/core/src/gate.ts";
 import type { SnapshotId, ToolHash } from "../packages/core/src/hash.ts";
 import { confirmPublish, draftHashOf, publishedAgentsFor } from "../packages/core/src/publish.ts";
 import { createQueue } from "../packages/core/src/queue.ts";
-import { createPayloadStore } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey } from "../packages/core/src/record.ts";
 import { eligibleOptions, LOW_CONFIDENCE, route, scoreOptions } from "../packages/core/src/router.ts";
 import type { Actor } from "../packages/core/src/roles.ts";
 import { freshDatabase } from "./db.ts";
@@ -74,7 +74,7 @@ for (const d of [desk, methods]) await confirmPublish({ db, catalog: async () =>
 
 const deps: IntakeDeps = {
   db,
-  store: createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" }),
+  store: createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) }),
   queue: createQueue(db),
   catalog: async () => catalog,
   gate: { members: async (id) => ({ id: id as MemberId, audiences: [{ t: "lab" }] }), channelFloor: async () => "D1", labPatterns: [], policy: DEFAULT_POLICY },

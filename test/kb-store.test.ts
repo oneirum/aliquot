@@ -4,12 +4,12 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import { createKbReader, loadManifest, memorySnapshots, saveSnapshot, snapshotFromFixture, storedSnapshots } from "../packages/core/src/kb.ts";
-import { createPayloadStore } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey } from "../packages/core/src/record.ts";
 import { freshDatabase } from "./db.ts";
 
 const { db } = await freshDatabase("labh_test_kb_store");
 after(() => db.end());
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
 const loaded = snapshotFromFixture(JSON.parse(await readFile(new URL("../fixtures/kb.json", import.meta.url), "utf8")), store.address);
 
 test("a saved snapshot reads back from Postgres and the store with the same outline, reads and hits as in memory", async () => {

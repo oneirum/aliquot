@@ -59,13 +59,63 @@ Each PDF is read in its own container. The container has no network, a read-only
 	scripts/backup.sh                 # writes backups/<UTC time>/
 	scripts/restore.sh backups/<time>
 
-`backup.sh` writes `labh.dump` (a `pg_dump` of the whole database: run records, knowledge bases, the studio), `payload-key` (a copy of `LABH_PAYLOAD_KEY`) and `SHA256SUMS`. Payloads in the dump are encrypted under that key. Keep the key apart from the dump: the dump alone cannot be read, and anyone with both can read every stored question and answer.
+`backup.sh` writes `labh.dump` (a `pg_dump` of the whole database: run records, knowledge bases, the studio), `payload-key` (one `ENV=value` line for each payload key the lab holds), `key-ids` (which key id each line is) and `SHA256SUMS`. It asks the worker which keys hold bodies (`aliquot keys env`) and refuses, naming the key id, when one of them is not in `.env`. Payloads in the dump are encrypted under those keys. Keep the keys apart from the dump: the dump alone cannot be read, and anyone with both can read every stored question and answer.
 
-`restore.sh` checks the checksums. It refuses when `.env`'s `LABH_PAYLOAD_KEY` differs from the backup's, because the restored payloads would not decrypt. It then stops the worker, the web door and the studio, replaces the `labh` database, starts them again and runs `aliquot runs`, which checks every run's hash chain. It exits nonzero if any chain is broken.
+`restore.sh` checks the checksums. It refuses when `.env` lacks any key in the backup's `key-ids`, or holds a different value, and names the missing key id, because the restored payloads would not decrypt. It then stops the worker, the web door and the studio, replaces the `labh` database, starts them again and runs `aliquot runs`, which checks every run's hash chain. It exits nonzero if any chain is broken.
 
-To restore on a new machine: clone, run `docker compose run --rm init`, set `LABH_PAYLOAD_KEY` in the new `.env` to the backup's key, run `docker compose up -d --build`, then run `scripts/restore.sh`.
+To restore on a new machine: clone, run `docker compose run --rm init`, copy every line of the backup's `payload-key` into the new `.env`, run `docker compose up -d --build`, then run `scripts/restore.sh`.
 
 Both scripts honour `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` and `ALIQUOT_ENV` (the env file, `.env` by default).
+
+## Rotate the key
+
+Rotate the payload key when someone who held it leaves, on the schedule your security office sets, or to move D3 under a key of its own. Old payloads stay readable the whole time: each stored payload carries the id of the key it was written under, and a process reads it with that key. Payload hashes never change, so run records, knowledge bases and published agents are unaffected.
+
+1. Add the new key to `.env` beside the old one:
+
+	echo "LABH_PAYLOAD_KEY_2=$(openssl rand -hex 32)" >> .env
+
+2. In `config/lab.toml`, replace `key_env = "LABH_PAYLOAD_KEY"` with key ids, and make the new one current:
+
+	[store]
+	placement = "lab"
+	current = "k2"
+	[store.keys]
+	k1 = "LABH_PAYLOAD_KEY"
+	k2 = "LABH_PAYLOAD_KEY_2"
+
+   `key_env = "X"` is the same as `k1 = "X"`, so every payload already stored is under `k1`. `compose.yaml` passes `LABH_PAYLOAD_KEY`, `LABH_PAYLOAD_KEY_2` and `LABH_PAYLOAD_KEY_3` to the worker and the web door.
+
+3. Record the rotation and restart, so new payloads go under `k2`:
+
+	docker compose run --rm worker aliquot keys rotate
+	docker compose up -d worker web
+
+4. Re-encrypt what is under `k1`. It works in batches and each batch commits on its own, so a stopped run picks up where it stopped and a second run finds nothing to do:
+
+	docker compose exec worker aliquot keys reencrypt
+	docker compose exec worker aliquot keys status
+
+   `keys status` prints each key id, its env var, whether this process holds it, how many payloads it holds, and how many wait to move. When `k1` holds 0, remove `k1` from `[store.keys]`, delete `LABH_PAYLOAD_KEY` from `.env`, restart, and take a new backup.
+
+To keep D3 under its own key, add `k3 = "LABH_PAYLOAD_KEY_3"` to `[store.keys]` and a `[store.class_keys]` table with `D3 = "k3"`, then run `keys reencrypt` to move D3 payloads already stored. A process that is not given `LABH_PAYLOAD_KEY_3` cannot read D3 bodies: its record pages list them as unavailable, encrypted under `k3`, and every chain still verifies. A process holding a key under an id the lab already knows, but with a different value, refuses to start.
+
+## Retention
+
+Set how long payload bodies are kept per data class in `[policy.retention]`. `keep_min_days` is the floor your records rules set (for example UW-Madison's seven years after close-out, HIPAA's six years for documentation, three years for IRB records). `purge_payload_after_days` is when a run's bodies are redacted. A class's own table overrides the lab-wide keys:
+
+	[policy.retention]
+	keep_min_days = 2555
+	[policy.retention.D3]
+	keep_min_days = 1095
+	purge_payload_after_days = 1095
+
+A class with no purge is kept. Aliquot refuses to start with a purge shorter than the same class's floor, and the sweep never redacts a body under the floor.
+
+	docker compose exec worker aliquot retention --dry-run      # lists each run past the window; changes nothing
+	docker compose exec worker aliquot retention --apply
+
+`--apply` deletes each body whose newest run is past its class's window, and clears the web door's copy of that run's reply. Each body keeps a tombstone: its hash, class, size, when it was redacted and why. Events and their hashes stay, so every record still verifies, and `--apply` checks each chain it touched. The record page shows the body as "Redacted on <date> by the lab's retention window", with its hash. Each `--apply` writes an audit event, even when nothing was past the window, and running it twice redacts nothing the second time. `--as-of YYYY-MM-DD` judges the window at another date, to see what a later sweep would take. Run `--apply` from cron or a systemd timer at whatever cadence the lab's policy names.
 
 ## Upgrade
 

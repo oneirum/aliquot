@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
 import { canonicalJson, sha256 } from "../packages/core/src/hash.ts";
 import { Labelled, DEFAULT_POLICY, decideEgress } from "../packages/core/src/dataclass.ts";
-import { LeaseLost, PayloadUnavailable, RecordCorrupt, StoreRefused, createPayloadStore, fold, loadEvents, openJournal, sendToInbox, verifyChain, type RunId } from "../packages/core/src/record.ts";
+import { LeaseLost, PayloadUnavailable, RecordCorrupt, StoreRefused, createPayloadStore, oneKey, fold, loadEvents, openJournal, sendToInbox, verifyChain, type RunId } from "../packages/core/src/record.ts";
 import { createQueue } from "../packages/core/src/queue.ts";
 import type { Db } from "../packages/core/src/db.ts";
 import { freshDatabase } from "./db.ts";
@@ -98,7 +98,7 @@ test("verifyChain finds the first tampered, reordered or misclassed event", () =
 const { db } = await freshDatabase("labh_test_record");
 after(() => db.end());
 const storeKey = randomBytes(32);
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: storeKey, keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(storeKey) });
 
 test("a content address is the HMAC of the class and the plaintext under an HKDF address subkey, so a hash alone confirms nothing", async () => {
   const value = { text: "participant P-12345 withdrew" };
@@ -114,7 +114,7 @@ test("a content address is the HMAC of the class and the plaintext under an HKDF
   decipher.setAAD(Buffer.from(r.hash));
   decipher.setAuthTag(row.ciphertext.subarray(row.ciphertext.length - 16));
   assert.equal(Buffer.concat([decipher.update(row.ciphertext.subarray(0, row.ciphertext.length - 16)), decipher.final()]).toString("utf8"), plaintext, "the body decrypts under the cipher subkey, not the master");
-  const otherKey = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k9" });
+  const otherKey = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32), "k9") });
   assert.notEqual((await otherKey.put(Labelled.stamp(value, "D3", "test"))).hash, r.hash, "the same bytes under another key have another address");
 });
 
@@ -132,7 +132,7 @@ test("payload store round-trips a body, dedupes by content within a class and re
   assert.equal(!("redacted" in (await store.get(b))) && (await store.get(b)).cls, "D3");
   const raw = await db.query<{ ciphertext: Buffer }>("select ciphertext from payloads where hash = $1", [a.hash]);
   assert.ok(!raw.rows[0]!.ciphertext.toString("utf8").includes("hello"), "bodies are not stored in the clear");
-  const hosted = createPayloadStore(db, { placement: "zdr", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k2" });
+  const hosted = createPayloadStore(db, { placement: "zdr", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32), "k2") });
   await assert.rejects(hosted.put(Labelled.stamp("x", "D1", "test")), (err: unknown) => err instanceof StoreRefused && err.refusal.code === "destination-receives-nothing");
   await db.query("update payloads set ciphertext = null, nonce = null where hash = $1", [a.hash]);
   assert.deepEqual(await store.get(a), { redacted: true, hash: a.hash, cls: "D1" });

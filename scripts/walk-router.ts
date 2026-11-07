@@ -18,7 +18,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createPayloadStore, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { freshDatabase } from "../test/db.ts";
@@ -40,7 +40,7 @@ const compiler = await startFakeModel("scripted-1", "compile");
 const agentModel = await startFakeModel("scripted-1", "search-then-answer");
 const payloadKey = randomBytes(32).toString("hex");
 const env: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey };
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(Buffer.from(payloadKey, "hex")) });
 
 const agentPath = join(work, "agent.json");
 writeFileSync(agentPath, JSON.stringify({ ...JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")), knowledgeBases: ["lab0-handbook"], model: { endpointId: "agentlab", modelId: "scripted-1", params: { temperature: 0, maxOutputTokens: 256 } } }));

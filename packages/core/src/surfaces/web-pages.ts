@@ -203,6 +203,12 @@ tr.refused td.ev { color: var(--warn-ink); }
 .legend .refused .kind { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--warn-ink); }
 .legend[hidden] { display: none; }
 .only-refused tr:not(.refused) { display: none; }
+h2.sub { font-size: 15px; font-weight: 620; margin: 30px 0 10px; }
+h2.sub[hidden] { display: none; }
+td.detail .hash { font: 12px/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; margin-top: 2px; }
+tr.body td.ev .kind { width: 9px; height: 9px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); border-radius: 50%; }
+tr.body.redacted td.ev .kind { box-shadow: none; background: linear-gradient(to top right, transparent 44%, var(--muted) 44%, var(--muted) 56%, transparent 56%); border-radius: 0; }
+tr.body.unavailable td.detail .st, tr.body.missing td.detail .st { color: var(--warn-ink); }
 @media print { .summary { border-color: #999; } .note { color: #333; } }
 .note { color: var(--muted); font-size: 13px; margin-top: 16px; max-width: 70ch; }
 @media (max-width: 640px) {
@@ -238,7 +244,9 @@ tr.refused td.ev { color: var(--warn-ink); }
   <p class="state" id="state" hidden></p>
   <p class="legend" id="legend" hidden><span class="run"><i class="kind"></i>Run</span><span class="model"><i class="kind"></i>Model call</span><span class="tool"><i class="kind"></i>Tool call</span><span class="refused"><i class="kind"></i>Refused or withheld</span><span>Labels: D0 public, D1 internal, D2 confidential, D3 restricted</span></p>
   <table id="table" hidden><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Label</th><th>Detail</th></tr></thead><tbody id="rows"></tbody></table>
-  <p class="note">Bodies are encrypted in the payload store and never shown here. The label is the data class of the event row; a refusal names the class of what it refused. Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
+  <h2 class="sub" id="bodies-h" hidden>Bodies</h2>
+  <table id="bodies" hidden><thead><tr><th>#</th><th>Size</th><th>Body</th><th>Label</th><th>State and hash</th></tr></thead><tbody id="body-rows"></tbody></table>
+  <p class="note">Bodies are encrypted in the payload store and never shown here. The Bodies table names each one by its hash and says whether it is still stored. The label is the data class of the event row; a refusal names the class of what it refused. Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
 </div>
 <script type="application/json" id="view">${scriptJson(view)}</script>
 <script type="module">
@@ -309,6 +317,22 @@ for (const r of v.rows) {
   tr.append(el("td", "detail", r.detail));
   $("rows").append(tr);
 }
+const day = (at) => new Date(at).toLocaleDateString(undefined, { dateStyle: "medium" });
+const bodyState = (b) =>
+  b.state === "stored" ? "Stored, encrypted under key " + b.keyId
+  : b.state === "unavailable" ? "Unavailable on this server: encrypted under key " + (b.keyId || "(none)") + ", which it does not hold"
+  : b.state === "redacted" ? (b.reason === "retention" && b.at ? "Redacted on " + day(b.at) + " by the lab's retention window" : "Redacted")
+  : "Missing from the payload store";
+const bytes = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
+for (const b of v.bodies) {
+  const tr = el("tr", "body " + b.state);
+  const ev = el("td", "ev"); const k = el("i", "kind"); k.setAttribute("aria-hidden", "true"); ev.append(k, b.t + " " + b.role);
+  tr.append(el("td", "seq", String(b.seq)), el("td", "t", bytes(b.bytes)), ev);
+  const cls = el("td", "cls"); const pill = el("span", "pill " + String(b.cls).toLowerCase(), b.cls); pill.title = CLASS_NAMES[b.cls] || b.cls; cls.append(pill); tr.append(cls);
+  const d = el("td", "detail"); d.append(el("div", "st", bodyState(b)), el("div", "hash", b.hash)); tr.append(d);
+  $("body-rows").append(tr);
+}
+if (v.bodies.length) { $("bodies-h").hidden = false; $("bodies").hidden = false; }
 </script>
 </body>
 </html>`;

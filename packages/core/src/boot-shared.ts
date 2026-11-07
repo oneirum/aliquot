@@ -2,7 +2,7 @@
  * The wiring every sealed process shares: lab.toml and the environment read once,
  * Postgres, the payload store, the queue, the HTTP choke point, the catalog a
  * draft resolves against, and intake. It builds no model gateway and no tool
- * runner; the sealed binaries add those in boot.ts. It reads the payload key,
+ * runner; the sealed binaries add those in boot.ts. It reads the payload keys,
  * so the studio never loads it (test/boundaries.test.ts).
  */
 
@@ -15,7 +15,8 @@ import type { GateDeps } from "./gate.ts";
 import { publishedSnapshots, snapshotFromFixture, type KbSnapshot, type LoadedSnapshot } from "./kb.ts";
 import { publishedAgentsFor } from "./publish.ts";
 import { createQueue, type Queue } from "./queue.ts";
-import { createPayloadStore, type PayloadStore } from "./record.ts";
+import type { PayloadStore } from "./record.ts";
+import { openPayloadStore } from "./steward.ts";
 import { builtinTools, createHttpEgress, registryOf, type HttpEgress, type RegisteredTool, type ToolRegistry } from "./tools.ts";
 
 export interface SharedCore {
@@ -44,7 +45,7 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
   const config = await loadConfig(configPath);
   const db = connect(databaseUrlFromEnv(config, env));
   await applySchema(db);
-  const store = createPayloadStore(db, { placement: config.store.placement, policy: config.policy, key: payloadKeyFromEnv(config, env), keyId: "k1" });
+  const { store } = await openPayloadStore(db, config, env);
   const fixtureSnapshots = await Promise.all(config.kbFixtures.map(async (f) => snapshotFromFixture(JSON.parse(await readFile(f, "utf8")), store.address)));
   const planted = new Set((options.tools ?? []).map((t) => t.manifest.name));
   const registry = registryOf([...builtinTools().filter((t) => !planted.has(t.manifest.name)), ...(options.tools ?? [])]);
@@ -102,11 +103,4 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     registry,
     close: () => db.end(),
   };
-}
-
-/** Reads the one secret the store needs. 64 hex characters, from the env var lab.toml names. */
-export function payloadKeyFromEnv(config: LabConfig, env: NodeJS.ProcessEnv = process.env): Uint8Array {
-  const hex = env[config.store.keyEnv];
-  if (!hex || !/^[0-9a-f]{64}$/i.test(hex)) throw new Error(`${config.store.keyEnv} must hold 64 hex characters (32 bytes) for the payload store`);
-  return Buffer.from(hex, "hex");
 }
