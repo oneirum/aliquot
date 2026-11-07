@@ -113,7 +113,7 @@ Each PDF is read in its own container. The container has no network, a read-only
 
 ## Logging and monitoring
 
-**Event log.** `aliquot audit export` prints every audited event as one JSON line: publishes, KB compiles, calls made outside a run, and every event of every run record (model and tool calls, refusals, stops, outcomes). A line holds ids, data classes, hashes, actors, refusal codes and the hash, class and size of each stored payload an event references. It never holds a question, an answer, a source, a changelog or a URL's path, so the log a forwarder ships holds nothing above D0.
+**Event log.** `aliquot audit export` prints every audited event as one JSON line: publishes, KB compiles, calls made outside a run, and every event of every run record (model and tool calls, refusals, stops, outcomes). A line holds ids, data classes, hashes, actors, refusal codes and the hash, class and size of each stored payload an event references. It never holds a question, an answer, a source, a changelog or a URL's path, so the log a forwarder ships holds nothing above D0. It is not `aliquot export`, which writes a reviewer bundle of chosen runs with their bodies at a stated clearance; `audit export` streams every event's metadata and no body.
 
 	docker compose exec -T worker aliquot audit export --follow | logger -t aliquot          # to syslog
 	docker compose exec -T worker aliquot audit export --since 1840 >> /var/log/aliquot.jsonl  # resume after line 1840
