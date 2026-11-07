@@ -16,7 +16,9 @@
  * are in fixtures/lab0/prereg-v2.json. Neither changes the other.
  *
  * Check K, added with document sources, is not pre-registered: a Box sync folder and a fake Drive feed one KB with
- * scoped entries, and it checks change detection, the version in the record and scope at retrieval.
+ * scoped entries, and it checks change detection, the version in the record and scope at retrieval. Check K2, added
+ * with the Graph source, is not pre-registered either: a fake SharePoint library, by delta, with an edit, a delete and
+ * a folder shared with one group.
  *
  *   node scripts/lab0.ts
  */
@@ -41,6 +43,8 @@ import { askShared, publishRoutedAgents, SHARED, type Sent } from "./routed-lab.
 import { newAnchorKeyPem } from "../packages/core/src/anchor.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 import { GOOGLE_DOC, startFakeDrive } from "./fake-drive.ts";
+import { DOCX, startFakeGraph } from "./fake-graph.ts";
+import { freezerSop } from "../test/docx-fixture.ts";
 import type { SourceStatus } from "../packages/core/src/record-view.ts";
 
 interface Prereg {
@@ -777,6 +781,87 @@ try {
     } finally {
       await cite.close();
       await drive.close();
+    }
+  });
+
+  await check("check K2: a fake SharePoint library feeds a KB through Graph delta; an edit and a delete reach the next answer, and a folder shared with one group is never read by anyone else", async () => {
+    await ps.stopAll();
+    const cite = await startFakeModel("scripted-1", "cite");
+    const graph = await startFakeGraph();
+    try {
+      graph.put({ id: "root", name: "root", folder: true, grants: [{ kind: "siteGroup", name: "Lab0 SOPs Members" }] });
+      graph.put({ id: "sp-sops", name: "Lab SOPs", folder: true });
+      graph.put({ id: "sp-freezer", name: "Freezer storage.docx", parent: "sp-sops", mimeType: DOCX, content: freezerSop() });
+      graph.put({ id: "sp-cryo", name: "Cryo", parent: "sp-sops", folder: true, inherits: false, grants: [{ kind: "group", email: "cryo@lab0.example" }] });
+      graph.put({ id: "sp-cryostat", name: "Cryostat rinse.md", parent: "sp-cryo", content: "# Cryostat rinse\n\nThe cryostat quillon rinse runs every Tuesday at 9 am, cryo group only.\n" });
+      const agentPath = agentFile("sharepoint", { agentId: "lab0-sharepoint", name: "Lab0 SharePoint documents", knowledgeBases: ["lab0-sp"], instructions: "Answer from the lab's documents and end with a Source: line." });
+      const cfg = join(work, "lab-sharepoint.toml");
+      writeFileSync(cfg, [
+        "[endpoints.local]", `base_url = "${cite.url}"`, 'placement = "lab"',
+        "[surfaces.web]", 'placement = "lab"', "port = 0",
+        // Graph and the download host are both on loopback here; a real lab places graph.microsoft.com and <tenant>.sharepoint.com.
+        "[hosts]", '"127.0.0.1" = "lab"',
+        "[agents]", `fixtures = ["${agentPath}"]`,
+        "[sources.lab0-sharepoint]", 'kind = "graph"', `drive_id = "${graph.driveId}"`, 'token_env = "LAB0_GRAPH_TOKEN"', `base_url = "${graph.url}"`, 'kb = "lab0-sp"', 'class = "D1"', "poll_seconds = 5",
+        "[sources.lab0-sharepoint.site_groups]", '"Lab0 SOPs Members" = "lab"',
+        "[directory.groups]", 'cryo = ["member-cryo"]',
+        "[directory.emails]", '"cryo@lab0.example" = "group:cryo"', "",
+      ].join("\n"));
+      const ks = processes(root, work, { ...childEnv, LAB0_GRAPH_TOKEN: graph.token });
+      try {
+        const sync = ks.start("sharepoint-sync", "kb.ts", ["sync", "--watch", "--config", cfg]);
+        await waitLine(sync, /watching 1 source: lab0-sharepoint \(every 5 s\)/, 20_000);
+        const { base } = await ks.startWeb(cfg);
+        ks.startWorker(cfg, "K2");
+        let k = 0;
+        const askAs = async (user: string, text: string) => {
+          const sent = await post(base, "/message", { thread: `t-K2-${k}`, message: `m-K2-${k++}`, text, user });
+          assert.equal(sent.status, 202, JSON.stringify(sent.json));
+          const runId = sent.json.runId as RunId;
+          const events = await waitFor(`run.finished for K2 ${text}`, async () => {
+            const es = await loadEvents(db, runId);
+            return es.some((e) => e.event.t === "run.finished") ? es : null;
+          }, 20_000);
+          const sources = JSON.parse((await get(`${base}/runs/${runId}/sources`)).text) as SourceStatus[];
+          return { runId, events, answer: await answerText(events), sources };
+        };
+        const statusOf = async (runId: RunId) => (JSON.parse((await get(`${base}/runs/${runId}/sources`)).text) as SourceStatus[]).find((v) => v.location === "Lab SOPs/Freezer storage.docx")?.state;
+        const q = "Where do aliquots go in the freezer?";
+        const first = await askAs("member-1", q);
+        assert.match(first.answer, /room 214, rack C/, `the answer quotes the Word document: ${first.answer}`);
+        const v1 = first.sources.find((v) => v.location === "Lab SOPs/Freezer storage.docx" && v.source === "lab0-sharepoint");
+        assert.ok(v1 && v1.state === "current", `the answer cites the SharePoint file's version: ${JSON.stringify(first.sources)}`);
+
+        let before = sync.out.join("").length;
+        graph.edit("sp-freezer", freezerSop("Edited in SharePoint by lab0 check K2."));
+        await waitFor("the delta poll to publish the edit", async () => (/published .*changed lab0-sharepoint\/lab-sops\/freezer-storage\.md/.test(sync.out.join("").slice(before)) ? true : null), 20_000);
+        assert.equal(await statusOf(first.runId), "changed", "the first answer now says its source changed");
+        const second = await askAs("member-1", q);
+        const v2 = second.sources.find((v) => v.location === "Lab SOPs/Freezer storage.docx");
+        assert.ok(v2 && v2.state === "current" && v2.version !== v1.version, "the next answer cites the edited version");
+
+        before = sync.out.join("").length;
+        graph.remove("sp-freezer");
+        await waitFor("the delta poll to publish the delete", async () => (/published .*removed lab0-sharepoint\/lab-sops\/freezer-storage\.md/.test(sync.out.join("").slice(before)) ? true : null), 20_000);
+        assert.equal(await statusOf(second.runId), "removed", "an answer from the deleted file says its source was removed");
+        const third = await askAs("member-1", q);
+        assert.ok(!/rack C/.test(third.answer) && !third.sources.some((v) => v.location === "Lab SOPs/Freezer storage.docx"), `the deleted file left the knowledge base: ${third.answer}`);
+
+        const outside = await askAs("member-1", "quillon rinse cryostat");
+        const leaked = JSON.stringify(outside.events).includes("cryostat-rinse") || /quillon rinse runs|Tuesday/.test(outside.answer) || outside.sources.some((v) => v.location.includes("Cryostat"));
+        assert.equal(leaked, false, "member-1 is not in the cryo group the folder is shared with, so its file is never retrieved, cited or answered from");
+        const inside = await askAs("member-cryo", "quillon rinse cryostat");
+        assert.match(inside.answer, /quillon rinse runs every Tuesday/);
+        assert.ok(inside.sources.some((v) => v.location === "Lab SOPs/Cryo/Cryostat rinse.md" && v.source === "lab0-sharepoint"));
+        const contentHops = graph.requests.filter((r) => r.startsWith("GET download:")).length;
+        assert.ok(graph.downloadAuth.every((a) => a === undefined), "no download hop carried the Graph token");
+        return `fake SharePoint library -> lab0-sp by delta; edit (version ${v1.version.slice(0, 8)} -> ${v2.version.slice(0, 8)}) and delete reached the next answer, earlier answers marked changed then removed; cryo folder: 0 retrievals for member-1, cited for member-cryo; ${contentHops} downloads, none with the token`;
+      } finally {
+        await ks.stopAll();
+      }
+    } finally {
+      await cite.close();
+      await graph.close();
     }
   });
 
