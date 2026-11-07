@@ -18,7 +18,7 @@ import { providerWire } from "../packages/core/src/surfaces/signon-wire.ts";
 import { createWebHandler, doorTokens, listenWeb } from "../packages/core/src/surfaces/web.ts";
 import { freshDatabase } from "./db.ts";
 import { chain, ref, started } from "./events.ts";
-import { Browser, seedStudioAccounts, startFakeOidc } from "./fake-oidc.ts";
+import { Browser, seedStudioAccounts, startFakeOidc, subOf } from "./fake-oidc.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const ALICE = "alice@lab.edu";
@@ -50,7 +50,7 @@ const probe = {
 
 const acpToken = "a".repeat(40);
 const tokens = doorTokens([{ id: "acp" as never, kind: "acp", placement: "lab", tokenEnv: "ACP" }], { ACP: acpToken }, () => {});
-const auth: SignOnConfig = { issuer: idp.issuer, clientId: "aliquot-door", clientSecretEnv: "SECRET", sessionSecretEnv: "SESSION", emailClaim: "email" };
+const auth: SignOnConfig = { issuer: idp.issuer, clientId: "aliquot-door", clientSecretEnv: "SECRET", sessionSecretEnv: "SESSION", emailClaim: "email", idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] };
 let handler: ReturnType<typeof createWebHandler> = async () => {};
 const { server, port } = await listenWeb((req, res) => handler(req, res), 0);
 const door = `http://127.0.0.1:${port}`;
@@ -84,10 +84,11 @@ const read = (snapshot: typeof handbook, path: string): RunEvent => ({
 });
 const finished: RunEvent = { t: "run.finished", outcome: "answered", answer: null, reason: null, flags: [] };
 
-const aliceRun = await insertRun(ALICE, [read(handbook, "office-hours.md"), finished]);
-const aliceRestricted = await insertRun(ALICE, [read(visits, "office-hours.md"), finished]);
-const bobRun = await insertRun(BOB, [finished]);
-const acpRun = await insertRun(ALICE, [finished], "acp");
+// Runs record the provider's stable id for the member, not their email.
+const aliceRun = await insertRun(subOf(ALICE), [read(handbook, "office-hours.md"), finished]);
+const aliceRestricted = await insertRun(subOf(ALICE), [read(visits, "office-hours.md"), finished]);
+const bobRun = await insertRun(subOf(BOB), [finished]);
+const acpRun = await insertRun(subOf(ALICE), [finished], "acp");
 
 async function signedIn(email: string): Promise<Browser> {
   const b = new Browser();
@@ -104,7 +105,8 @@ test("a member signs in through the provider with PKCE, lands on the page they a
   assert.ok(hops.some((h) => h.startsWith(`${door}/callback?code=`)), "came back through /callback");
   assert.ok(idp.log.includes(`token for ${ALICE}`), "the door exchanged the code at the token endpoint");
   const chat = await (await b.fetch(`${door}/`)).text();
-  assert.ok(chat.includes(`const user = "${ALICE}";`), "the chat page names the signed-in member");
+  assert.ok(chat.includes(`const user = "${subOf(ALICE)}";`), "the chat page asks as the provider's id for the member");
+  assert.ok(chat.includes(`const shown = "${ALICE}";`), "and names them by their email");
   assert.ok(chat.includes('action="/logout"'), "and offers sign out");
 });
 
@@ -124,7 +126,7 @@ test("once sign-on is on, a body user is ignored: intake gets the session's memb
   asked.length = 0;
   const res = await b.fetch(`${door}/message`, { method: "POST", headers: { "content-type": "application/json", origin: door }, body: JSON.stringify({ thread: "t", message: "m1", text: "hi", user: "mallory@lab.edu" }) });
   assert.equal(res.status, 403, "the probe's gate refuses every member");
-  assert.deepEqual(asked, [ALICE]);
+  assert.deepEqual(asked, [subOf(ALICE)], "the provider's stable id, which the run's record names");
   asked.length = 0;
   await fetch(`http://127.0.0.1:${open.port}/message`, { method: "POST", body: JSON.stringify({ thread: "t", message: "m2", text: "hi", user: "mallory@lab.edu" }) });
   assert.deepEqual(asked, ["mallory@lab.edu"], "without sign-on the door still trusts the body, on loopback");
@@ -289,6 +291,80 @@ test("a removed studio account loses access on its next request", async () => {
   }
 });
 
+/** A second door on its own provider and clock, for the tests that change [auth] or time. */
+async function otherDoor(config: Partial<SignOnConfig>, people: Parameters<typeof startFakeOidc>[0]["people"], clock = { now: Date.now() }) {
+  const p = await startFakeOidc({ clientId: "aliquot-door", clientSecret: null, people, now: () => clock.now });
+  let h: ReturnType<typeof createWebHandler> = async () => {};
+  const s = await listenWeb((req, res) => h(req, res), 0);
+  const url = `http://127.0.0.1:${s.port}`;
+  const so = createSignOn({ config: { ...auth, issuer: p.issuer, clientSecretEnv: null, ...config }, wire: providerWire, db, sessionSecret: randomBytes(32).toString("hex"), clientSecret: null, baseUrl: url, now: () => clock.now });
+  h = createWebHandler(db, probe, () => {}, null, "", new Map(), null, { signOn: so, kb });
+  return { url, clock, stop: async () => (s.server.close(), await p.stop()) };
+}
+
+test("a session nobody uses for idle_timeout_minutes ends: a page goes back through /login, JSON is a 401, and use keeps it alive", async () => {
+  const d = await otherDoor({ idleMinutes: 30 }, [{ email: ALICE }]);
+  try {
+    const b = new Browser();
+    assert.equal((await b.signIn(d.url, ALICE)).res.status, 200);
+    d.clock.now += 29 * 60_000;
+    assert.equal((await b.fetch(`${d.url}/runs`)).status, 200, "29 minutes after sign-in");
+    d.clock.now += 29 * 60_000;
+    assert.equal((await b.fetch(`${d.url}/runs/${aliceRun}/events`)).status, 200, "29 minutes after the last request: each request renews the session");
+    d.clock.now += 30 * 60_000;
+    const page = await b.fetch(`${d.url}/runs?show=failed`);
+    assert.equal(page.status, 302, "30 minutes unused");
+    assert.equal(page.headers.get("location"), `/login?next=${encodeURIComponent("/runs?show=failed")}`);
+    assert.ok(!b.cookies.has("aliquot_session"), "and the session cookie is cleared");
+    d.clock.now += 1000;
+    assert.equal((await b.signIn(d.url, ALICE, "/runs")).res.status, 200, "signing in again works");
+    d.clock.now += 31 * 60_000;
+    const json = await b.fetch(`${d.url}/runs/${aliceRun}/events`);
+    assert.deepEqual({ status: json.status, body: await json.json() }, { status: 401, body: { error: "your session ended after 30 minutes unused: sign in again at /login" } });
+  } finally {
+    await d.stop();
+  }
+});
+
+test("roles_claim maps a group claim to a role without a studio account, eppn is the member id, and an unmapped group falls back to the studio", async () => {
+  const carol = "carol@campus.edu";
+  const cilogon = { idClaim: "eppn", rolesClaim: "isMemberOf", roleValues: { "lab0:member": "member", "lab0:pi": "pi" } } as const;
+  const bare = await otherDoor(cilogon, [{ email: "carol@campus.edu", eppn: "carol@wisc.edu", groups: ["lab0:pi"] }]);
+  try {
+    const r = await new Browser().signIn(bare.url, "carol@campus.edu");
+    assert.ok(r.res.status === 403 && (await r.res.text()).includes("has no eppn claim"), "without its scope, the provider releases no eppn");
+  } finally {
+    await bare.stop();
+  }
+  const d = await otherDoor({ ...cilogon, scopes: ["openid", "email", "profile", "org.cilogon.userinfo"] }, [
+    { email: carol, eppn: "carol@wisc.edu", groups: ["campus:staff", "lab0:member", "lab0:pi"] },
+    { email: BOB, eppn: "bob@wisc.edu", groups: ["campus:staff"] },
+    { email: "dan@campus.edu", eppn: "dan@wisc.edu", groups: ["campus:staff"] },
+    { email: "noeppn@campus.edu", groups: ["lab0:pi"] },
+  ]);
+  try {
+    const c = new Browser();
+    assert.equal((await c.signIn(d.url, carol)).res.status, 200, "no studio account, but the provider says lab0:pi");
+    const list = await (await c.fetch(`${d.url}/runs`)).text();
+    assert.ok(list.includes("<h1>Runs</h1>") && list.includes(bobRun), "the highest mapped role wins: the PI sees all");
+    asked.length = 0;
+    await c.fetch(`${d.url}/message`, { method: "POST", headers: { origin: d.url }, body: JSON.stringify({ thread: "t", message: "m9", text: "hi" }) });
+    assert.deepEqual(asked, ["carol@wisc.edu"], "the run is asked as the eppn");
+
+    const b = new Browser();
+    assert.equal((await b.signIn(d.url, BOB)).res.status, 200, "no mapped group: bob's studio account makes him a member");
+    assert.ok((await (await b.fetch(`${d.url}/runs`)).text()).includes("Your runs"));
+
+    const dan = await new Browser().signIn(d.url, "dan@campus.edu");
+    assert.equal(dan.res.status, 403, "no mapped group and no studio account");
+    const noId = await new Browser().signIn(d.url, "noeppn@campus.edu");
+    assert.equal(noId.res.status, 403);
+    assert.ok((await noId.res.text()).includes("has no eppn claim"), "a token without the id claim signs nobody in");
+  } finally {
+    await d.stop();
+  }
+});
+
 test("lab.toml refuses a web bind beyond loopback without [auth], and takes it with [auth]", () => {
   const base = '[endpoints.local]\nbase_url = "http://127.0.0.1:11434/v1"\nplacement = "lab"\n';
   assert.throws(() => parseConfig(`${base}[surfaces.web]\nbind = "0.0.0.0"\n`, "/lab/lab.toml"), {
@@ -296,7 +372,14 @@ test("lab.toml refuses a web bind beyond loopback without [auth], and takes it w
   });
   assert.equal(parseConfig(`${base}[surfaces.web]\nbind = "127.0.0.1"\n`, "/lab/lab.toml").web.bind, "127.0.0.1");
   const c = parseConfig(`${base}[surfaces.web]\nbind = "0.0.0.0"\nbase_url = "https://ask.lab.edu"\n[auth]\nissuer = "https://login.lab.edu"\nclient_id = "aliquot"\nclient_secret_env = "OIDC_SECRET"\n`, "/lab/lab.toml");
-  assert.deepEqual({ bind: c.web.bind, signOn: c.signOn }, { bind: "0.0.0.0", signOn: { issuer: "https://login.lab.edu", clientId: "aliquot", clientSecretEnv: "OIDC_SECRET", sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email" } });
+  assert.deepEqual({ bind: c.web.bind, signOn: c.signOn }, { bind: "0.0.0.0", signOn: { issuer: "https://login.lab.edu", clientId: "aliquot", clientSecretEnv: "OIDC_SECRET", sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] } });
+  const auth2 = `${base}[auth]\nissuer = "https://cilogon.org"\nclient_id = "aliquot"\nid_claim = "eppn"\nidle_timeout_minutes = 15\nroles_claim = "isMemberOf"\nscopes = ["openid", "email", "org.cilogon.userinfo"]\n`;
+  assert.deepEqual(parseConfig(`${auth2}[auth.roles]\n"lab0:pi" = "pi"\n`, "/lab/lab.toml").signOn, {
+    issuer: "https://cilogon.org", clientId: "aliquot", clientSecretEnv: null, sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", idClaim: "eppn", idleMinutes: 15, rolesClaim: "isMemberOf", roleValues: { "lab0:pi": "pi" }, scopes: ["openid", "email", "org.cilogon.userinfo"],
+  });
+  assert.throws(() => parseConfig(auth2, "/lab/lab.toml"), /roles_claim and \[auth.roles\] go together/);
+  assert.throws(() => parseConfig(`${base}[auth]\nissuer = "https://cilogon.org"\nclient_id = "a"\nscopes = ["email"]\n`, "/lab/lab.toml"), /scopes must include openid/);
+  assert.throws(() => parseConfig(`${auth2}[auth.roles]\n"lab0:pi" = "dean"\n`, "/lab/lab.toml"), /roles/);
 });
 
 test("the door binary will not listen beyond loopback without [auth], whether asked by --host or --published", () => {

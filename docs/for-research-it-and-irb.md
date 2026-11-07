@@ -70,7 +70,7 @@ ceiling of its placement. An answer above it is posted as the record link only, 
 
 | Surface | What reaches the door | Placement | Ceiling |
 |---|---|---|---|
-| `web` | the chat page, and `aliquot ask` or `aliquot acp` with no token; no sign-in until the sign-on release | `lab` by default | D3 |
+| `web` | the chat page; with `[auth]`, only a signed-in member, and without it, also `aliquot ask` or `aliquot acp` with no token on the machine itself | `lab` by default | D3 |
 | `acp` | `aliquot acp` for T3 Code and other ACP clients, and `aliquot ask`, with the surface's bearer token | `zdr`, as `aliquot init` writes it | D1 |
 | `studio` | the studio's reads and writes of core and its test threads, on the `/studio` routes only, with the surface's bearer token | `lab`, as `aliquot init` writes it | D3 |
 | `slack` | `aliquot slack`, over Socket Mode to Slack and over HTTP to the door with the surface's bearer token ([slack.md](slack.md)) | `approved` at most; `lab.toml` refuses `lab` and `institution` because Slack keeps a copy of every answer and every question | D2 |
@@ -79,11 +79,12 @@ ceiling of its placement. An answer above it is posted as the record link only, 
 A surface's token comes from an environment variable that `lab.toml` names, never from the file. The door keeps only
 its hash. A request with an unknown bearer token, or `Bearer` with no token, is refused with a 401 and is never treated
 as web. A request with no bearer token is the web surface. A surface reads and stops only its own runs, which keeps
-each client on its own surface. While the web surface has no sign-in this is not access control, because anyone who
-reaches the door can ask as web.
+each client on its own surface. Without `[auth]` this is not access control, because anyone who reaches the door can
+ask as web, which is why the door then listens on loopback only. With `[auth]`, the web surface is the signed-in member
+and nobody else: a member id in a request body is ignored, and another member's run answers 404.
 
-The studio's token is the one credential from which the door takes a member and a role, because the studio's accounts
-hold the lab's roles until sign-on. The door makes every role and class check on the studio's requests, and never
+The studio's token is one credential from which the door takes a member and a role; a signed-in session is the other.
+Both read the role from the studio's accounts. The door makes every role and class check on the studio's requests, and never
 sends the studio the text of a D3 knowledge base entry.
 
 ### Hosted agent CLIs
@@ -161,7 +162,7 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Is data encrypted at rest? | Payloads are encrypted with AES-256-GCM under a key held outside the database. Run records hold references, not text. |
 | Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. |
 | Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
-| Single sign-on? | Not yet. The web door has no member sign-in and listens on 127.0.0.1 only. A bearer token says which surface a request comes from, not which member sent it. |
+| Single sign-on? | Yes, on the web door, with any OpenID Connect provider: Entra ID, Okta, Keycloak, CILogon. A SAML-only campus puts Keycloak or CILogon in front. With `[auth]` in `lab.toml`, a member signs in with the university account and sees only their own runs and records; the data steward and the PI see all. The role comes from a group or entitlement claim the lab maps, or from the studio account the PI added for that email. Every run's record names the member by the provider's stable id (`sub`, or `eppn`), and a session unused for `idle_timeout_minutes` (30 by default) ends, for HIPAA automatic logoff and NIST SP 800-171 03.01.10 and 03.01.11. Without `[auth]` the door listens on 127.0.0.1 only and refuses any other address. The studio keeps its own accounts. A token surface (Slack, `aliquot ask`, `acp`) says which surface a request comes from, not which member sent it. |
 | Key rotation and retention? | Not yet. |
 
 ## Not covered yet
@@ -169,7 +170,8 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 - **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A lab must add its
   own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,
   and refuses a pattern that matches ordinary text or no sample id.
-- **No sign-on.** Keep the web door on the machine until sign-on lands.
+- **Sign-on covers the web door only.** The studio signs people in with its own accounts, and a phone pairing or an
+  `aliquot ask` token cannot yet be minted from a signed-in session.
 - **No key rotation, no per-class keys, no retention sweep.**
 - **The version hash does not yet cover the system prompt text that the core builds around an agent's instructions.**
 - **The studio runs outside the network seal and still holds the database password.** It holds no payload key, so it

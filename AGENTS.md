@@ -57,6 +57,8 @@ An agent may run on Claude Code or Codex instead of a model endpoint (`[agent_ba
 
 ## Other harnesses
 
+Sign-on for the web door is `packages/core/src/surfaces/signon.ts` (OpenID Connect, PKCE, ID token checks with `node:crypto`, the signed session cookie with its idle timeout) and `signon-wire.ts`, the one file that reaches the provider: it is in the seal's allowance and `scripts/boundaries.ts` allows it `http` and `https` only. Do not add another. `web.ts` turns a session into a viewer (`open` without `[auth]`, `member`, or a token `surface`); every run route goes through `requireVisible` or `requireOwnRun`, which answer 404 for a run the viewer may not see. With sign-on on, a body `user` is never read. `test/fake-oidc.ts` is the provider for tests and `pnpm walk:signon`; nothing signs in to a real provider.
+
 `aliquot ask` and `aliquot acp` (Agent Client Protocol for T3 Code and other ACP clients) are clients of the web door's HTTP routes. `packages/core/src/door-client.ts` is the only file they add to the seal, and `scripts/boundaries.ts` allows it `http` and `https` only. They decide no egress: the door does. `packages/core/src/acp.ts` is the protocol, with no network of its own. `scripts/tmux.sh` lays the processes out in tmux. Its test (`test/tmux.test.ts`) uses a private tmux server (`ALIQUOT_TMUX_SOCKET`), never the default one, and skips without tmux. `docs/harnesses.md` is the user guide.
 
 ## Where things are

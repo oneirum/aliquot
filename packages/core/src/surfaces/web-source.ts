@@ -122,7 +122,9 @@ ${APP_HEAD}
 .from code, .lede code, .check code, .snap code { font: 12.5px var(--mono); }
 .from code { color: var(--muted); }
 .lede { color: var(--ink-2); font-size: 16px; margin: 14px 0 0; }
-.check { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; font-weight: 550; margin: 14px 0 0; }
+.check { font-size: 14px; font-weight: 550; margin: 14px 0 0; }
+.check span { margin-right: 6px; }
+.check code { white-space: nowrap; }
 .check.ok { color: var(--held); } .check.bad { color: var(--broken); }
 .entry { margin: 28px 0 0; padding: 24px 0 0; border-top: 1px solid var(--line); font-size: 16.5px; line-height: 1.65; }
 .entry p, .entry ul { margin: 0 0 14px; }

@@ -13,6 +13,7 @@ import { AUTH_HEADERS, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
+import { ROLES, type Role } from "./roles.ts";
 
 const placement = z.enum(PLACEMENTS);
 
@@ -69,8 +70,9 @@ export interface WebSurfaceConfig {
 }
 
 /**
- * [auth]: OpenID Connect sign-on for the web door. The member is the email the provider vouches for, matched to a studio
- * account by email. Secrets are named by env var.
+ * [auth]: OpenID Connect sign-on for the web door. The member id is the provider's stable id for the person; the role
+ * comes from a group claim when one is mapped, else from the studio account with the email the provider vouches for.
+ * Secrets are named by env var.
  */
 export interface SignOnConfig {
   readonly issuer: string;
@@ -81,6 +83,16 @@ export interface SignOnConfig {
   readonly sessionSecretEnv: string;
   /** The ID token claim that holds the member's email: email for most providers, preferred_username for some Entra ID tenants. */
   readonly emailClaim: string;
+  /** The claim whose value is the member id every run records: sub by default, eppn on InCommon campuses. An email can change; this does not. */
+  readonly idClaim: string;
+  /** A session nobody has used for this long ends, and the next request signs in again (HIPAA automatic logoff). */
+  readonly idleMinutes: number;
+  /** A group or entitlement claim whose values name the role, or null to take every role from the studio account. */
+  readonly rolesClaim: string | null;
+  /** Claim value to role. When several values match, the highest role wins; when none does, the studio account decides. */
+  readonly roleValues: Readonly<Record<string, Role>>;
+  /** What /login asks the provider for. CILogon releases eppn only under org.cilogon.userinfo; Okta's groups claim may need groups. */
+  readonly scopes: readonly string[];
 }
 
 /** 127.0.0.0/8, ::1 and localhost: the addresses only this machine reaches. */
@@ -209,8 +221,14 @@ const schema = z.object({
       client_secret_env: z.string().min(1).optional(),
       session_secret_env: z.string().min(1).default("LABH_SESSION_SECRET"),
       email_claim: z.string().min(1).default("email"),
+      id_claim: z.string().min(1).default("sub"),
+      idle_timeout_minutes: z.number().int().min(1).max(12 * 60).default(30),
+      roles_claim: z.string().min(1).optional(),
+      roles: z.record(z.string().min(1), z.enum(ROLES)).optional(),
+      scopes: z.array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/, "a scope is one word")).refine((s) => s.includes("openid"), "scopes must include openid").default(["openid", "email", "profile"]),
     })
     .strict()
+    .refine((a) => (a.roles_claim === undefined) === (a.roles === undefined), "roles_claim and [auth.roles] go together: the claim to read, and which of its values is which role")
     .optional(),
 });
 
@@ -316,7 +334,18 @@ export function parseConfig(text: string, path: string): LabConfig {
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
     signOn: c.auth
-      ? { issuer: c.auth.issuer, clientId: c.auth.client_id, clientSecretEnv: c.auth.client_secret_env ?? null, sessionSecretEnv: c.auth.session_secret_env, emailClaim: c.auth.email_claim }
+      ? {
+          issuer: c.auth.issuer,
+          clientId: c.auth.client_id,
+          clientSecretEnv: c.auth.client_secret_env ?? null,
+          sessionSecretEnv: c.auth.session_secret_env,
+          emailClaim: c.auth.email_claim,
+          idClaim: c.auth.id_claim,
+          idleMinutes: c.auth.idle_timeout_minutes,
+          rolesClaim: c.auth.roles_claim ?? null,
+          roleValues: c.auth.roles ?? {},
+          scopes: c.auth.scopes,
+        }
       : null,
   };
 }

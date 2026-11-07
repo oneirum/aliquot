@@ -18,13 +18,22 @@ export interface FakePerson {
   readonly name?: string;
   /** false makes the ID token say the provider has not verified the email. */
   readonly emailVerified?: boolean;
+  /** An InCommon campus's eduPersonPrincipalName, sent as the eppn claim under the org.cilogon.userinfo scope, as CILogon does. */
+  readonly eppn?: string;
+  /** Group memberships, sent as the isMemberOf claim under the same scope, as CILogon does. */
+  readonly groups?: readonly string[];
 }
+
+/** The sub the fake provider gives a person: stable, opaque, and not their email. */
+export const subOf = (email: string): string => `sub-${createHash("sha256").update(email).digest("hex").slice(0, 12)}`;
 
 export interface FakeOidcOptions {
   readonly clientId: string;
   /** Null: a public client, which sends no secret. */
   readonly clientSecret: string | null;
   readonly people: readonly FakePerson[];
+  /** The provider's clock, for a test that moves the door's. */
+  readonly now?: () => number;
 }
 
 export interface FakeOidc {
@@ -46,6 +55,7 @@ interface Grant {
   readonly challenge: string;
   readonly nonce: string;
   readonly person: FakePerson;
+  readonly scopes: readonly string[];
 }
 
 export async function startFakeOidc(opts: FakeOidcOptions): Promise<FakeOidc> {
@@ -88,6 +98,11 @@ export async function startFakeOidc(opts: FakeOidcOptions): Promise<FakeOidc> {
           id_token_signing_alg_values_supported: ["RS256"],
           code_challenge_methods_supported: ["S256"],
           token_endpoint_auth_methods_supported: [opts.clientSecret === null ? "none" : "client_secret_basic"],
+          // The rest of CILogon's shape: its own scope and the research-identity claims a campus releases through it.
+          userinfo_endpoint: `${issuer}/userinfo`,
+          scopes_supported: ["openid", "email", "profile", "org.cilogon.userinfo"],
+          claims_supported: ["sub", "iss", "aud", "email", "name", "given_name", "family_name", "idp", "idp_name", "eppn", "eptid", "affiliation", "isMemberOf", "entitlement"],
+          grant_types_supported: ["authorization_code", "refresh_token"],
         });
       if (url.pathname === "/jwks") return json(res, 200, { keys: [{ ...publicKey.export({ format: "jwk" }), kid, use: "sig", alg: "RS256" }] });
       if (url.pathname === "/authorize" || url.pathname === "/authorize/pick") {
@@ -117,7 +132,7 @@ main{width:100%;max-width:400px}h1{font-size:22px;margin:0 0 6px}p{margin:0 0 20
         }
         if (!person) return json(res, 400, { error: "access_denied", error_description: "no such test person" });
         const code = b64url(randomBytes(24));
-        grants.set(code, { redirectUri: q.get("redirect_uri")!, challenge: q.get("code_challenge")!, nonce: q.get("nonce")!, person });
+        grants.set(code, { redirectUri: q.get("redirect_uri")!, challenge: q.get("code_challenge")!, nonce: q.get("nonce")!, person, scopes: (q.get("scope") ?? "").split(" ") });
         const back = new URL(q.get("redirect_uri")!);
         back.searchParams.set("code", code);
         back.searchParams.set("state", q.get("state")!);
@@ -141,10 +156,10 @@ main{width:100%;max-width:400px}h1{font-size:22px;margin:0 0 6px}p{margin:0 0 20
         if (f.get("grant_type") !== "authorization_code" || !grant) return refuse("invalid_grant", "unknown or used code");
         if (f.get("redirect_uri") !== grant.redirectUri) return refuse("invalid_grant", "redirect_uri does not match");
         if (b64url(createHash("sha256").update(f.get("code_verifier") ?? "").digest()) !== grant.challenge) return refuse("invalid_grant", "PKCE verifier does not match");
-        const now = Math.floor(Date.now() / 1000);
+        const now = Math.floor((opts.now ?? Date.now)() / 1000);
         let claims: Record<string, unknown> = {
           iss: issuer,
-          sub: `sub-${createHash("sha256").update(grant.person.email).digest("hex").slice(0, 12)}`,
+          sub: subOf(grant.person.email),
           aud: opts.clientId,
           iat: now,
           exp: now + 300,
@@ -152,6 +167,9 @@ main{width:100%;max-width:400px}h1{font-size:22px;margin:0 0 6px}p{margin:0 0 20
           email: grant.person.email,
           email_verified: grant.person.emailVerified ?? true,
           name: grant.person.name ?? grant.person.email,
+          // CILogon releases these only to a client that asks for its org.cilogon.userinfo scope.
+          ...(grant.person.eppn && grant.scopes.includes("org.cilogon.userinfo") ? { eppn: grant.person.eppn } : {}),
+          ...(grant.person.groups && grant.scopes.includes("org.cilogon.userinfo") ? { isMemberOf: grant.person.groups } : {}),
         };
         if (tamper) {
           claims = tamper(claims);

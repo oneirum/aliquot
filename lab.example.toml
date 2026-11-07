@@ -79,7 +79,25 @@ name = "Mettu Lab"                     # shown at the top of the chat and record
 
 [surfaces.web]
 placement = "lab"
-port = 3000                              # no token: on this machine only until the sign-on release
+port = 3000                              # no token: members sign in through [auth] below, or the door stays on this machine
+# base_url = "https://ask.lab.example.edu"  # what members type; the provider sends them back to its /callback
+# bind = "0.0.0.0"                       # beyond loopback only with [auth]; compose sets it from LABH_BIND
+
+# Sign-on for the web door, with any OpenID Connect provider: Entra ID, Okta, Keycloak, CILogon (docs/install.md).
+# A member is the studio account with the email the provider vouches for, unless roles_claim maps their group.
+# [auth]
+# issuer = "https://login.microsoftonline.com/<tenant-id>/v2.0"
+# client_id = "<application id>"
+# client_secret_env = "LABH_OIDC_CLIENT_SECRET"
+# session_secret_env = "LABH_SESSION_SECRET"   # openssl rand -hex 32; signs the session cookie
+# id_claim = "sub"                       # the member id every run records; "eppn" on an InCommon campus
+# email_claim = "email"                  # "preferred_username" for Entra ID tenants that send no email
+# idle_timeout_minutes = 30              # an unused session ends (HIPAA automatic logoff)
+# scopes = ["openid", "email", "profile"]  # CILogon: add "org.cilogon.userinfo" for eppn and isMemberOf
+# roles_claim = "isMemberOf"             # with [auth.roles]: roles from the provider's groups
+# [auth.roles]
+# "lab0:members" = "member"
+# "lab0:pi" = "pi"
 
 # Every other surface names the env var that holds its bearer token (32 characters or more, openssl rand -hex 32).
 # The door shows a surface nothing above its placement's chat ceiling; anything higher gets the record link only.

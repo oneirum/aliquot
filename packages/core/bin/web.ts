@@ -45,7 +45,7 @@ try {
     const secret = s.clientSecretEnv === null ? null : (process.env[s.clientSecretEnv] ?? "");
     if (secret === "") throw new Error(`[auth] names client_secret_env ${s.clientSecretEnv}, which is not set`);
     signOn = createSignOn({ config: s, wire: providerWire, db: core.db, sessionSecret: process.env[s.sessionSecretEnv] ?? "", clientSecret: secret, baseUrl: core.config.web.baseUrl });
-    if (!(await studioAccountsExist(core.db))) log("[web] sign-on is on, but the studio has no accounts yet, so nobody can sign in until the studio has started once and its PI has added members");
+    if (s.rolesClaim === null && !(await studioAccountsExist(core.db))) log("[web] sign-on is on, but the studio has no accounts yet, so nobody can sign in until the studio has started once and its PI has added members");
   }
 } catch (err) {
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);

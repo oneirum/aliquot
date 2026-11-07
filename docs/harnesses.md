@@ -33,7 +33,7 @@ Exit codes: 0 answered, 1 refused or not answered, 2 a usage problem or a door t
 
 `--ceiling D0|D1|D2|D3` is a stricter promise on the caller's side, for a caller that keeps its own copy of the answer. The door already withholds anything above its surface's placement. An answer above the ceiling is withheld the same way.
 
-The web door has no member sign-in yet. Until the sign-on release (0.7), it trusts the member id it is given, and it stays on `127.0.0.1` like the chat page. So `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`).
+Without `[auth]`, the web door trusts the member id it is given and stays on `127.0.0.1`, so `aliquot ask` and `aliquot acp` run on the lab machine itself, or reach the door through an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 lab-server`). With `[auth]`, the web surface is for signed-in browsers only: give `aliquot ask` and `aliquot acp` a token surface (`[surfaces.acp]` and `ALIQUOT_SURFACE_TOKEN`), and it reads only its own surface's runs. A token cannot yet be minted from a signed-in session.
 
 ## Surfaces
 
@@ -132,7 +132,7 @@ Cursor, `.cursor/mcp.json` in the project or `~/.cursor/mcp.json`:
 	  }
 	}
 
-The door stays on `127.0.0.1` until sign-on, so a member's laptop reaches it through an SSH tunnel, as above. Every message from a surface other than web starts at D1, because the sender names its channel, and only the channel `[surfaces.web]` binds may start lower. So a `public` surface, whose ceiling is D0, gets the record link for every answer today, and its members read the answers on the chat page. A surface at `approved`, for a seat the institution approved, gets answers up to D2.
+Without `[auth]` the door stays on `127.0.0.1`, so a member's laptop reaches it through an SSH tunnel, as above; with it, through the lab's reverse proxy and the surface's token. Every message from a surface other than web starts at D1, because the sender names its channel, and only the channel `[surfaces.web]` binds may start lower. So a `public` surface, whose ceiling is D0, gets the record link for every answer today, and its members read the answers on the chat page. A surface at `approved`, for a seat the institution approved, gets answers up to D2.
 
 `test/door-client.test.ts` drives `aliquot mcp` over stdio, and `pnpm lab0` check H runs it against the real door through a `zdr` and a `public` surface. The official MCP TypeScript SDK (`@modelcontextprotocol/sdk` 1.32.2) also ran as its client against lab0: it listed `ask`, validated the results against the tool's output schema, got the cited handbook answer through the `zdr` surface, and got the record link only through the `public` one.
 

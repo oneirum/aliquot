@@ -22,7 +22,7 @@ const CLOSE = icon('<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-wi
 const SEND = icon('<path d="M8 13V3.5M3.75 7.5L8 3.25l4.25 4.25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>');
 
 /** me is the signed-in member when sign-on is on: the page asks as them, and seesAll says whether the runs list is everyone's. */
-export function chatPage(where = "", me: { readonly id: string; readonly seesAll: boolean } | null = null): string {
+export function chatPage(where = "", me: { readonly id: string; readonly name: string; readonly seesAll: boolean } | null = null): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -238,6 +238,7 @@ const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 // Signed in, the door names the member and ignores any user the page sends; without sign-on, the page names one.
 const user = ${me ? JSON.stringify(me.id).replace(/</g, "\\u003c") : 'params.get("user") || "member-1"'};
+const shown = ${me ? JSON.stringify(me.name).replace(/</g, "\\u003c") : "user"};
 const channel = params.get("channel") || undefined;
 // The thread lives in this tab's sessionStorage, so a reload or a visit to a record and back keeps it.
 const KEY = "aliquot.thread." + (channel || "") + "." + user;
@@ -253,7 +254,7 @@ const clock = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-di
 const dayName = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const hex = (h) => h.slice(0, 16).replace(/(.{4})(?!$)/g, "$1 ");
 
-$("who").textContent = user;
+$("who").textContent = shown;
 
 // The sidebar sits beside the thread on a wide screen, where the toggle hides it and the choice is remembered, and
 // slides over it as a drawer on a phone, where it starts closed.
@@ -486,7 +487,7 @@ function turnOf(t, n) {
   const entry = el("article", "entry"); entry.id = "e" + n;
   const head = el("p", "meta");
   const time = el("time", "", clock(at)); time.dateTime = at;
-  head.append(time, el("span", "who", user));
+  head.append(time, el("span", "who", shown));
   const body = el("div", "body");
   body.append(el("h3", "q", t.q));
   const margin = el("aside", "margin");
@@ -531,7 +532,7 @@ async function watch(turn, steps, runId, scroll) {
     const finished = events.find((e) => e.event.t === "run.finished");
     if (finished) {
       const started = events.find((e) => e.event.t === "run.started");
-      if (started) turn.head.lastChild.textContent = started.event.trigger.memberId || user;
+      if (started) turn.head.lastChild.textContent = started.event.trigger.memberId === user ? shown : started.event.trigger.memberId || user;
       const replies = await fetchJson("/replies?runId=" + runId);
       const refused = events.find((e) => e.event.t === "egress.refused");
       const withheld = events.filter((e) => e.event.t === "tool.withheld").length;

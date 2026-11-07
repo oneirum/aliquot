@@ -64,7 +64,7 @@ export function formatSummary(s: RunSummary): string {
 export function describeEvent(e: RunEvent): string {
   switch (e.t) {
     case "run.started":
-      return `${e.surface} thread, trigger ${e.trigger.t}, ${e.history.length} earlier turns`;
+      return `${e.surface} thread, trigger ${e.trigger.t}${"memberId" in e.trigger ? ` from ${e.trigger.memberId}` : ""}, ${e.history.length} earlier turns`;
     case "model.requested":
       return `to ${e.target.endpointId}, model ${e.target.modelId}, step ${e.step}${e.attempt > 1 ? `, attempt ${e.attempt}` : ""}${e.final ? ", final" : ""}`;
     case "model.completed":

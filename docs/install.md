@@ -29,7 +29,62 @@ The participant id question is the one that matters most. Every message, source 
 
 `docker compose up` starts four services. Postgres holds core's tables and the studio's tables (in a `studio` schema). The worker runs agents and compiles knowledge bases. The web door is the members' chat page and record pages, on port 3000. The studio is the authoring app, a production build on port 3001. Only the worker and the web door get `LABH_PAYLOAD_KEY`. The studio holds no payload key: it sends every read and write of core's tables to the web door with `ALIQUOT_STUDIO_TOKEN`, and connects to Postgres itself only for its own tables, as the same database user. Core applies its migrations when the worker or the web door starts. The studio applies its own committed migrations when it starts.
 
-Every port is published on `127.0.0.1`. The web door has no sign-in yet (planned for 0.7), so keep it on the machine, or behind a proxy that only lab members can reach. `LABH_BIND` in `.env` changes the address. `LABH_WEB_PORT`, `LABH_STUDIO_PORT` and `LABH_PG_PORT` change the ports.
+Every port is published on `127.0.0.1`. `LABH_BIND` in `.env` changes the address, and the web door refuses any address beyond the machine until `lab.toml` has sign-on (next section). `LABH_WEB_PORT`, `LABH_STUDIO_PORT` and `LABH_PG_PORT` change the ports.
+
+## Sign-on and a reverse proxy
+
+Without sign-on, the web door trusts the member id the page sends, so it listens on the machine only. With an `[auth]` table in `lab.toml`, members sign in with the university account through any OpenID Connect provider, and the door may face the campus network behind a reverse proxy.
+
+What a signed-in member gets: their own runs on `/runs` and nobody else's (the data steward and the PI see all), a 404 for anyone else's record, events, sources, replies or stop, and the cited entry behind the chat's Source chip when its class allows. A member id in a request body is ignored. Each run's record names the member by the provider's stable id.
+
+1. Register Aliquot with the provider as a web application (a confidential client). The redirect URI is the door's address plus `/callback`, for example `https://ask.lab.example.edu/callback`. Ask for the authorization code flow; Aliquot always sends PKCE (S256).
+2. Add to `config/lab.toml`:
+
+	[surfaces.web]
+	placement = "lab"
+	port = 3000
+	base_url = "https://ask.lab.example.edu"   # what members type; https makes the cookie Secure
+	bind = "0.0.0.0"                          # or leave it out and set LABH_BIND for compose
+
+	[auth]
+	issuer = "https://login.microsoftonline.com/<tenant-id>/v2.0"
+	client_id = "<application id>"
+	client_secret_env = "LABH_OIDC_CLIENT_SECRET"
+	# id_claim = "sub"                 # the member id each run records; eppn on an InCommon campus
+	# email_claim = "email"            # preferred_username for Entra ID tenants that send no email claim
+	# idle_timeout_minutes = 30        # a session unused this long ends (HIPAA automatic logoff)
+	# scopes = ["openid", "email", "profile"]
+
+3. Add to `.env`: `LABH_SESSION_SECRET=$(openssl rand -hex 32)` (it signs the session cookie; the door refuses one shorter than 32 characters) and `LABH_OIDC_CLIENT_SECRET=<the provider's client secret>`. Set `LABH_BIND=0.0.0.0` only once the proxy is in front.
+4. `docker compose up -d`. The door's start line names the provider members sign in at. Without `roles_claim`, it also warns when the studio has not created its accounts yet, because nobody can sign in until it has.
+
+Who may sign in: a person the provider vouches for whose email matches a studio account the PI added, with that account's role, read on every request, so a removed account loses access at once. A university provider vouches for the whole campus, so anyone else is told to ask the PI. A lab that manages membership in the provider instead maps a group or entitlement claim to roles, and the studio account then only matters for someone with no mapped group:
+
+	[auth]
+	roles_claim = "isMemberOf"
+
+	[auth.roles]
+	"lab0:members" = "member"
+	"lab0:pi" = "pi"
+
+A role from a claim holds for the session. A session lasts 12 hours from sign-in and ends sooner after `idle_timeout_minutes` unused; the next page goes back through the provider and returns to where it was. **Sign out** clears the session on the door, not at the provider.
+
+| Provider | `issuer` | Notes |
+|---|---|---|
+| Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Add the `email` optional claim, or set `email_claim = "preferred_username"`. For roles, the `groups` claim carries group object ids, which are the keys of `[auth.roles]`. |
+| Okta | `https://<org>.okta.com/oauth2/default` | A groups claim needs the authorization server's claim rule, and may need `"groups"` in `scopes`. |
+| Keycloak | `https://<host>/realms/<realm>` | Add a group membership mapper to the client for `roles_claim = "groups"`. |
+| CILogon | `https://cilogon.org` | Set `scopes = ["openid", "email", "profile", "org.cilogon.userinfo"]`: CILogon releases `eppn` and `isMemberOf` only under that scope. Then `id_claim = "eppn"`. |
+
+A campus that speaks only SAML puts Keycloak (as a SAML broker) or CILogon (through InCommon) in front, and Aliquot signs in to that.
+
+The reverse proxy terminates TLS and passes requests to the door on port 3000 with the original `Host` header. A signed-in POST must come from `base_url`'s origin or the `Host` it was sent to, so keep both the same. For Caddy:
+
+	ask.lab.example.edu {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+Sign-on covers the web door. The studio keeps its own accounts, and the token surfaces (`aliquot ask`, `aliquot acp`, Slack) keep their tokens. With sign-on on, a token surface reads only its own surface's runs.
 
 ## Knowledge bases
 

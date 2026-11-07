@@ -8,10 +8,14 @@
  *              matched to a studio account
  *   /logout    the session cookie is cleared
  *
- * The member id is the account's email, the id the studio already records every publish and test under (actorOf).
- * Their role is read from the studio's account on every request, so a role change or a removed account takes effect
- * at once, and the session cookie carries only who signed in and until when. Someone the provider vouches for who
- * has no studio account is refused: a university provider vouches for the whole campus, and the lab is a few people.
+ * The member id is the provider's stable id for the person ([auth] id_claim: sub, or eppn on an InCommon campus), so
+ * every run's record names who asked by an id that outlives a changed email. The role comes from a group or
+ * entitlement claim when [auth] roles_claim maps one, fixed for the session; otherwise it is read from the studio
+ * account with the member's email on every request, so a role change or a removed account takes effect at once.
+ * Someone with neither is refused: a university provider vouches for the whole campus, and the lab is a few people.
+ *
+ * A session lasts 12 hours from sign-in, and ends sooner when nobody uses it for [auth] idle_timeout_minutes (HIPAA
+ * automatic logoff, NIST SP 800-171 03.01.10 and 03.01.11): the cookie carries when it was last used, and every request renews it.
  *
  * The provider is reached only through signon-wire.ts.
  */
@@ -36,7 +40,24 @@ const KEYS_REFRESH_MS = 60_000;
 
 export interface Member {
   readonly id: MemberId;
+  /** For people to read: the chat names the member by it. */
+  readonly email: string;
   readonly role: Role;
+}
+
+/** What a request's session cookie says: a member (and the renewed cookie), a session that sat idle too long, or none. */
+export type Session =
+  | { readonly t: "member"; readonly member: Member; readonly setCookie: string }
+  | { readonly t: "idle"; readonly minutes: number; readonly setCookie: string }
+  | { readonly t: "none" };
+
+interface SessionValue {
+  readonly id: string;
+  readonly email: string;
+  /** Only when a mapped claim named the role at sign-in. */
+  readonly role?: Role;
+  /** Seconds: when the session was last used. */
+  readonly seen: number;
 }
 
 /** A sign-in that did not finish. The message is written for the person signing in. */
@@ -62,7 +83,7 @@ function signValue(secret: string, purpose: Purpose, value: unknown, expiresAt: 
   return `${body}.${b64url(createHmac("sha256", secret).update(body).digest())}`;
 }
 
-function openValue(secret: string, purpose: Purpose, token: string | undefined, nowSeconds: number): unknown {
+function openValue(secret: string, purpose: Purpose, token: string | undefined, nowSeconds: number): { readonly v: unknown; readonly exp: number } | null {
   const [body, mac, extra] = (token ?? "").split(".");
   if (!body || !mac || extra !== undefined) return null;
   const want = createHmac("sha256", secret).update(body).digest();
@@ -70,7 +91,7 @@ function openValue(secret: string, purpose: Purpose, token: string | undefined, 
   if (got.length !== want.length || !timingSafeEqual(got, want)) return null;
   try {
     const p = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as { p?: unknown; exp?: unknown; v?: unknown };
-    return p.p === purpose && typeof p.exp === "number" && p.exp > nowSeconds ? p.v : null;
+    return p.p === purpose && typeof p.exp === "number" && p.exp > nowSeconds ? { v: p.v, exp: p.exp } : null;
   } catch {
     return null;
   }
@@ -153,6 +174,18 @@ export function verifyIdToken(token: string, keys: readonly Jwk[], check: IdToke
   return claims;
 }
 
+/** The highest role any of the claim's values maps to, or null. A claim may be one string or a list of them. */
+export function claimRole(claims: Record<string, unknown>, claim: string, values: Readonly<Record<string, Role>>): Role | null {
+  const raw = claims[claim];
+  const list = Array.isArray(raw) ? raw : [raw];
+  let best: Role | null = null;
+  for (const v of list) {
+    const role = typeof v === "string" && Object.hasOwn(values, v) ? values[v]! : null;
+    if (role && (best === null || ROLES.indexOf(role) > ROLES.indexOf(best))) best = role;
+  }
+  return best;
+}
+
 /**
  * The studio account's role for an email, or null when there is none. The studio's accounts live in its own schema of
  * the same database (Payload, packages/studio/collections/users.ts); before the studio has run there is no table, and
@@ -192,8 +225,8 @@ export interface SignOn {
   readonly origin: string;
   /** The provider's host, for the sign-in page. */
   readonly provider: string;
-  /** The signed-in member, or null: no session, an expired or altered one, or an account the lab has removed. */
-  member(cookieHeader: string | undefined): Promise<Member | null>;
+  /** The signed-in member with the renewed cookie; an idle session; or none: no cookie, an expired or altered one, or an account the lab has removed. */
+  session(cookieHeader: string | undefined): Promise<Session>;
   /** Where /login sends the browser, and the cookie that remembers this sign-in until /callback. */
   begin(next: string | null): Promise<{ readonly location: string; readonly setCookie: string }>;
   /** /callback. Throws SignOnRefused with a message for the person. */
@@ -278,11 +311,16 @@ export function createSignOn(deps: SignOnDeps): SignOn {
   return {
     origin: base.origin,
     provider: new URL(config.issuer).host,
-    async member(cookieHeader) {
-      const session = openValue(sessionSecret, "session", cookieValue(cookieHeader, SESSION_COOKIE), seconds()) as { email?: unknown } | null;
-      if (!session || typeof session.email !== "string") return null;
-      const role = await studioRole(db, session.email);
-      return role ? { id: session.email as MemberId, role } : null;
+    async session(cookieHeader) {
+      const now = seconds();
+      const opened = openValue(sessionSecret, "session", cookieValue(cookieHeader, SESSION_COOKIE), now);
+      const s = opened?.v as Partial<SessionValue> | undefined;
+      if (!opened || !s || typeof s.id !== "string" || typeof s.email !== "string" || typeof s.seen !== "number") return { t: "none" };
+      if (now - s.seen >= config.idleMinutes * 60) return { t: "idle", minutes: config.idleMinutes, setCookie: cookie(SESSION_COOKIE, "", "/", 0) };
+      const role = s.role ?? (await studioRole(db, s.email));
+      if (!role) return { t: "none" };
+      const renewed = signValue(sessionSecret, "session", { ...s, seen: now }, opened.exp);
+      return { t: "member", member: { id: s.id as MemberId, email: s.email, role }, setCookie: cookie(SESSION_COOKIE, renewed, "/", opened.exp - now) };
     },
     begin: (next) => reach(async () => {
       const p = await discover();
@@ -292,7 +330,7 @@ export function createSignOn(deps: SignOnDeps): SignOn {
         response_type: "code",
         client_id: config.clientId,
         redirect_uri: redirectUri,
-        scope: "openid email profile",
+        scope: config.scopes.join(" "),
         state: login.state,
         nonce: login.nonce,
         code_challenge: pkceChallenge(login.verifier),
@@ -304,7 +342,7 @@ export function createSignOn(deps: SignOnDeps): SignOn {
     finish: (query, cookieHeader) => reach(async () => {
       const error = query.get("error");
       if (error) throw new SignOnRefused(`The provider did not sign you in: ${query.get("error_description") ?? error}.`);
-      const login = openValue(sessionSecret, "login", cookieValue(cookieHeader, LOGIN_COOKIE), seconds()) as LoginState | null;
+      const login = (openValue(sessionSecret, "login", cookieValue(cookieHeader, LOGIN_COOKIE), seconds())?.v ?? null) as LoginState | null;
       if (!login) throw new SignOnRefused("This sign-in started more than ten minutes ago, or in another browser. Sign in again.");
       const state = query.get("state") ?? "";
       if (state.length !== login.state.length || !timingSafeEqual(Buffer.from(state), Buffer.from(login.state))) throw new SignOnRefused("This sign-in does not match the one this browser started. Sign in again.");
@@ -323,10 +361,14 @@ export function createSignOn(deps: SignOnDeps): SignOn {
       const email = claims[config.emailClaim];
       if (typeof email !== "string" || !email.includes("@")) throw new SignOnRefused(`The provider's ID token has no email in its ${config.emailClaim} claim, so Aliquot cannot match you to a lab account.`);
       if (claims.email_verified === false) throw new SignOnRefused(`The provider has not verified ${email}, so Aliquot cannot match it to a lab account.`);
-      const role = await studioRole(db, email);
+      const id = claims[config.idClaim];
+      if (typeof id !== "string" || !id.trim()) throw new SignOnRefused(`The provider's ID token has no ${config.idClaim} claim, which lab.toml's [auth] id_claim names as the member's id. Tell the lab's research IT.`);
+      const fromClaim = config.rolesClaim === null ? null : claimRole(claims, config.rolesClaim, config.roleValues);
+      const role = fromClaim ?? (await studioRole(db, email));
       if (!role) throw new SignOnRefused(`You signed in as ${email}, but this lab has no account for that address. Ask the PI to add it in the studio.`);
-      const session = signValue(sessionSecret, "session", { sub: claims.sub, email }, seconds() + SESSION_SECONDS);
-      return { member: { id: email as MemberId, role }, next: login.next, setCookie: [cookie(SESSION_COOKIE, session, "/", SESSION_SECONDS), cookie(LOGIN_COOKIE, "", "/callback", 0)] };
+      const value: SessionValue = { id, email, ...(fromClaim ? { role: fromClaim } : {}), seen: seconds() };
+      const session = signValue(sessionSecret, "session", value, seconds() + SESSION_SECONDS);
+      return { member: { id: id as MemberId, email, role }, next: login.next, setCookie: [cookie(SESSION_COOKIE, session, "/", SESSION_SECONDS), cookie(LOGIN_COOKIE, "", "/callback", 0)] };
     }),
     signOut: () => [cookie(SESSION_COOKIE, "", "/", 0)],
   };

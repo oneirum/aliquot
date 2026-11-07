@@ -129,6 +129,8 @@ port = ${a.port}                        # the web door, on this machine only unt
 # client_secret_env = "LABH_OIDC_CLIENT_SECRET"   # the secret goes in .env, never here
 # session_secret_env = "LABH_SESSION_SECRET"      # signs session cookies; add it to .env: openssl rand -hex 32
 # email_claim = "email"                           # some Entra ID tenants: "preferred_username"
+# id_claim = "sub"                                # the member id every run records; "eppn" on an InCommon campus
+# idle_timeout_minutes = 30                       # an unused session ends (HIPAA automatic logoff)
 
 # aliquot acp for T3 Code and other ACP clients. T3 Code keeps a copy of every thread, so the door shows this surface
 # D1 at most and withholds anything above it with the record link only. The client sets ALIQUOT_SURFACE_TOKEN to this token.

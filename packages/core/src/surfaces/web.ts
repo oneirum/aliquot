@@ -221,7 +221,7 @@ function surfaceOf(req: IncomingMessage, tokens: DoorTokens): { readonly id: Sur
  * Who a request speaks for. open: sign-on is off, so the web surface trusts the body's user and records are open, as
  * before sign-on. member: the session's member. surface: a token surface while sign-on is on, which reads its own runs.
  */
-type Viewer = { readonly t: "open" } | { readonly t: "member"; readonly id: MemberId; readonly role: Role } | { readonly t: "surface"; readonly id: SurfaceId };
+type Viewer = { readonly t: "open" } | { readonly t: "member"; readonly id: MemberId; readonly email: string; readonly role: Role } | { readonly t: "surface"; readonly id: SurfaceId };
 
 /** The run's surface and the member who asked it, from the job intake wrote, or null when there is no such run. */
 async function runOwner(db: Db, runId: string): Promise<{ readonly surface: string; readonly member: string | null } | null> {
@@ -309,9 +309,16 @@ export function createWebHandler(
           }
         }
         if ((req.method === "GET" || req.method === "POST") && url.pathname === "/logout") return redirect(res, "/?signed-out", signOn.signOut());
-        const member = await signOn.member(req.headers.cookie);
-        if (!member) {
-          if (req.method === "GET" && PAGE.test(url.pathname)) {
+        const session = await signOn.session(req.headers.cookie);
+        const page = req.method === "GET" && PAGE.test(url.pathname);
+        if (session.t === "idle") {
+          // Automatic logoff: the session ends, and a page goes straight back through the provider to where it was.
+          if (page) return redirect(res, `/login?next=${encodeURIComponent(`${url.pathname}${url.search}`)}`, [session.setCookie]);
+          res.setHeader("set-cookie", session.setCookie);
+          throw new HttpError(401, `your session ended after ${session.minutes} minutes unused: sign in again at /login`);
+        }
+        if (session.t === "none") {
+          if (page) {
             const note = url.searchParams.has("signed-out") ? "You are signed out." : null;
             return sendHtml(req, res, signInPage(where, signOn.provider, url.searchParams.has("signed-out") ? "/" : `${url.pathname}${url.search}`, note), NO_STORE, 401);
           }
@@ -320,7 +327,8 @@ export function createWebHandler(
         // SameSite=Lax keeps the cookie off another site's POST; this also refuses one from an origin the door does not serve.
         const origin = req.headers.origin;
         if (req.method === "POST" && origin && origin !== signOn.origin && URL.parse(origin)?.host !== req.headers.host) throw new HttpError(403, `a signed-in POST must come from ${signOn.origin}`);
-        viewer = { t: "member", id: member.id, role: member.role };
+        res.setHeader("set-cookie", session.setCookie);
+        viewer = { t: "member", id: session.member.id, email: session.member.email, role: session.member.role };
       } else if (signOn) viewer = { t: "surface", id: surface };
 
       const boundHere = surface === WEB_SURFACE ? bound : null;
@@ -349,7 +357,7 @@ export function createWebHandler(
         await requireOwnRun(db, runId.data, surface, viewer);
         return send(req, res, 200, await readReplies(db, runId.data as RunId), NO_STORE);
       }
-      const me = viewer.t === "member" ? { id: viewer.id, seesAll: seesAllRuns(viewer.role) } : null;
+      const me = viewer.t === "member" ? { id: viewer.id, name: viewer.email, seesAll: seesAllRuns(viewer.role) } : null;
       if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat")) return sendHtml(req, res, chatPage(where, me), me ? NO_STORE : {});
       if (req.method === "GET" && url.pathname === "/runs") {
         const show = url.searchParams.get("show");

@@ -101,8 +101,9 @@ export async function startFakeModel(modelId: string, script: Script, at: { read
         // The demo's fake: search, read the top entry, quote its opening and name the path. It reads; it does not think.
         const last = toolResults.at(-1);
         if (last === undefined) return respond(res, 200, hasTools ? call("kb_search", { query: lastUser, k: 3 }) : answer("No knowledge base tools are attached."));
-        const parsed = JSON.parse(last) as { results?: { path: string }[]; entries?: { path: string; body: string }[] };
-        if (parsed.results) return respond(res, 200, parsed.results.length ? call("kb_read", { paths: [parsed.results[0]!.path] }) : answer("The lab's documents do not cover this question."));
+        const parsed = JSON.parse(last) as { results?: { kb: string; path: string }[]; entries?: { path: string; body: string }[] };
+        // kb names the hit's knowledge base, which kb_read needs when the agent has more than one.
+        if (parsed.results) return respond(res, 200, parsed.results.length ? call("kb_read", { paths: [parsed.results[0]!.path], kb: parsed.results[0]!.kb }) : answer("The lab's documents do not cover this question."));
         const entry = parsed.entries?.[0];
         if (!entry) return respond(res, 200, answer("The lab's documents do not cover this question."));
         const opening = entry.body.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/).slice(0, 2).join(" ");
