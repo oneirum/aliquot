@@ -436,6 +436,12 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 [`docs/for-research-it-and-irb.md`](docs/for-research-it-and-irb.md) is for the people who decide whether a lab may run Aliquot: where each class of data may go, what runs where, what is stored and under which key, and what is not covered yet.
 
+## For a security review
+
+A campus security review asks control by control. `pnpm review-pack --config config/lab.toml` writes one answer per control for your lab: HIPAA Security Rule sections, every NIST SP 800-171 Rev. 3 family, and the HECVAT 4 question areas (in our words, not EDUCAUSE's). Each row says what Aliquot does toward the control, what your `lab.toml` makes true for it, and its status: met, partly, not met, or the lab's responsibility. A row reads met only when it names the tests that prove it, and a test in the suite fails when a cited test does not exist. Change `lab.toml` and the rows that depend on it change with it. The pack never says a deployment is compliant; that call is your institution's.
+
+The pack for the compose check's lab is committed: [summary](docs/review/check/summary.md) (not met first), [HIPAA](docs/review/check/hipaa.md), [NIST 800-171](docs/review/check/nist-800-171.md), [HECVAT answers](docs/review/check/hecvat-answers.md). Sign-on, key rotation and retention read not met until they land in 0.7.
+
 ## Working with a coding agent
 
 [`AGENTS.md`](AGENTS.md) tells a coding agent how to set up the repo, which checks to run and which boundaries the checks enforce. Point your agent at it.
