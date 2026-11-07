@@ -122,6 +122,19 @@ body[data-side="closed"] .pane { padding-left: 0; --safe-l: env(safe-area-inset-
 .refusal .title svg { width: 16px; height: 16px; flex: none; }
 .refusal p { margin: 0; line-height: 26px; }
 .refusal p:last-child { color: var(--ink-2); }
+/* The router's question: the agents that could answer, one row each, its name and one line. A row is a 56 px
+   target; its number is the key that picks it, shown only where there is a keyboard. */
+.choose { display: grid; gap: 12px; transition: opacity 200ms var(--ease-out); }
+@starting-style { .choose { opacity: 0; } }
+.choose > p { margin: 0; line-height: 26px; color: var(--ink-2); }
+.choices { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+button.choice { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; width: 100%; min-height: 56px; padding: 9px 15px; border: 1px solid var(--edge); border-radius: 12px; background: none; color: var(--ink); font: 15px/22px var(--sans); text-align: left; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
+button.choice:active { transform: scale(0.98); }
+.choice .name { font-weight: 500; }
+.choice .line { grid-column: 1; font-size: 14px; line-height: 20px; color: var(--muted); }
+.choice kbd { grid-column: 2; grid-row: 1 / span 2; display: none; min-width: 24px; height: 24px; place-items: center; border: 1px solid var(--line); border-radius: 6px; font: 12px/1 var(--mono); color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { button.choice:hover { background: var(--hover); } .choice kbd { display: grid; } }
+.meta .agent { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 
 .margin { display: grid; gap: 16px; margin-top: 24px; }
 .margin:empty { display: none; }
@@ -188,7 +201,7 @@ button.send:disabled { cursor: default; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
-  .icon, .try, .row, button.verify, .trail a, button.send { transition: none; }
+  .icon, .try, .row, button.verify, .trail a, button.send, button.choice { transition: none; }
 }
 </style>
 </head>
@@ -483,21 +496,65 @@ function stepsOf(turn) {
   return steps;
 }
 const done = (steps, node) => { clearInterval(steps.timer); steps.replaceWith(node); };
+// The agent's name beside the time, when the router chose it among several.
+const byline = (turn, name) => { turn.head.querySelector(".agent")?.remove(); turn.head.append(el("span", "agent", name)); };
+
+// The router could not tell which agent the question is for: one row per agent, picked by click, tap, Enter, the
+// arrow keys or its number. The pick sends the same message again, naming that agent.
+function chooser(t, turn) {
+  const box = el("div", "choose"); box.setAttribute("role", "group"); box.setAttribute("aria-label", "Choose who answers");
+  box.append(el("p", "", "More than one agent answers here. Which one should take this?"));
+  const list = el("ul", "choices");
+  const buttons = t.choices.map((c, i) => {
+    const b = el("button", "choice"); b.type = "button";
+    b.append(el("span", "name", c.name), el("span", "line", c.line), el("kbd", "", String(i + 1)));
+    b.onclick = () => pick(t, turn, box, c);
+    const li = el("li"); li.append(b); list.append(li);
+    return b;
+  });
+  box.addEventListener("keydown", (e) => {
+    const at = buttons.indexOf(document.activeElement);
+    const n = Number(e.key);
+    if (n >= 1 && n <= buttons.length) { e.preventDefault(); buttons[n - 1].click(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); buttons[(at + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length].focus(); }
+  });
+  box.append(list);
+  return box;
+}
+function pick(t, turn, box, c) {
+  const steps = stepsOf(turn);
+  box.remove();
+  send(t, turn, steps, c.agentId);
+}
 
 async function ask(text) {
-  const t = { q: text, at: new Date().toISOString() };
+  const t = { q: text, at: new Date().toISOString(), message: state.thread + "-" + (state.n++) };
   state.turns.push(t); save();
   const turn = turnOf(t, state.turns.length), steps = stepsOf(turn);
   turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
+  await send(t, turn, steps);
+}
+async function send(t, turn, steps, agent) {
   const fail = (msg) => { t.error = msg; save(); done(steps, el("p", "err", msg)); };
   let body;
   try {
-    const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: state.thread + "-" + (state.n++), text, user }) });
+    const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: t.message || state.thread + "-" + (state.n++), text: t.q, user, agent }) });
     body = await res.json();
   } catch { return fail("The web door did not answer. Check that it is running, then ask again."); }
-  if (body.t === "refused") { t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); return; }
+  if (body.t === "refused") { delete t.choices; t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); return; }
+  if (body.t === "asked-user") {
+    t.choices = body.choices; save();
+    const box = chooser(t, turn);
+    done(steps, box);
+    box.querySelector("button").focus({ preventScroll: true });
+    turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
+    return;
+  }
   if (body.t !== "enqueued") return fail(body.error || "The web door did not take the question, so ask it again.");
-  t.runId = body.runId; save();
+  delete t.choices;
+  t.runId = body.runId;
+  if (body.route && body.route.t === "agent") { t.by = body.answeredBy.name; byline(turn, t.by); }
+  save();
   await follow(turn, steps, body.runId, true);
 }
 
@@ -511,7 +568,7 @@ async function watch(turn, steps, runId, scroll) {
     const finished = events.find((e) => e.event.t === "run.finished");
     if (finished) {
       const started = events.find((e) => e.event.t === "run.started");
-      if (started) turn.head.lastChild.textContent = started.event.trigger.memberId || user;
+      if (started) turn.head.querySelector(".who").textContent = started.event.trigger.memberId || user;
       const replies = await fetchJson("/replies?runId=" + runId);
       const refused = events.find((e) => e.event.t === "egress.refused");
       const withheld = events.filter((e) => e.event.t === "tool.withheld").length;
@@ -560,9 +617,11 @@ for (const b of document.querySelectorAll(".fresh")) b.addEventListener("click",
 document.documentElement.classList.add("restoring");
 state.turns.forEach((t, i) => {
   const turn = turnOf(t, i + 1);
+  if (t.by) byline(turn, t.by);
   if (t.notice) turn.body.append(refusal("Not sent", t.notice));
   else if (t.error) turn.body.append(el("p", "err", t.error));
   else if (t.runId) follow(turn, stepsOf(turn), t.runId, false);
+  else if (t.choices) turn.body.append(chooser(t, turn));
 });
 save();
 requestAnimationFrame(() => { document.documentElement.classList.remove("restoring"); if (state.turns.length) scrollTo(0, document.body.scrollHeight); });

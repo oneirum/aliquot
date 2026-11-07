@@ -12,6 +12,8 @@ export interface RecordView {
   readonly runId: string;
   readonly startedAt: string | null;
   readonly agent: string | null;
+  /** Why this agent answered, when the router chose it. Null for a channel's only agent. */
+  readonly route: string | null;
   readonly outcome: string;
   readonly chain: { readonly events: number; readonly firstBad: number | null };
   readonly summary: RunSummary;
@@ -61,10 +63,36 @@ export function formatSummary(s: RunSummary): string {
   return parts.join("; ");
 }
 
+type RunRouteEvent = Extract<RunEvent, { t: "run.started" }>["route"];
+
+const BASIS = { only: "the only agent open to this member", thread: "it holds this thread", score: "the router's top score", picked: "the member picked it" } as const;
+
+/** `lab0-methods: the router's top score, confidence 0.94 (lab0-desk 0.06), router lexical-v1`. Null for a channel's only agent. */
+export function describeRoute(r: RunRouteEvent): string | null {
+  switch (r.t) {
+    case "direct":
+      return null;
+    case "pinned":
+      return `pinned by study ${r.studyId}`;
+    case "agent": {
+      const others = Object.entries(r.probs).filter(([id]) => id !== r.agentId).map(([id, p]) => `${id} ${p.toFixed(2)}`);
+      return `${r.agentId}: ${BASIS[r.basis]}, confidence ${r.confidence.toFixed(2)}${others.length ? ` (${others.join(", ")})` : ""}, router ${r.router}`;
+    }
+    case "ask-user":
+      return `the member was asked to pick from ${r.top3.join(", ")}, router ${r.router}`;
+    case "self":
+      return `the harness itself, router ${r.router}`;
+    case "unavailable":
+      return r.reason;
+  }
+}
+
 export function describeEvent(e: RunEvent): string {
   switch (e.t) {
-    case "run.started":
-      return `${e.surface} thread, trigger ${e.trigger.t}, ${e.history.length} earlier turns`;
+    case "run.started": {
+      const routed = describeRoute(e.route);
+      return `${e.surface} thread, trigger ${e.trigger.t}, ${e.history.length} earlier turns${routed ? `; routed to ${routed}` : ""}`;
+    }
     case "model.requested":
       return `to ${e.target.endpointId}, model ${e.target.modelId}, step ${e.step}${e.attempt > 1 ? `, attempt ${e.attempt}` : ""}${e.final ? ", final" : ""}`;
     case "model.completed":
@@ -113,6 +141,7 @@ export function recordView(runId: string, events: readonly StoredEvent[]): Recor
     runId,
     startedAt: events[0]?.at ?? null,
     agent: started?.t === "run.started" ? started.agent : null,
+    route: started?.t === "run.started" ? describeRoute(started.route) : null,
     outcome: finished?.t === "run.finished" ? finished.outcome : "running",
     chain: { events: events.length, firstBad: verifyChain(events) },
     summary: summarize(events),
@@ -127,6 +156,7 @@ export function formatRecordView(v: RecordView): string {
   return [
     `run      ${v.runId}`,
     `agent    ${v.agent ?? "(no run.started)"}`,
+    ...(v.route ? [`routed   ${v.route}`] : []),
     `outcome  ${v.outcome}`,
     `chain    ${chain}`,
     `summary  ${formatSummary(v.summary)}`,

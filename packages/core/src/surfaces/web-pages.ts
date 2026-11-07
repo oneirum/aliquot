@@ -295,6 +295,7 @@ if (v.chain.events) {
 const fact = (k, val) => { $("facts").append(el("dt", "", k)); const d = el("dd"); typeof val === "string" ? (d.textContent = val) : d.append(val); $("facts").append(d); };
 fact("Run", v.runId);
 if (v.agent) fact("Agent version", v.agent);
+if (v.route) fact("Routed to", v.route);
 const cm = (ok) => { const m = el("span", "", ok ? "\u2713" : "\u2717"); m.setAttribute("aria-hidden", "true"); return m; };
 if (v.chain.events === 0) fact("Chain", el("span", "chain none", "Nothing to verify yet"));
 else { const c = el("span", "chain " + (v.chain.firstBad === null ? "ok" : "bad")); c.append(cm(v.chain.firstBad === null), v.chain.firstBad === null ? "Verified: chain intact over " + v.chain.events + " events" : "Chain broken at event " + v.chain.firstBad); fact("Chain", c); }

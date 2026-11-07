@@ -185,13 +185,14 @@ export async function headOf(db: Db, agentId: AgentId): Promise<Head | null> {
   return row.rows[0] ? headFromRow(row.rows[0]) : null;
 }
 
-/** The published agent bound to a channel (its `channels` list names `surface:channel`), newest publish first. The router replaces this for unbound channels. */
-export async function publishedAgentFor(db: Db, channel: ChannelRef): Promise<AgentDocument | undefined> {
-  const row = await db.query<{ document: unknown }>("select document from agent_heads where document->'channels' ? $1 order by published_at desc limit 1", [`${channel.surface}:${channel.channelId}`]);
-  if (!row.rows[0]) return undefined;
-  const parsed = parseAgentDocument(row.rows[0].document);
-  if (!parsed.ok) throw new Error(`agent_heads holds a document that no longer parses: ${parsed.issues.map((i) => `${i.field}: ${i.message}`).join("; ")}`);
-  return parsed.doc;
+/** The published agents bound to a channel (their `channels` lists name `surface:channel`), newest publish first. Intake routes among two or more. */
+export async function publishedAgentsFor(db: Db, channel: ChannelRef): Promise<AgentDocument[]> {
+  const rows = await db.query<{ document: unknown }>("select document from agent_heads where document->'channels' ? $1 order by published_at desc, agent_id", [`${channel.surface}:${channel.channelId}`]);
+  return rows.rows.map((r) => {
+    const parsed = parseAgentDocument(r.document);
+    if (!parsed.ok) throw new Error(`agent_heads holds a document that no longer parses: ${parsed.issues.map((i) => `${i.field}: ${i.message}`).join("; ")}`);
+    return parsed.doc;
+  });
 }
 
 export async function unpublish(_agentId: AgentId, _actor: MemberId, _reason: string): Promise<void> {

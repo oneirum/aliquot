@@ -27,9 +27,16 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DATA_CLASSES, rank, type DataClass } from "./dataclass.ts";
+/** An agent the member may pick, as the door sends it (frontdoor.ts AgentChoice). */
+export interface AgentChoice {
+  readonly agentId: string;
+  readonly name: string;
+  readonly line: string;
+}
 
 export type DoorEvent =
-  | { readonly t: "started"; readonly runId: string; readonly recordUrl: string }
+  /** routedTo is the agent's name when the router chose it among several; absent when the channel has one agent, so the --json contract is unchanged there. */
+  | { readonly t: "started"; readonly runId: string; readonly recordUrl: string; readonly routedTo?: string }
   | { readonly t: "tool"; readonly runId: string; readonly tool: string }
   | {
       readonly t: "finished";
@@ -41,7 +48,9 @@ export type DoorEvent =
       readonly refusal: string | null;
       readonly recordUrl: string;
     }
-  | { readonly t: "refused"; readonly runId: null; readonly message: string };
+  | { readonly t: "refused"; readonly runId: null; readonly message: string }
+  /** The router could not tell which agent the question is for. Asking again with agent set runs that one. */
+  | { readonly t: "choose"; readonly runId: null; readonly choices: readonly AgentChoice[]; readonly message: string };
 
 export interface AskInput {
   readonly thread: string;
@@ -49,6 +58,13 @@ export interface AskInput {
   readonly text: string;
   readonly user: string;
   readonly channel?: string;
+  /** The agent picked from a choose event, sent with the same thread, message and text. */
+  readonly agent?: string;
+}
+
+/** The choices as a numbered list, for a client that shows text. */
+export function choicesText(choices: readonly AgentChoice[]): string {
+  return ["More than one agent answers here, and the question fits more than one. Which one should answer?", ...choices.map((c, i) => `${i + 1}. ${c.name}: ${c.line}`)].join("\n");
 }
 
 export interface AskOptions {
@@ -122,15 +138,20 @@ export async function* ask(door: Door, input: AskInput, opts: AskOptions = {}): 
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const pollMs = opts.pollMs ?? 300;
   const sent = await call(door, "POST", "message", input);
-  const body = sent.json as { t?: string; runId?: string; userFacing?: string; error?: string } | null;
+  const body = sent.json as { t?: string; runId?: string; userFacing?: string; error?: string; choices?: AgentChoice[]; answeredBy?: AgentChoice; route?: { t: string } } | null;
   if (body?.t === "refused") {
     yield { t: "refused", runId: null, message: body.userFacing ?? "The door refused the message." };
+    return;
+  }
+  if (body?.t === "asked-user" && body.choices) {
+    yield { t: "choose", runId: null, choices: body.choices, message: choicesText(body.choices) };
     return;
   }
   if (sent.status !== 202 || body?.t !== "enqueued" || !body.runId) throw new DoorError(`the door did not take the message (${sent.status}): ${body?.error ?? JSON.stringify(body)}`);
   const runId = body.runId;
   const recordUrl = new URL(`runs/${runId}`, base(door)).href;
-  yield { t: "started", runId, recordUrl };
+  const routedTo = body.route?.t === "agent" ? body.answeredBy?.name : undefined;
+  yield { t: "started", runId, recordUrl, ...(routedTo ? { routedTo } : {}) };
 
   const seen = new Set<number>();
   const deadline = Date.now() + timeoutMs;
