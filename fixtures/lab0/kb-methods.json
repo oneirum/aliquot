@@ -5,7 +5,9 @@
   "coverageQuestions": [
     "How many participants per group for a medium effect?",
     "Should repeated nights be fit with a mixed model?",
-    "How do I control the false discovery rate?"
+    "How do I control the false discovery rate?",
+    "When should the analysis plan be preregistered?",
+    "How should missing data be handled?"
   ],
   "sources": [{ "sourceId": "methods", "kind": "file", "location": "methods-guide.md", "cls": "D1", "licence": "internal-only" }],
   "compiler": { "endpointId": "local", "modelId": "scripted-1", "params": { "temperature": 0, "maxOutputTokens": 8192 } }
