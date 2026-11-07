@@ -175,14 +175,14 @@ test("intake runs the head bound to the channel; a studio test runs the unpublis
 });
 
 test("a published agent's project rides the job to run.started, and changing it never changes the version hash", async () => {
-  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
   const intakeDeps: IntakeDeps = {
     db,
     store,
     queue: createQueue(db),
     catalog: async () => catalog,
     gate: { members: async (id) => ({ id: id as MemberId, audiences: [{ t: "lab" }] }), channelFloor: async () => "D1", labPatterns: [], policy: DEFAULT_POLICY },
-    agentFor: (channel) => publishedAgentFor(db, channel),
+    agentsFor: (channel) => publishedAgentsFor(db, channel),
   };
   const tagged = doc({ agentId: "granted", channels: ["web:granted"], project: "R01-MH123456" });
   const plain = resolveAgent(doc({ agentId: "granted", channels: ["web:granted"] }), catalog);

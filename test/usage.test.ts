@@ -116,13 +116,13 @@ test("a run with no price prints its tokens and no price, never zero", () => {
   assert.doesNotMatch(table, /0\.00/);
   assert.match(formatUsageCsv(rows, "project"), /^\(no project\),1,1,5000,700,,,,no price$/m);
 
-  const v = recordView(runId(5), RUNS[4]!, config.prices);
+  const v = recordView(runId(5), RUNS[4]!, [], config.prices);
   assert.deepEqual(v.summary.cost, { amounts: [], unpricedCalls: 1 });
   assert.match(formatRecordView(v), /; cost no price$/m);
 });
 
 test("the record summary shows the run's cost when lab.toml has prices, and nothing about cost when it has none", () => {
-  const v = recordView(runId(2), RUNS[1]!, config.prices);
+  const v = recordView(runId(2), RUNS[1]!, [], config.prices);
   assert.deepEqual(v.summary.cost, { amounts: [{ currency: "USD", amount: "0.6235" }], unpricedCalls: 0 });
   assert.match(formatRecordView(v), /; cost USD 0\.6235$/m);
   const bare = recordView(runId(2), RUNS[1]!);
