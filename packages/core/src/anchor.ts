@@ -238,7 +238,7 @@ export type AnchorProblem =
   | { readonly t: "log-chain"; readonly line: number; readonly at: string; readonly why: string }
   | { readonly t: "audit-chain"; readonly seq: number }
   | { readonly t: "audit-diverged"; readonly line: number; readonly at: string; readonly from: number; readonly seq: number; readonly rowAt: string | null; readonly later: number }
-  | { readonly t: "run-diverged"; readonly line: number; readonly at: string; readonly run: RunId; readonly seq: number; readonly why: "missing" | "chain" | "hash"; readonly badSeq: number | null };
+  | { readonly t: "run-diverged"; readonly line: number; readonly at: string; readonly run: RunId; readonly seq: number; readonly why: "missing" | "chain" | "hash" | "grew"; readonly badSeq: number | null };
 
 export interface AnchorReport {
   readonly lines: number;
@@ -302,6 +302,8 @@ export async function verifyAnchors(db: Db, logText: string, key: KeyObject): Pr
       if (!events.length) problems.push({ t: "run-diverged", line, at: a.at, run: r.run, seq: r.seq, why: "missing", badSeq: null });
       else if (broken !== null) problems.push({ t: "run-diverged", line, at: a.at, run: r.run, seq: r.seq, why: "chain", badSeq: broken });
       else if (events[r.seq]?.hash !== r.hash) problems.push({ t: "run-diverged", line, at: a.at, run: r.run, seq: r.seq, why: "hash", badSeq: null });
+      // Only closed runs are anchored, and a closed run takes no more events, so one past the signed head was added after.
+      else if (events.length > r.seq + 1) problems.push({ t: "run-diverged", line, at: a.at, run: r.run, seq: r.seq, why: "grew", badSeq: r.seq + 1 });
     }
   }
   if (diverged) problems.push(diverged);
@@ -335,6 +337,8 @@ export function describeAnchorProblem(p: AnchorProblem): string {
         ? `run ${p.run}: anchor line ${p.line} (${p.at}) signed it through seq ${p.seq}, and the database has no events for it`
         : p.why === "chain"
           ? `run ${p.run}: seq ${p.badSeq} does not recompute (anchor line ${p.line}, ${p.at})`
+          : p.why === "grew"
+            ? `run ${p.run}: seq ${p.badSeq} was added after anchor line ${p.line} signed seq ${p.seq} as the closed run's last event at ${p.at}`
           : `run ${p.run}: changed at or before seq ${p.seq} after anchor line ${p.line} signed it at ${p.at}`;
   }
 }

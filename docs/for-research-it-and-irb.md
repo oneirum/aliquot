@@ -186,8 +186,9 @@ so a line removed from any copy shows. Keep an offline copy of the key, and of i
 anchor verifies only against the key that signed it. Aliquot makes no network call for any of this, and uses no
 public timestamping service.
 
-What anchors do not cover: a change made before the next anchor is written (at most `every_minutes`), and a run that
-is still open. Redaction and retention delete payload bodies but keep their hashes, so anchored runs still verify
+What anchors do not cover: a change made before the next anchor is written (at most `every_minutes`), a run that is
+still open, and lines cut from the end of the only copy of the log, which leaves an older log that still verifies. That
+last one is why the lines belong somewhere the database administrator cannot write as well. Redaction and retention delete payload bodies but keep their hashes, so anchored runs still verify
 after either.
 
 ## Not covered yet

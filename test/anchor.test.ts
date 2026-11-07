@@ -146,6 +146,24 @@ test("a run event rewritten with its chain and head recomputed passes verifyChai
   await rewriteRun(RUN_A, 1, finished);
 });
 
+test("an event appended to a closed run after its anchor is reported, chain and head recomputed or not", async () => {
+  const events = await loadEvents(db, RUN_A);
+  const [extra] = chain([started(ref("q")), finished, { ...finished, outcome: "refused" }], Date.parse("2026-01-01T00:00:00.000Z"), RUN_A).slice(2);
+  assert.equal(extra!.prevHash, events.at(-1)!.hash);
+  await db.query("insert into run_events (run_id, seq, at, cls, prev_hash, hash, event) values ($1, $2, $3, $4, $5, $6, $7)", [RUN_A, extra!.seq, extra!.at, extra!.cls, extra!.prevHash, extra!.hash, extra!.event]);
+  await db.query("update jobs set head_seq = $2, head_hash = $3 where id = $1", [RUN_A, extra!.seq, extra!.hash]);
+  assert.equal(verifyChain(await loadEvents(db, RUN_A)), null);
+  const problems = (await verifyAnchors(db, log(), signer.key)).problems;
+  assert.equal(problems.length, 1);
+  assert.match(describeAnchorProblem(problems[0]!), new RegExp(`^run ${RUN_A}: seq 2 was added after anchor line 1 signed seq 1 as the closed run's last event at `));
+  const client = await db.connect();
+  await client.query("alter table run_events disable trigger run_events_immutable");
+  await client.query("delete from run_events where run_id = $1 and seq = 2", [RUN_A]);
+  await client.query("alter table run_events enable trigger run_events_immutable");
+  client.release();
+  await db.query("update jobs set head_seq = 1, head_hash = $2 where id = $1", [RUN_A, events.at(-1)!.hash]);
+});
+
 test("a forged line, a line under another key and a removed line are each reported", async () => {
   const good = log();
   const lines = good.trim().split("\n");
