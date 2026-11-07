@@ -140,7 +140,7 @@ port = ${a.port}                        # the web door, on this machine only unt
 # client_id = "<application id>"
 # client_secret_env = "LABH_OIDC_CLIENT_SECRET"   # the secret goes in .env, never here
 # session_secret_env = "LABH_SESSION_SECRET"      # signs session cookies; add it to .env: openssl rand -hex 32
-# email_claim = "email"                           # some Entra ID tenants: "preferred_username"
+# email_claim = "email"                           # Entra ID sends no email_verified: see docs/install.md
 # id_claim = "sub"                                # the member id every run records; "eppn" on an InCommon campus
 # idle_timeout_minutes = 30                       # an unused session ends (HIPAA automatic logoff)
 

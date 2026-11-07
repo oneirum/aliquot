@@ -379,10 +379,10 @@ async function cite(source, runId) {
     const a = el("a", "doc", found.title); a.href = q + "?path=" + encodeURIComponent(source); a.title = found.kb + ", " + found.path;
     c.append(a);
   } else if (found && found.found) {
-    c.append(el("span", "doc", found.title), el("span", "who", found.cls + ": " + found.who.charAt(0).toUpperCase() + found.who.slice(1) + " can open this entry."));
+    c.append(el("span", "doc", found.path), el("span", "who", found.cls + ": " + found.who.charAt(0).toUpperCase() + found.who.slice(1) + " can open this entry."));
   } else {
     c.append(el("span", "doc", source));
-    if (found) c.append(el("span", "who", "Not an entry in the knowledge bases this run read."));
+    if (found) c.append(el("span", "who", "Not an entry this run retrieved."));
   }
   return c;
 }
