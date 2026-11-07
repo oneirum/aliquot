@@ -102,8 +102,8 @@ export async function listRuns(db: Db, limit = RUNS_LISTED): Promise<RunListRow[
   return rows.rows.map((r) => ({ runId: r.run_id, startedAt: r.at.toISOString(), agent: r.agent, outcome: r.outcome, events: r.events, refusals: r.refusals }));
 }
 
-/** Kinds the door serves over HTTP. The Slack door (aliquot slack) is a client too, with its surface's token, never a Slack token. */
-export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "mcp", "phone", "studio", "slack"];
+/** Kinds the door serves over HTTP. The Slack and Teams doors (aliquot slack, aliquot teams) are clients too, with their surface's token, never a Slack or Microsoft secret. */
+export const DOOR_KINDS: readonly SurfaceKind[] = ["acp", "mcp", "phone", "studio", "slack", "teams"];
 /** Shorter than this, a token could be guessed, so its surface accepts nothing. */
 const MIN_TOKEN_LENGTH = 32;
 

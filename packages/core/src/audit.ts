@@ -94,9 +94,8 @@ export async function loadAudit(db: Db, sinceSeq = 0): Promise<AuditRow[]> {
   return res.rows.map((r) => ({ seq: Number(r.seq), at: r.at.toISOString(), actor: r.actor, prevHash: r.prev_hash, hash: r.hash, event: r.event }));
 }
 
-/** Recomputes the chain over a full load. Returns the seq of the first bad row, or null. */
-export function verifyAudit(rows: readonly AuditRow[]): number | null {
-  let prev: Sha256 | null = null;
+/** Recomputes the chain over a full load, or over rows after a row whose hash `prev` is. Returns the seq of the first bad row, or null. */
+export function verifyAudit(rows: readonly AuditRow[], prev: Sha256 | null = null): number | null {
   for (const r of rows) {
     if (r.prevHash !== prev || r.hash !== auditHash(r.at, r.actor, r.prevHash, r.event)) return r.seq;
     prev = r.hash;
