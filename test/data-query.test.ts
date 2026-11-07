@@ -35,7 +35,12 @@ const truth = JSON.parse(readFileSync(`${DATA}answers.json`, "utf8")) as Record<
 const visitsCsv = readFileSync(`${DATA}visits.csv`, "utf8");
 const dosingCsv = readFileSync(`${DATA}redcap-dosing-records.csv`, "utf8");
 /** Values that identify someone, from both sources. None may reach a model, in any form. */
-const identifying = [...visitsCsv.split("\n").slice(1).flatMap((l) => l.split(",").slice(0, 3)), ...dosingCsv.split("\n").slice(1).flatMap((l) => l.split(",").slice(1, 4))].filter(Boolean);
+const dosingHeader = dosingCsv.split("\n")[0]!.split(",");
+const IDENTIFIER_FIELDS = ["first_name", "last_name", "mrn"];
+const identifying = [
+  ...visitsCsv.split("\n").slice(1).flatMap((l) => l.split(",").slice(0, 3)),
+  ...dosingCsv.split("\n").slice(1).flatMap((l) => IDENTIFIER_FIELDS.map((f) => l.split(",")[dosingHeader.indexOf(f)] ?? "")),
+].filter(Boolean);
 
 const TOKEN = "lab0-redcap-token-for-tests";
 const redcap = await startFakeRedcap(await lab0Dosing(TOKEN));
@@ -52,8 +57,10 @@ const VISITS: Table = {
 const DOSING: Table = {
   id: "dosing",
   description: "lab0 dosing project in REDCap",
-  source: { kind: "redcap", url: redcap.url, tokenEnv: "LAB0_REDCAP_TOKEN" },
-  columns: { record_id: "restricted", arm: "free", weight_kg: "free", ae_grade: "free" },
+  // rosa is rlee (DAG madison, full export), kiran is kpatel (no DAG, de-identified), mei is mchen (expired),
+  // owen is ostone (DAG milwaukee, no export on the enrollment form), ghost maps to a username the project lacks.
+  source: { kind: "redcap", url: redcap.url, tokenEnv: "LAB0_REDCAP_TOKEN", users: { rosa: "rlee", kiran: "kpatel", mei: "mchen", owen: "ostone", ghost: "nobody" } },
+  columns: { record_id: "restricted", arm: "free", weight_kg: "free", ae_grade: "free", consent_date: "free" },
   aggregateClass: "D1",
   minCell: 5,
 };
@@ -61,12 +68,12 @@ const MISFILED: Table = { ...DOSING, id: "misfiled", columns: { ...DOSING.column
 
 const config = typeof docker === "string" ? null : { image: docker.image, digest: docker.image.slice(7) as Sha256, cpus: 1, memoryMb: 512, timeoutMs: 20_000, socket: docker.socket };
 
-/** The real sandbox, counting its data_query containers. */
-function countingSandbox(): { sandbox: Sandbox | null; aggregates: () => number } {
-  if (!config) return { sandbox: null, aggregates: () => 0 };
+/** The real sandbox, counting its data_query containers and keeping the table each one was given. */
+function countingSandbox(): { sandbox: Sandbox | null; aggregates: () => number; tables: string[] } {
+  const tables: string[] = [];
+  if (!config) return { sandbox: null, aggregates: () => 0, tables };
   const real = createSandbox(config);
-  let n = 0;
-  return { sandbox: { ...real, aggregate: (files, engine, signal) => (n++, real.aggregate(files, engine, signal)) }, aggregates: () => n };
+  return { sandbox: { ...real, aggregate: (files, engine, signal) => (tables.push(Buffer.from(files.find((f) => f.name === "table.csv")!.data).toString("utf8")), real.aggregate(files, engine, signal)) }, aggregates: () => tables.length, tables };
 }
 
 const secret = (name: string) => (name === "LAB0_REDCAP_TOKEN" ? TOKEN : undefined);
@@ -80,8 +87,11 @@ const env: ToolEnv = { viewer: NO_MEMBER, knowledgeBases: [], retrieval: { algor
 
 type Outcome = { readonly ok: true; readonly cls: DataClass; readonly record: QueryRecord } | { readonly ok: false; readonly code: string; readonly detail: string; readonly cls: DataClass | null };
 
-async function query(q: Partial<DataQuery> & Pick<DataQuery, "table" | "measures">, sandbox = countingSandbox().sandbox, tables: ToolEnv["tables"] = env.tables): Promise<Outcome> {
+/** One data_query call in a run the member started; member null is a run no member started, like a schedule. */
+async function query(q: Partial<DataQuery> & Pick<DataQuery, "table" | "measures">, sandbox = countingSandbox().sandbox, tables: ToolEnv["tables"] = env.tables, member: string | null = "kiran"): Promise<Outcome> {
   const j = memoryJournal("00000000-0000-4000-8000-0000000000dd" as RunId);
+  const trigger = member === null ? { t: "schedule", scheduleId: "nightly" } : { t: "test", memberId: member };
+  await j.append({ t: "run.started", trigger, input: await j.put(Labelled.stamp("q", "D0", "test")), history: [] } as unknown as RunEvent);
   const ref = await j.put(Labelled.stamp(q, "D1", "test"));
   await runnerWith(sandbox).invoke(j, { callId: "c1", tool: "data_query", attempt: 1, input: ref }, { ...env, tables }, new AbortController().signal);
   const last = j.log.at(-1)!;
@@ -106,8 +116,11 @@ test("lab.toml registers a CSV and a REDCap table, and refuses a REDCap host it 
   const c = parseConfig(base + csv + rc, "/lab/lab.toml");
   assert.deepEqual(c.tables, [
     { id: "visits", description: "visit log", columns: { participant_id: "restricted", cohort: "free" }, aggregateClass: "D1", minCell: 5, source: { kind: "csv", path: "/lab/data/visits.csv" } },
-    { id: "dosing", description: "dosing", columns: { arm: "free" }, aggregateClass: "D1", minCell: 11, source: { kind: "redcap", url: "https://redcap.lab.example.edu/api/", tokenEnv: "REDCAP_TOKEN" } },
+    { id: "dosing", description: "dosing", columns: { arm: "free" }, aggregateClass: "D1", minCell: 11, source: { kind: "redcap", url: "https://redcap.lab.example.edu/api/", tokenEnv: "REDCAP_TOKEN", users: {} } },
   ]);
+  const mapped = parseConfig(base + rc.replace("min_cell = 11", 'min_cell = 11\n[tables.dosing.redcap_users]\n"ana@lab0.example" = "alee"'), "/lab/lab.toml");
+  assert.deepEqual(mapped.tables[0]!.source, { kind: "redcap", url: "https://redcap.lab.example.edu/api/", tokenEnv: "REDCAP_TOKEN", users: { "ana@lab0.example": "alee" } });
+  assert.throws(() => parseConfig(base + csv + '[tables.visits.redcap_users]\n"ana@lab0.example" = "alee"\n', "/lab/lab.toml"), { message: "lab.toml: [tables.visits] names redcap_users, which only a REDCap table takes" });
   assert.throws(() => parseConfig(base + rc.replace("redcap.lab.example.edu/api", "redcap.vendor.example.com/api"), "/lab/lab.toml"), { message: "lab.toml: [tables.dosing] names REDCap at redcap.vendor.example.com, which [hosts] does not place as lab or institution; the export request carries the token there" });
   assert.throws(() => parseConfig(base + csv.replace('aggregate_class = "D1"', 'aggregate_class = "D1"\nmin_cell = 3'), "/lab/lab.toml"), /may not be below 5/);
   assert.throws(() => parseConfig(base + csv.replace('csv = "data/visits.csv"', 'csv = "data/visits.csv"\nredcap_url = "https://redcap.lab.example.edu/api/"'), "/lab/lab.toml"), { message: "lab.toml: [tables.visits] needs csv, or redcap_url with redcap_token_env, and not both" });
@@ -127,7 +140,7 @@ test("a count, a mean and a group-by over the visits CSV come back as the ground
   assert.equal(await leftoverContainers(), 0);
 });
 
-test("the REDCap source answers through the same path: the metadata, then the flat records export, with the token from the environment", opts, async () => {
+test("the REDCap source answers through the same path: the metadata, the member's user rights, then the flat records export, with the token from the environment", opts, async () => {
   const before = redcap.requests.length;
   const byArm = await query({ table: "dosing", groupBy: ["arm"], measures: [{ fn: "count" }, { fn: "mean", column: "weight_kg" }] });
   assert.deepEqual(values(byArm), [
@@ -138,8 +151,9 @@ test("the REDCap source answers through the same path: the metadata, then the fl
   assert.deepEqual(values(ae), [{ n: truth.ae_grade_ge2_count, "count(*)": truth.ae_grade_ge2_count }]);
   assert.deepEqual(
     redcap.requests.slice(before).map((r) => [r.content, r.format, r.token]),
-    [["metadata", "json", "valid"], ["record", "csv", "valid"], ["metadata", "json", "valid"], ["record", "csv", "valid"]],
+    [["metadata", "json", "valid"], ["user", "json", "valid"], ["record", "csv", "valid"], ["metadata", "json", "valid"], ["user", "json", "valid"], ["record", "csv", "valid"]],
   );
+  assert.deepEqual(byArm.ok && byArm.record.rights, { member: "kiran", redcapUser: "kpatel", dag: null, forms: { enrollment: "de-identified", dosing: "de-identified" } });
 });
 
 test("a query that names a restricted column is refused before the table is read: no container, no records export", opts, async () => {
@@ -190,11 +204,12 @@ test("the record replays: the same query over the same source gives the same num
   const rec = first.record;
   const sandbox: TableSandbox = { image: config!.digest, aggregate: (f, e, s) => createSandbox(config!).aggregate(f, e, s) };
   const read = tableReader({ post: async () => new Response(null, { status: 500 }), secret });
-  const rerun = await executeQuery(VISITS, rec.query, { read, sandbox, signal: new AbortController().signal });
+  const deps = { read, sandbox, signal: new AbortController().signal, member: null, today: "2026-11-07" };
+  const rerun = await executeQuery(VISITS, rec.query, deps);
   assert.deepEqual(sameAnswer(rec, rerun), { same: true, why: null });
   assert.equal(rerun.groups[0]!.values["mean(dose_mg)"], truth.cohort_b_mean_dose);
-  const edited: typeof read = { identifiers: async () => [], bytes: async () => Buffer.from(visitsCsv.replace("P101,", "P101x,")) };
-  const changed = await executeQuery(VISITS, rec.query, { read: edited, sandbox, signal: new AbortController().signal });
+  const edited: typeof read = { dictionary: async () => [], user: async () => null, bytes: async () => Buffer.from(visitsCsv.replace("P101,", "P101x,")) };
+  const changed = await executeQuery(VISITS, rec.query, { ...deps, read: edited });
   assert.equal(sameAnswer(rec, changed).same, false);
   assert.match(sameAnswer(rec, changed).why!, /^the source changed/);
 });
@@ -269,4 +284,95 @@ test("on the wire: a hosted model asking three questions sees two aggregates and
   const leaked = identifying.filter((v) => wire.includes(v));
   assert.deepEqual(leaked, [], "no participant id, initials, birth date, name or MRN reached the model");
   assert.equal(model.bodies.length, 6, "two model calls per question");
+});
+
+test("a member in a Data Access Group gets aggregates over that DAG's records only, and a member in none over every record", opts, async () => {
+  const before = redcap.requests.length;
+  const rosa = await query({ table: "dosing", groupBy: ["arm"], measures: [{ fn: "count" }, { fn: "mean", column: "weight_kg" }] }, undefined, undefined, "rosa");
+  assert.deepEqual(values(rosa), [
+    { arm: "1", n: truth.dag_madison_arm1_n, "count(*)": truth.dag_madison_arm1_n, "mean(weight_kg)": truth.dag_madison_arm1_mean_weight },
+    { arm: "2", n: truth.dag_madison_arm2_n, "count(*)": truth.dag_madison_arm2_n, "mean(weight_kg)": truth.dag_madison_arm2_mean_weight },
+  ]);
+  assert.ok(rosa.ok);
+  if (!rosa.ok) return;
+  assert.deepEqual([rosa.record.rowsRead, rosa.record.rowsMatched], [truth.dag_madison_n, truth.dag_madison_n]);
+  assert.deepEqual(rosa.record.rights, { member: "rosa", redcapUser: "rlee", dag: "madison", forms: { enrollment: "full", dosing: "full" } });
+  const ae = await query({ table: "dosing", where: [{ column: "ae_grade", op: "ge", value: 2 }], groupBy: [], measures: [{ fn: "count" }] }, undefined, undefined, "kiran");
+  assert.deepEqual(values(ae), [{ n: truth.ae_grade_ge2_count, "count(*)": truth.ae_grade_ge2_count }]);
+  const all = await query({ table: "dosing", measures: [{ fn: "count" }] }, undefined, undefined, "kiran");
+  const madison = await query({ table: "dosing", measures: [{ fn: "count" }] }, undefined, undefined, "rosa");
+  assert.deepEqual([values(all), values(madison)], [[{ n: truth.redcap_rows, "count(*)": truth.redcap_rows }], [{ n: truth.dag_madison_n, "count(*)": truth.dag_madison_n }]]);
+  const exports = redcap.requests.slice(before).filter((r) => r.content === "record").map((r) => r.exportDataAccessGroups);
+  assert.deepEqual(exports, ["true", "false", "false", "true"], "only a user in a DAG asks for each record's DAG");
+  // A user with no export on the enrollment form can still count a dosing-form field, in their own DAG.
+  const owen = await query({ table: "dosing", measures: [{ fn: "count", column: "weight_kg" }] }, undefined, undefined, "owen");
+  assert.deepEqual(values(owen), [{ n: truth.redcap_rows! - truth.dag_madison_n!, "count(weight_kg)": truth.redcap_rows! - truth.dag_madison_n! }]);
+});
+
+test("a de-identified member never touches an identifier field: the export asks only for the query's fields, and a date is refused before any record is read", opts, async () => {
+  const counted = countingSandbox();
+  const before = redcap.requests.length;
+  const ok = await query({ table: "dosing", groupBy: ["arm"], measures: [{ fn: "mean", column: "weight_kg" }] }, counted.sandbox, undefined, "kiran");
+  assert.ok(ok.ok);
+  const asked = redcap.requests.slice(before).find((r) => r.content === "record")!;
+  assert.deepEqual(Object.entries(asked).filter(([k]) => k.startsWith("fields[")).map(([, v]) => v), ["record_id", "arm", "weight_kg"]);
+  const uploaded = counted.tables.join("\n");
+  assert.equal(uploaded.split("\n")[0], "record_id,arm,weight_kg");
+  assert.deepEqual(identifying.filter((v) => uploaded.includes(v)), [], "no name or MRN entered the sandbox");
+  const mark = redcap.requests.length;
+  const date = await query({ table: "dosing", measures: [{ fn: "count", column: "consent_date" }] }, counted.sandbox, undefined, "kiran");
+  assert.deepEqual(date, { ok: false, code: "invalid-input", detail: "column consent_date of table dosing is a date or free-text field, which the member's de-identified REDCap export rights leave out", cls: "D1" });
+  const mrn = await query({ table: "misfiled", groupBy: ["mrn"], measures: [{ fn: "count" }] }, counted.sandbox, ["misfiled"], "kiran");
+  assert.equal(!mrn.ok && mrn.detail, "column mrn of table misfiled is restricted; it never leaves the sandbox (the source flags it as an identifier)");
+  assert.deepEqual(redcap.requests.slice(mark).map((r) => r.content), ["metadata", "user", "metadata"], "neither refusal requested a record");
+  assert.equal(counted.aggregates(), 1);
+  // The same date field, for a member with full export, in their DAG.
+  const rosa = await query({ table: "dosing", measures: [{ fn: "count", column: "consent_date" }] }, undefined, undefined, "rosa");
+  assert.deepEqual(values(rosa), [{ n: truth.dag_madison_n, "count(consent_date)": truth.dag_madison_n }]);
+});
+
+test("a member the table maps to no REDCap user, a run with no member, a user the project lacks, an expired user, and a form without export rights are each refused before any record is read", opts, async () => {
+  const counted = countingSandbox();
+  const before = redcap.requests.length;
+  const q = { table: "dosing", groupBy: ["arm"], measures: [{ fn: "count" as const }] };
+  const refused = async (member: string | null) => {
+    const o = await query(q, counted.sandbox, undefined, member);
+    assert.equal(o.ok, false);
+    return !o.ok && o.detail;
+  };
+  assert.equal(await refused("alice"), "table dosing is a REDCap project, and [tables.dosing.redcap_users] maps no REDCap user for the member who asked; rule: a member queries REDCap only under their own REDCap account");
+  assert.equal(await refused(null), "table dosing is a REDCap project, which answers each member under their own REDCap rights, and this run has no member (a schedule, an eval or a replay)");
+  assert.equal(await refused("ghost"), "table dosing: the member's REDCap user is not a user of the project");
+  assert.equal(await refused("mei"), "table dosing: the member's REDCap access to the project expired on 2026-01-31");
+  assert.equal(await refused("owen"), "column arm of table dosing is on REDCap form enrollment, which the member's REDCap export rights do not reach");
+  assert.equal(counted.aggregates(), 0);
+  assert.equal(redcap.requests.slice(before).filter((r) => r.content === "record").length, 0);
+  // A CSV table has no REDCap rights and answers a run with no member as before.
+  assert.ok((await query({ table: "visits", measures: [{ fn: "count" }] }, undefined, undefined, null)).ok);
+});
+
+test("REDCap's user export: forms_export as an object or as form:level text, and data_export when a version sends no forms_export", async () => {
+  const project = await lab0Dosing(TOKEN);
+  const users = [
+    { username: "a", expiration: "", data_access_group: "", data_export: "1", forms_export: "enrollment:3,dosing:0" },
+    { username: "b", expiration: null, data_access_group: null, data_export: 2 },
+  ];
+  const fake = await startFakeRedcap({ ...project, users: users as never });
+  after(() => fake.close());
+  const read = tableReader({ post: (url, form) => fetch(url, { method: "POST", body: new URLSearchParams(form) }), secret });
+  const t: Table = { ...DOSING, source: { kind: "redcap", url: fake.url, tokenEnv: "LAB0_REDCAP_TOKEN", users: {} } };
+  assert.deepEqual(await read.user(t, "a"), { username: "a", expiration: "", dataAccessGroup: "", forms: { enrollment: "no-identifiers", dosing: "none" }, dataExport: "full" });
+  assert.deepEqual(await read.user(t, "b"), { username: "b", expiration: "", dataAccessGroup: "", forms: null, dataExport: "de-identified" });
+  assert.equal(await read.user(t, "c"), null);
+  const dictionary = await read.dictionary(t);
+  assert.deepEqual(dictionary.filter((f) => f.identifier).map((f) => f.name), IDENTIFIER_FIELDS);
+  assert.deepEqual(dictionary.filter((f) => f.deidentified).map((f) => f.name), ["record_id", "first_name", "last_name", "mrn", "consent_date"]);
+});
+
+test("a rerun under changed REDCap rights says so, even when the numbers agree", () => {
+  const rec: QueryRecord = { table: "dosing", query: { table: "dosing", where: [], groupBy: [], measures: [{ fn: "count" }] }, source: { kind: "redcap", sha256: "a".repeat(64) as Sha256, bytes: 1 }, engine: { sha256: "b".repeat(64) as Sha256, image: "c".repeat(64) as Sha256 }, minCell: 5, rights: { member: "rosa", redcapUser: "rlee", dag: "madison", forms: { enrollment: "full" } }, rowsRead: 12, rowsMatched: 12, groups: [] };
+  assert.deepEqual(sameAnswer(rec, { ...rec, rights: { ...rec.rights!, dag: null } }), { same: false, why: "the member's REDCap rights changed" });
+  assert.deepEqual(sameAnswer(rec, rec), { same: true, why: null });
+  const reordered: QueryRecord = { ...rec, rights: { ...rec.rights!, forms: { dosing: "full", enrollment: "full" } } };
+  assert.deepEqual(sameAnswer({ ...rec, rights: { ...rec.rights!, forms: { enrollment: "full", dosing: "full" } } }, reordered), { same: true, why: null }, "the forms' key order is not a change");
 });

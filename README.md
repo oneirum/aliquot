@@ -106,7 +106,7 @@ The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` on
 A lab answers the same questions every week. Where the freezer log is, how a variable is coded, what the SOP says about a sample that came in late, what the literature says about a measure. The answers live in documents, datasets and papers nobody has time to search. Aliquot turns them into agents the lab owns.
 
 - **Answers from your own documents.** A steward compiles SOPs, codebooks and onboarding notes into a knowledge base, from Markdown, text, the Word files the lab already keeps, or PDFs with real text. Agents search it and cite the entry they used.
-- **Answers from the lab's data.** A member asks how many participants finished visit 3, or the mean dose in cohort B, and gets the number from the lab's CSV or REDCap project. The rows stay in a container with no network; only counts and means over large enough groups come back, and the record says how to rerun each one.
+- **Answers from the lab's data.** A member asks how many participants finished visit 3, or the mean dose in cohort B, and gets the number from the lab's CSV or REDCap project. The rows stay in a container with no network; only counts and means over large enough groups come back, and the record says how to rerun each one. A REDCap project answers each member under their own REDCap account: their Data Access Group and export rights apply, so a lab-wide token never shows a member records REDCap would not.
 - **Research tools.** Agents can search OpenAlex, PubMed, arXiv and Europe PMC, read open-access papers in full, look up a DOI and where a legal open copy is, and walk citations. They can also list the lab's datasets and run R or Python over them in a container with no network.
 - **Claude Code or Codex as the agent.** An agent can run on one of these CLIs instead of a model endpoint. The CLI is confined: it has no tools of its own, and it reaches only Aliquot and its vendor's API.
 - **Restricted data does not leave.** Every piece of content carries a data class. Participant identifiers are restricted, and restricted content never reaches a hosted model or a hosted agent CLI: the harness refuses the call and records the refusal. One agent can send public questions to a hosted model (Anthropic, OpenAI) and restricted ones to a lab model (Ollama or any OpenAI-compatible server).
@@ -435,6 +435,9 @@ A data steward registers each table in `lab.toml` and says which columns are fre
 	[tables.dosing.columns]
 	arm = "free"
 	weight_kg = "free"
+	[tables.dosing.redcap_users]
+	"ana@lab0.example" = "alee"
+	"ben@lab0.example" = "bkim"
 
 An agent lists the table ids in `tables` and holds `data_query` in its tools. The model writes a query: filters, up to three group-by columns, and `count`, `sum`, `mean` or `sd`. There is no `min`, `max` or `median`, because each can be one participant's own value, and nothing lists rows. Then:
 
@@ -443,9 +446,20 @@ An agent lists the table ids in `tables` and holds `data_query` in its tools. Th
 3. The engine refuses the whole query when any group, or the values behind any count, mean or sum, has fewer rows than the table's `min_cell`. That is 5 unless the steward sets it higher, and `lab.toml` refuses anything lower. The refusal names the rule, never the size of the small cell.
 4. The harness parses the engine's output against a fixed shape and checks the cells again. Only that aggregate enters the run, at the table's `aggregate_class`.
 
-The record of each call holds the query, the sha256 of the bytes the table held, the engine's hash and the sandbox image, the rows read and matched, and the numbers. A reviewer reruns the query and gets the same number, or learns the source changed. The REDCap token comes from the environment variable `lab.toml` names, and the export request goes only to a REDCap host `[hosts]` places as `lab` or `institution`; `lab.toml` refuses any other.
+### Each member under their own REDCap rights
 
-`pnpm walk:data` runs it on lab0: a member asks three questions of a visits CSV and a REDCap dosing project (`scripts/fake-redcap.ts`, the same two API calls a live REDCap answers), and one question that names a birth date. Part of its output:
+REDCap gives each user export rights per form and can put them in a Data Access Group (DAG), which limits them to that group's records. A token in `lab.toml` belongs to one REDCap user, usually one who sees everything, so without more every member would count every record. `[tables.<id>.redcap_users]` maps each member id (the one every run records, the `[auth]` `id_claim` under sign-on) to that member's REDCap username, and every query reads the user's row from REDCap's user export (`content=user`, which needs User Rights privileges for the token's user) before it asks for a record:
+
+- A member the map does not name, a run with no member (a schedule, an eval or a replay), a username the project does not have, and a user whose project access has expired are refused.
+- A column on a form the user may not export is refused. Under de-identified rights, so is a date, an unvalidated text field or a notes field, as REDCap's own de-identified export drops them. `forms_export` is read per form; a REDCap that sends only `data_export` has it apply to every form.
+- The records export asks only for the record id and the fields the query names, so an identifier field is never exported, whatever the member's rights.
+- For a user in a DAG, the export carries each record's group (`exportDataAccessGroups`) and the engine drops every other group's rows inside the container before it counts. `rows read` is the member's own records.
+
+The record keeps the rights that applied: the member, the REDCap user, the DAG and the level per form. A rerun runs under the same member, and says so when their rights have changed since.
+
+The record of each call holds the query, the sha256 of the bytes the table held, the engine's hash and the sandbox image, the rows read and matched, the REDCap rights, and the numbers. A reviewer reruns the query and gets the same number, or learns the source changed. The REDCap token comes from the environment variable `lab.toml` names, and the export request goes only to a REDCap host `[hosts]` places as `lab` or `institution`; `lab.toml` refuses any other.
+
+`pnpm walk:data` runs it on lab0: members ask a visits CSV and a REDCap dosing project (`scripts/fake-redcap.ts`, the same metadata, user and records exports a live REDCap answers). member-1 is REDCap user rlee in the madison DAG, member-2 is kpatel with de-identified rights and no DAG, and member-3 has no REDCap user. Part of its output:
 
 	member: What was the mean dose in cohort B?
 	aliquot: mean(dose_mg) 20.735294  (answered)
@@ -457,13 +471,34 @@ The record of each call holds the query, the sha256 of the bytes the table held,
 	aliquot: refused. column dob of table visits is restricted; it never leaves the sandbox  (answered)
 	  record: run 27a95211-589, data_query refused before the table was read, 0 rows left the sandbox
 
-	rerun visits: same numbers from source ae8785e76c5b and engine 993395b7aa34
-	rerun dosing: same numbers from source c2b5f69b8c0e and engine 993395b7aa34
+	member-1: How many participants are in the dosing study?
+	aliquot: count(*) 12  (answered)
+	  record: run 3cb188d8-92a, data_query on dosing (redcap, source 693e6604063a, 392 bytes), engine c1c7ca84a7db
+	          query {"groupBy":[],"measures":[{"fn":"count"}],"table":"dosing","where":[]}
+	          rights: member-1 as REDCap user rlee, DAG madison, export dosing full, enrollment full
+	          12 rows read, 12 matched, min cell 5, answer class D1
 
-	ground truth (fixtures/lab0/data/answers.json): all three numbers match
-	on the wire: 8 requests reached the hosted model; none holds any of 204 identifying values from the two sources
+	member-2: How many participants are in the dosing study?
+	aliquot: count(*) 30  (answered)
+	  record: run 2d9f2977-b60, data_query on dosing (redcap, source 4f64bf363dae, 91 bytes), engine c1c7ca84a7db
+	          query {"groupBy":[],"measures":[{"fn":"count"}],"table":"dosing","where":[]}
+	          rights: member-2 as REDCap user kpatel, DAG none (every record), export dosing de-identified, enrollment de-identified
+	          30 rows read, 30 matched, min cell 5, answer class D1
 
-`test/data-query.test.ts` checks the count, the mean and the group-by against those answers, the refusals and the rerun, and searches every request the hosted model received for the identifying values of both sources.
+	member-2: How many dosing participants have a consent date?
+	aliquot: refused. column consent_date of table dosing is a date or free-text field, which the member's de-identified REDCap export rights leave out  (answered)
+
+	member-3: How many participants are enrolled in dosing?
+	aliquot: refused. table dosing is a REDCap project, and [tables.dosing.redcap_users] maps no REDCap user for the member who asked; rule: a member queries REDCap only under their own REDCap account  (answered)
+
+	rerun dosing as member-1: same numbers from source 693e6604063a and engine c1c7ca84a7db
+	rerun dosing as member-2: same numbers from source 4f64bf363dae and engine c1c7ca84a7db
+
+	ground truth (fixtures/lab0/data/answers.json): all five numbers match
+	same question, two members: member-1 (REDCap rlee, DAG madison) counted 12 records, member-2 (REDCap kpatel, no DAG) counted 30
+	on the wire: 16 requests reached the hosted model; none holds any of 204 identifying values from the two sources
+
+`test/data-query.test.ts` checks the count, the mean and the group-by against those answers, the refusals and the rerun, and searches every request the hosted model received for the identifying values of both sources. It also checks that a member in a DAG gets aggregates over that DAG's records only, that a de-identified member's export holds no identifier field and that no name or MRN enters the container, and that an unmapped member, a run with no member, an unknown or expired REDCap user and a form without export rights are each refused before any record is read.
 
 ## Model providers
 
@@ -530,7 +565,7 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm slice1` | The run loop: crash and resume exactly once, a zombie worker fenced off, idempotent intake, restricted data refused with zero hosted requests, limits, stop, and the network seal against planted routes. |
 | `pnpm unit3` | Knowledge bases: compile, coverage gaps blocking publish, a restart mid-compile, `kb_search` and `kb_read` in a run, snapshot diff, refused URL hosts, publish with an override note. |
 | `pnpm lab0` | The first-use check on a synthetic lab, described below. |
-| `pnpm walk:data` | A member asks lab0's visits CSV and REDCap project three questions and one refused one; each record reruns to the same number, and no row value reaches the hosted model. Needs the sandbox image. |
+| `pnpm walk:data` | Three members ask lab0's visits CSV and REDCap project; two get different counts to the same question under their own REDCap rights, three questions are refused, each record reruns to the same number, and no row value reaches the hosted model. Needs the sandbox image. |
 | `aliquot verify --anchors` | That nobody rewrote history in the database. The worker signs the head of the audit stream and of each closed run into an anchor log outside the database every few minutes, with a key the database never holds. This checks every line's signature and that the database still holds each signed hash, and names the first seq that changed. `test/anchor.test.ts` rewrites an audit row and a run event, recomputes every later hash so plain `aliquot verify` passes, and shows this check fail at that seq; it also catches a forged line, a line under another key, and a removed line. |
 | `pnpm trust` | The trust numbers in [`docs/trust.md`](docs/trust.md): unsupported claims, wrong citations, refusals both ways and planted instructions obeyed, on a larger synthetic lab. No Postgres and no key; CI runs it on every push. |
 | `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. Then accessibility: axe-core over the chat page, a record, the runs list and both studio forms in light and dark, failing on any serious or critical WCAG 2.1 AA violation, and a keyboard-only walk from asking to downloading the record with a visible focus ring at every stop. [`docs/accessibility.md`](docs/accessibility.md) has what is tested, the result and what is not covered. |

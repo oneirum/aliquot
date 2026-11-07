@@ -245,6 +245,13 @@ to a tool's code alone moves no agent version.
   and the list does not name is restricted. For REDCap, a field the project's data dictionary flags as an identifier
   is restricted even if `lab.toml` marks it free. A query that filters, groups or measures on a restricted column is
   refused before the table is read, and the refusal is recorded.
+- **REDCap rights.** A REDCap table answers each member under their own REDCap account, mapped in
+  `[tables.<id>.redcap_users]`. Before any record is read, the worker reads the user's row from REDCap's user export:
+  an unmapped member, a run with no member, an unknown or expired user, and a column on a form the user may not export
+  (or, under de-identified rights, a date, unvalidated text or notes field) are refused. A user in a Data Access Group
+  gets aggregates over that group's records only. The records export asks only for the record id and the query's
+  fields, so identifier fields are never exported. The record names the member, the REDCap user, the group and the
+  export level per form.
 - **Minimum cell size.** Every group in an answer, and the count of values behind every count, sum, mean and standard
   deviation, must be at least the table's `min_cell`. The default is 5. A steward may raise it (11 matches the CMS
   cell suppression policy), and `lab.toml` refuses a value below 5. A count of zero is allowed. When any cell is

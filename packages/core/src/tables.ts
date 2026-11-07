@@ -23,7 +23,13 @@ import { sha256, type Sha256 } from "./hash.ts";
 
 export type ColumnClass = "free" | "restricted";
 
-export type TableSource = { readonly kind: "csv"; readonly path: string } | { readonly kind: "redcap"; readonly url: string; readonly tokenEnv: string };
+/**
+ * A REDCap project answers each member with that member's own REDCap rights: `users` maps a member id to the REDCap
+ * username whose export rights and Data Access Group apply. A member it does not name is refused.
+ */
+export type TableSource =
+  | { readonly kind: "csv"; readonly path: string }
+  | { readonly kind: "redcap"; readonly url: string; readonly tokenEnv: string; readonly users: Readonly<Record<string, string>> };
 
 export interface Table {
   readonly id: string;
@@ -86,10 +92,29 @@ const groupOut = z.object({ key: z.record(z.string(), z.string().max(200)), n: z
 
 const engineOut = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), rowsRead: z.number().int().min(0), rowsMatched: z.number().int().min(0), groups: z.array(groupOut).max(MAX_GROUPS) }).strict(),
-  z.object({ ok: z.literal(false), refusal: z.enum(["restricted-column", "missing-column", "not-numeric", "cell-size", "too-many-groups"]), column: z.string().optional() }).strict(),
+  z.object({ ok: z.literal(false), refusal: z.enum(["restricted-column", "missing-column", "not-numeric", "cell-size", "too-many-groups", "missing-scope"]), column: z.string().optional() }).strict(),
 ]);
 
 export type Group = z.infer<typeof groupOut>;
+
+/**
+ * REDCap's export rights, per form: 0 no access, 1 full data set, 2 de-identified (no identifier fields, dates,
+ * unvalidated text or notes), 3 every identifier field removed.
+ */
+export type ExportLevel = "none" | "full" | "de-identified" | "no-identifiers";
+const LEVELS: Readonly<Record<string, ExportLevel>> = { "0": "none", "1": "full", "2": "de-identified", "3": "no-identifiers" };
+
+/** The REDCap rights a query ran under, as the record keeps them. */
+export interface AppliedRights {
+  readonly member: string;
+  readonly redcapUser: string;
+  /** The user's Data Access Group (its unique name), or null for a user in none, who sees every record. */
+  readonly dag: string | null;
+  readonly forms: Readonly<Record<string, ExportLevel>>;
+}
+
+/** The column a records export carries each record's DAG in, with exportDataAccessGroups=true. */
+export const DAG_COLUMN = "redcap_data_access_group";
 
 /** What a data_query call records as its output: enough for a reviewer to rerun it and compare. */
 export interface QueryRecord {
@@ -98,6 +123,8 @@ export interface QueryRecord {
   readonly source: { readonly kind: TableSource["kind"]; readonly sha256: Sha256; readonly bytes: number };
   readonly engine: { readonly sha256: Sha256; readonly image: Sha256 };
   readonly minCell: number;
+  /** The REDCap rights applied, or null for a CSV. */
+  readonly rights: AppliedRights | null;
   readonly rowsRead: number;
   readonly rowsMatched: number;
   readonly groups: readonly Group[];
@@ -130,16 +157,51 @@ export interface TableReaderDeps {
   readonly secret: (env: string) => string | undefined;
 }
 
-/** One table's source, read in two steps so a query on a flagged column is refused before any record is requested. */
-export interface TableReader {
-  /** Columns the source itself flags as identifiers: REDCap's metadata export. None for a CSV. */
-  identifiers(t: Table): Promise<readonly string[]>;
-  /** The rows as CSV: the file, or REDCap's flat records export. */
-  bytes(t: Table): Promise<Uint8Array>;
+/** A field of a REDCap project's data dictionary, as far as export rights need it. */
+export interface Field {
+  readonly name: string;
+  readonly form: string;
+  readonly identifier: boolean;
+  /** A date, an unvalidated text field or a notes field: what a de-identified export leaves out besides identifiers. */
+  readonly deidentified: boolean;
 }
 
-/** REDCap's metadata export, the part read here: which fields are flagged as identifiers. */
-const redcapField = z.object({ field_name: z.string(), identifier: z.string().optional() }).loose();
+/** A REDCap user's row in the project's user export, the part read here. */
+export interface RedcapUserRights {
+  readonly username: string;
+  readonly expiration: string;
+  readonly dataAccessGroup: string;
+  readonly forms: Readonly<Record<string, ExportLevel>> | null;
+  readonly dataExport: ExportLevel;
+}
+
+/** What a records export asks REDCap for: these fields only, and each record's DAG when the user has one. */
+export interface RecordsRequest {
+  readonly fields: readonly string[];
+  readonly dags: boolean;
+}
+
+/** One table's source, read in steps so a query is refused on the dictionary or the member's rights before any record is requested. */
+export interface TableReader {
+  /** REDCap's data dictionary: the metadata export. None for a CSV. */
+  dictionary(t: Table): Promise<readonly Field[]>;
+  /** The REDCap user's rights in the project, from the user export, or null when the project has no such user. */
+  user(t: Table, username: string): Promise<RedcapUserRights | null>;
+  /** The rows as CSV: the file, or REDCap's flat records export of the fields asked for. */
+  bytes(t: Table, request?: RecordsRequest): Promise<Uint8Array>;
+}
+
+/** REDCap's metadata export, the part read here. */
+const redcapField = z.object({ field_name: z.string(), form_name: z.string(), field_type: z.string(), identifier: z.string().optional(), text_validation_type_or_show_slider_number: z.string().optional() }).loose();
+const level = z.union([z.string(), z.number()]).transform((v) => LEVELS[String(v)] ?? "none");
+/** forms_export is an object in REDCap's JSON user export, and "form:level,form:level" in some versions. */
+const formsExport = z.union([z.record(z.string(), level), z.string().transform((s) => Object.fromEntries(s.split(",").filter(Boolean).map((p) => [p.split(":")[0]!, LEVELS[p.split(":")[1] ?? ""] ?? "none"])))]);
+const redcapUser = z.object({ username: z.string(), expiration: z.string().nullish(), data_access_group: z.string().nullish(), data_export: level.optional(), forms_export: formsExport.nullish() }).loose();
+
+const deidentifiedOut = (f: z.infer<typeof redcapField>): boolean => {
+  const v = f.text_validation_type_or_show_slider_number ?? "";
+  return f.field_type === "notes" || (f.field_type === "text" && (v === "" || /^(date|datetime|time)/.test(v)));
+};
 
 const tooLarge = (t: Table, bytes: Uint8Array) => {
   if (bytes.length > TABLE_CAP_BYTES) throw new QueryRefused(`table ${t.id} is over the ${TABLE_CAP_BYTES / 1024 / 1024} MB limit`);
@@ -156,14 +218,21 @@ export function tableReader(deps: TableReaderDeps): TableReader {
     return new Uint8Array(await res.arrayBuffer());
   };
   return {
-    async identifiers(t) {
+    async dictionary(t) {
       if (t.source.kind === "csv") return [];
       const meta = z.array(redcapField).parse(JSON.parse(Buffer.from(await redcap(t, { content: "metadata", format: "json" })).toString("utf8")));
-      return meta.filter((f) => f.identifier === "y").map((f) => f.field_name);
+      return meta.map((f) => ({ name: f.field_name, form: f.form_name, identifier: f.identifier === "y", deidentified: deidentifiedOut(f) }));
     },
-    async bytes(t) {
+    async user(t, username) {
+      const users = z.array(redcapUser).parse(JSON.parse(Buffer.from(await redcap(t, { content: "user", format: "json" })).toString("utf8")));
+      const u = users.find((x) => x.username === username);
+      return u ? { username, expiration: u.expiration ?? "", dataAccessGroup: u.data_access_group ?? "", forms: u.forms_export ?? null, dataExport: u.data_export ?? "none" } : null;
+    },
+    async bytes(t, request) {
       if (t.source.kind === "csv") return tooLarge(t, await readFile(t.source.path));
-      return tooLarge(t, await redcap(t, { content: "record", format: "csv", type: "flat", rawOrLabel: "raw", rawOrLabelHeaders: "raw", exportCheckboxLabel: "false" }));
+      if (!request) throw new Error(`table ${t.id}: a REDCap records export names the fields it asks for`);
+      const fields = Object.fromEntries(request.fields.map((f, i) => [`fields[${i}]`, f]));
+      return tooLarge(t, await redcap(t, { content: "record", format: "csv", type: "flat", rawOrLabel: "raw", rawOrLabelHeaders: "raw", exportCheckboxLabel: "false", exportDataAccessGroups: String(request.dags), ...fields }));
     },
   };
 }
@@ -180,23 +249,72 @@ const REFUSALS: Record<Exclude<z.infer<typeof engineOut>, { ok: true }>["refusal
   "not-numeric": (t, c) => `column ${c} of table ${t.id} holds a value that is not a number`,
   "cell-size": (t) => `a group, or the values behind a measure, has fewer than ${t.minCell} rows; widen the groups or drop a filter`,
   "too-many-groups": () => `the query makes more than ${MAX_GROUPS} groups; group by fewer columns`,
+  "missing-scope": (t) => `REDCap's export of table ${t.id} has no ${DAG_COLUMN} column, so the member's Data Access Group cannot be applied`,
 };
 
 const small = (n: number, min: number) => n > 0 && n < min;
+
+/** The REDCap field a column comes from: a checkbox field's columns are field___1 and on. */
+const fieldOf = (column: string) => column.replace(/___[^_]+$/, "");
+
+/**
+ * The member's REDCap rights over the columns a query names, or a refusal. A run with no member, a member the table
+ * does not map, a username the project does not have, an expired user, and a column on a form the user may not export
+ * or that their de-identified export leaves out are each refused before any record is requested.
+ */
+async function rightsFor(t: Table, q: DataQuery, dictionary: readonly Field[], read: TableReader, member: string | null, today: string): Promise<{ readonly rights: AppliedRights; readonly fields: string[] }> {
+  if (t.source.kind !== "redcap") throw new Error("unreachable");
+  const where = `[tables.${t.id}.redcap_users]`;
+  if (member === null) throw new QueryRefused(`table ${t.id} is a REDCap project, which answers each member under their own REDCap rights, and this run has no member (a schedule, an eval or a replay)`);
+  const username = Object.hasOwn(t.source.users, member) ? t.source.users[member] : undefined;
+  if (username === undefined) throw new QueryRefused(`table ${t.id} is a REDCap project, and ${where} maps no REDCap user for the member who asked; rule: a member queries REDCap only under their own REDCap account`);
+  const user = await read.user(t, username);
+  if (!user) throw new QueryRefused(`table ${t.id}: the member's REDCap user is not a user of the project`);
+  if (user.expiration !== "" && today > user.expiration) throw new QueryRefused(`table ${t.id}: the member's REDCap access to the project expired on ${user.expiration}`);
+  const forms = Object.fromEntries([...new Set(dictionary.map((f) => f.form))].map((form) => [form, user.forms?.[form] ?? (user.forms ? "none" : user.dataExport)]));
+  const fields: string[] = [];
+  for (const column of columnsOf(q)) {
+    const f = dictionary.find((x) => x.name === column) ?? dictionary.find((x) => x.name === fieldOf(column));
+    if (!f) throw new QueryRefused(REFUSALS["missing-column"](t, column));
+    const lvl = forms[f.form] ?? "none";
+    if (lvl === "none") throw new QueryRefused(`column ${column} of table ${t.id} is on REDCap form ${f.form}, which the member's REDCap export rights do not reach`);
+    if (lvl === "de-identified" && f.deidentified) throw new QueryRefused(`column ${column} of table ${t.id} is a date or free-text field, which the member's de-identified REDCap export rights leave out`);
+    if (!fields.includes(f.name)) fields.push(f.name);
+  }
+  const recordId = dictionary[0]?.name;
+  return {
+    rights: { member, redcapUser: username, dag: user.dataAccessGroup === "" ? null : user.dataAccessGroup, forms },
+    fields: recordId && !fields.includes(recordId) ? [recordId, ...fields] : fields,
+  };
+}
 
 /**
  * Runs one query end to end: column check, read, engine in the sandbox, shape and cell check. Throws QueryRefused for
  * any refusal; nothing about the rows is in its message. Used by data_query and by a reviewer's rerun alike.
  */
-export async function executeQuery(t: Table, q: DataQuery, deps: { readonly read: TableReader; readonly sandbox: TableSandbox; readonly signal: AbortSignal }): Promise<QueryRecord> {
+export interface QueryDeps {
+  readonly read: TableReader;
+  readonly sandbox: TableSandbox;
+  readonly signal: AbortSignal;
+  /** The member the run is for, whose REDCap rights a REDCap table applies; null for a run no member started. */
+  readonly member: string | null;
+  /** Today's UTC day, YYYY-MM-DD, against a REDCap user's expiration. */
+  readonly today: string;
+}
+
+export async function executeQuery(t: Table, q: DataQuery, deps: QueryDeps): Promise<QueryRecord> {
   const declared = restrictedColumn(t, q);
   if (declared) throw new QueryRefused(REFUSALS["restricted-column"](t, declared));
-  const identifiers = await deps.read.identifiers(t);
+  const dictionary = await deps.read.dictionary(t);
+  const identifiers = dictionary.filter((f) => f.identifier).map((f) => f.name);
   const flagged = restrictedColumn(t, q, identifiers);
   if (flagged) throw new QueryRefused(`${REFUSALS["restricted-column"](t, flagged)} (the source flags it as an identifier)`);
-  const bytes = await deps.read.bytes(t);
+  const granted = t.source.kind === "redcap" ? await rightsFor(t, q, dictionary, deps.read, deps.member, deps.today) : null;
+  const bytes = await deps.read.bytes(t, granted ? { fields: granted.fields, dags: granted.rights.dag !== null } : undefined);
   const free = Object.entries(t.columns).filter(([c, cls]) => cls === "free" && !flaggedBy(c, identifiers)).map(([c]) => c);
-  const envelope = JSON.stringify({ query: q, free, minCell: t.minCell, maxGroups: MAX_GROUPS });
+  // A user in a DAG sees only its records: the engine drops every other row before it counts anything.
+  const scope = granted?.rights.dag ? { column: DAG_COLUMN, value: granted.rights.dag } : null;
+  const envelope = JSON.stringify({ query: q, free, minCell: t.minCell, maxGroups: MAX_GROUPS, scope });
   const run = await deps.sandbox.aggregate([{ name: "table.csv", data: bytes }, { name: "query.json", data: Buffer.from(envelope) }], engine().source, deps.signal);
   if (run.timedOut) throw new Error(`table ${t.id}: the query took longer than the sandbox's timeout`);
   // stderr is never read: a traceback quotes the line it failed on, and that line can hold a row.
@@ -224,14 +342,19 @@ export async function executeQuery(t: Table, q: DataQuery, deps: { readonly read
     source: { kind: t.source.kind, sha256: sha256(bytes), bytes: bytes.length },
     engine: { sha256: engine().sha256, image: deps.sandbox.image },
     minCell: t.minCell,
+    rights: granted?.rights ?? null,
     rowsRead: parsed.rowsRead,
     rowsMatched: parsed.rowsMatched,
     groups: parsed.groups,
   };
 }
 
-/** A rerun matches when the source bytes, the engine and the numbers are the same. */
+/** Rights compared by value: a record read back from the store's jsonb has its forms in another key order. */
+const rightsKey = (r: AppliedRights | null) => (r ? JSON.stringify([r.member, r.redcapUser, r.dag, Object.entries(r.forms).sort(([x], [y]) => x.localeCompare(y))]) : "null");
+
+/** A rerun matches when the rights, the source bytes, the engine and the numbers are the same. */
 export function sameAnswer(a: QueryRecord, b: QueryRecord): { readonly same: boolean; readonly why: string | null } {
+  if (rightsKey(a.rights) !== rightsKey(b.rights)) return { same: false, why: "the member's REDCap rights changed" };
   if (a.source.sha256 !== b.source.sha256) return { same: false, why: `the source changed (${a.source.sha256.slice(0, 12)} then ${b.source.sha256.slice(0, 12)})` };
   if (a.engine.sha256 !== b.engine.sha256) return { same: false, why: "the query engine changed" };
   const numbers = (r: QueryRecord) => JSON.stringify({ rowsRead: r.rowsRead, rowsMatched: r.rowsMatched, groups: r.groups });
