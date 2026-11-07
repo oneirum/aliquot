@@ -59,7 +59,7 @@ To run the checks:
 	pnpm test
 	pnpm lab0
 
-`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `9/9 checks passed`.
+`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `15/15 checks passed`.
 
 If port 5432 is taken, set `LABH_PG_PORT` for every command, for example `export LABH_PG_PORT=55433` before `docker compose up -d postgres`.
 
@@ -208,6 +208,7 @@ A terminal, tmux, T3 Code or a lab's own orchestrator can reach Aliquot's agents
 | T3 Code, Zed or another ACP client | `aliquot acp`, added as a local ACP command: each question a thread, ending with the record link |
 | A member's own Claude Code, Codex or Cursor | `aliquot mcp`, added as a stdio MCP server: one tool, `ask`, on the member's own subscription ([docs/harnesses.md](docs/harnesses.md)) |
 | Slack | `aliquot slack` (`docker compose --profile slack up -d`): mention Aliquot in a channel or send it a DM, and the answer posts in the thread with its record link. Socket Mode, so no public URL. The app manifest and setup are in [docs/slack.md](docs/slack.md) |
+| Microsoft Teams | `aliquot teams` (`docker compose --profile teams up -d`): mention Aliquot in a channel or group chat, or message it directly, and the answer posts in the thread with its record link. Only activities the Bot Framework signed for the lab's app and tenant are read. The app manifest and the steps for the campus Teams admin are in [docs/teams.md](docs/teams.md); `pnpm demo --teams` runs it against a stand-in for Teams |
 
 `--ceiling D1` keeps an answer above D1 out of a client that stores its own copy, such as T3 Code's thread history. The client gets the record link instead.
 
@@ -296,6 +297,7 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm slice1` | The run loop: crash and resume exactly once, a zombie worker fenced off, idempotent intake, restricted data refused with zero hosted requests, limits, stop, and the network seal against planted routes. |
 | `pnpm unit3` | Knowledge bases: compile, coverage gaps blocking publish, a restart mid-compile, `kb_search` and `kb_read` in a run, snapshot diff, refused URL hosts, publish with an override note. |
 | `pnpm lab0` | The first-use check on a synthetic lab, described below. |
+| `aliquot verify --anchors` | That nobody rewrote history in the database. The worker signs the head of the audit stream and of each closed run into an anchor log outside the database every few minutes, with a key the database never holds. This checks every line's signature and that the database still holds each signed hash, and names the first seq that changed. `test/anchor.test.ts` rewrites an audit row and a run event, recomputes every later hash so plain `aliquot verify` passes, and shows this check fail at that seq; it also catches a forged line, a line under another key, and a removed line. |
 | `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. |
 
 The tests that need macOS or the sandbox image skip elsewhere, each with its reason; CI runs on Linux.
@@ -316,6 +318,7 @@ The tests that need macOS or the sandbox image skip elsewhere, each with its rea
 | One channel with the handbook agent and a methods agent | A handbook question and a statistics question each reach their agent and cite its entry; a question that fits both asks the member, the pick answers, and a follow-up stays with it |
 | Every run | 26 of 26 run records verify, each naming its agent version |
 | The hosted endpoint over the whole check | 1 request, the planned control message |
+| A worker with `[anchor]` set signs every chain into a log outside the database | 1 anchor line over 38 audit rows and 33 closed runs; `aliquot verify --anchors` holds |
 
 The fake models are scripted, so this checks retrieval, orchestration, provenance and egress control. It does not measure answer quality, and it does not show that a real lab wants this. That needs a pilot.
 
@@ -356,7 +359,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
-- **0.6, ask where the lab already talks:** the Slack door is built ([docs/slack.md](docs/slack.md)), and so is the router across several agents on one channel; left is Teams after a lab asks.
+- **0.6, ask where the lab already talks:** the Slack and Teams doors are built ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)), and so is the router across several agents on one channel.
 - **0.7, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
 - **0.8, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.

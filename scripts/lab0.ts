@@ -30,9 +30,12 @@ import { loadManifest, tokenize, type KbSnapshot } from "../packages/core/src/kb
 import { createPayloadStore, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { startFakeSlack } from "../test/fake-slack.ts";
+import { APP_ID, APP_SECRET, startFakeTeams, TENANT } from "./fake-teams.ts";
 import { freshDatabase } from "../test/db.ts";
-import { checker, ensurePostgres, get, post, processes, runWithInput, waitFor } from "./procs.ts";
+import { checker, ensurePostgres, get, post, processes, runWithInput, waitFor, waitLine } from "./procs.ts";
 import { askShared, publishRoutedAgents, SHARED, type Sent } from "./routed-lab.ts";
+import { newAnchorKeyPem } from "../packages/core/src/anchor.ts";
+import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 
 interface Prereg {
   readonly inDocument: readonly { readonly id: string; readonly question: string; readonly expected: string }[];
@@ -62,7 +65,8 @@ const acpToken = randomBytes(32).toString("hex");
 const mcpToken = randomBytes(32).toString("hex");
 const personalToken = randomBytes(32).toString("hex");
 const slackToken = randomBytes(32).toString("hex");
-const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken, LAB0_SLACK_TOKEN: slackToken };
+const teamsToken = randomBytes(32).toString("hex");
+const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken, LAB0_SLACK_TOKEN: slackToken, LAB0_TEAMS_TOKEN: teamsToken, LABH_ANCHOR_KEY_FILE: join(work, "anchor.key") };
 const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
@@ -102,6 +106,11 @@ function config(name: string, agentPath: string): string {
     'kind = "slack"',
     'placement = "approved"',
     'token_env = "LAB0_SLACK_TOKEN"',
+    // Check T: the Teams door at institution (D2), the university's own tenant, so the D1 handbook answer posts in the thread.
+    "[surfaces.teams]",
+    'kind = "teams"',
+    'placement = "institution"',
+    'token_env = "LAB0_TEAMS_TOKEN"',
     "[policy]",
     'review_confidential = "refuse"',
     `participant_id_patterns = ['${prereg.restricted.pattern}']`,
@@ -430,6 +439,65 @@ try {
     return `${q05.id} to Lab handbook (confidence ${handbook.confidence}), cites ${q05.expected}; sample size to Methods desk (${methods.confidence}), cites methods/sample-size.md; "${unsure}": asked, choices Lab handbook and Methods desk; pick ran Methods desk; follow-up stayed (basis thread), alone it went to Lab handbook; record page shows the route; hosted requests ${start} -> ${hosted.requests}`;
   });
 
+
+  await check("check T: through a fake Teams and Bot Framework, a channel mention gets the cited answer in its thread with a record link that resolves, and a participant id is refused with zero hosted requests", async () => {
+    assert.ok(published, "check 1 published a snapshot");
+    await ps.stopAll();
+    const teams = await startFakeTeams();
+    const teamsEnv = { PATH: childEnv.PATH!, HOME: childEnv.HOME!, ALIQUOT_SURFACE_TOKEN: teamsToken, MICROSOFT_APP_ID: APP_ID, MICROSOFT_APP_PASSWORD: APP_SECRET, MICROSOFT_APP_TENANT_ID: TENANT, ALIQUOT_TEAMS_OPENID: teams.openid, ALIQUOT_TEAMS_LOGIN: teams.login };
+    const teamsDoors = processes(root, work, teamsEnv);
+    try {
+      const q = prereg.inDocument[0]!;
+      /** Starts aliquot teams on a free port and returns its messaging endpoint. */
+      const door = async (base: string) => {
+        const proc = teamsDoors.start("teams-T", "aliquot.ts", ["teams", "--door", base, "--listen", "127.0.0.1:0"]);
+        return waitFor("the Teams door to listen", async () => /listening on (http:\/\/\S+\/api\/messages)/.exec(proc.out.join(""))?.[1] ?? null, 15_000);
+      };
+      const runIn = (text: string) => /\/runs\/([0-9a-f-]{36})/.exec(text)?.[1] as RunId | undefined;
+
+      let web = await ps.startWeb(cfgHandbook);
+      ps.startWorker(cfgHandbook, "WT");
+      let endpoint = await door(web.base);
+      const mention = teams.activity(q.question);
+      assert.equal(await teams.deliver(endpoint, mention), 200);
+      const answered = await teams.answerTo(mention.id);
+      assert.ok(answered.includes(q.expected), `the thread's answer does not name ${q.expected}: ${answered}`);
+      const looking = teams.calls.find((c) => c.method === "POST" && c.activityId === mention.id)!;
+      assert.equal(looking.conversationId, mention.conversation.id, "the reply is in the channel thread the mention started");
+      const runId = runIn(answered);
+      assert.ok(runId, `the answer carries a record link: ${answered}`);
+      const recorded = await loadEvents(db, runId);
+      assert.equal(verifyChain(recorded), null);
+      assert.equal(recorded[0]?.event.t === "run.started" ? recorded[0].event.surface : null, "teams");
+      const page = await get(`${web.base}/runs/${runId}`);
+      assert.equal(page.status, 200);
+      assert.ok(page.text.includes(runId), "the record page names the run");
+      assert.equal(await teams.deliver(endpoint, teams.activity(q.question), "forged"), 401, "an activity the Bot Framework did not sign is refused");
+      await teamsDoors.stopAll();
+      await ps.stopAll();
+
+      const start = hosted.requests;
+      web = await ps.startWeb(cfgHosted);
+      ps.startWorker(cfgHosted, "WT2");
+      endpoint = await door(web.base);
+      const restricted = teams.activity(prereg.restricted.message);
+      assert.equal(await teams.deliver(endpoint, restricted), 200);
+      const refused = await teams.answerTo(restricted.id);
+      const refusedRun = runIn(refused);
+      assert.ok(refusedRun, `the refusal carries a record link: ${refused}`);
+      const refusedEvents = await loadEvents(db, refusedRun);
+      assert.equal(finishedOf(refusedEvents).outcome, "refused");
+      assert.equal(refusedEvents.some((e) => e.event.t === "model.requested"), false, "no model.requested was journaled");
+      assert.equal(hosted.requests, start, "the participant id sent nothing to the hosted endpoint");
+      await teamsDoors.stopAll();
+      await ps.stopAll();
+      return `answer in thread names ${q.expected}, record ${runId.slice(0, 8)} on surface teams, chain verified, record page 200, forged activity 401; participant id: run ${refusedRun.slice(0, 8)} refused, hosted requests ${start} -> ${hosted.requests}; Teams saw: ${refused.split("\n")[0]}`;
+    } finally {
+      await teamsDoors.stopAll();
+      await teams.close();
+    }
+  });
+
   await check("check B: questions outside the documents get the coverage-gap behaviour", async () => {
     assert.ok(published, "check 1 published a snapshot");
     const web = await ps.startWeb(cfgHandbook);
@@ -584,6 +652,26 @@ try {
   await check("total: the hosted endpoint saw exactly the one control request", async () => {
     assert.equal(hosted.requests, 1);
     return "hosted requests over the whole script: 1";
+  });
+
+  await check("check Z: the worker signs an anchor of every chain into a log outside the database, and aliquot verify --anchors holds it", async () => {
+    const keyPath = childEnv.LABH_ANCHOR_KEY_FILE!;
+    const logPath = join(work, "anchors.log");
+    writeFileSync(keyPath, newAnchorKeyPem(), { mode: 0o600 });
+    const cfgAnchor = join(work, "lab-anchor.toml");
+    writeFileSync(cfgAnchor, `${readFileSync(cfgHandbook, "utf8")}[anchor]\npath = "anchors.log"\nevery_minutes = 15\n`);
+    const bin = (b: string) => join(root, "packages/core/bin", b);
+    const worker = ps.startGroup("worker-anchor", process.execPath, [...PERMISSION_FLAGS, `--allow-fs-write=${logPath}`, bin("worker.ts"), "--config", cfgAnchor, "--worker-id", "WZ"], root);
+    const line = await waitLine(worker, /anchor \{.*\}/, 15_000);
+    await ps.stop(worker);
+    const anchor = JSON.parse(line.slice(line.indexOf("{"))) as { n: number; audit: { seq: number } | null; runs: unknown[] };
+    assert.equal(anchor.n, 1);
+    assert.ok(anchor.runs.length >= runs.length, `${anchor.runs.length} runs anchored, ${runs.length} started by this script`);
+    const verify = await runWithInput(root, "aliquot.ts", ["--config", cfgAnchor, "verify", "--anchors"], childEnv, "");
+    assert.equal(verify.code, 0, verify.stdout);
+    const held = verify.stdout.trim().split("\n").at(-1)!;
+    assert.match(held, /^anchors: 1 line, every signature valid/);
+    return `anchor line 1: audit seq ${anchor.audit?.seq ?? "none"}, ${anchor.runs.length} closed runs; ${held}`;
   });
 } finally {
   await ps.stopAll();

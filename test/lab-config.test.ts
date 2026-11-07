@@ -78,7 +78,7 @@ test("each surface rule refuses its entry with one line naming the surface", () 
     ["an id with a capital", '[surfaces.Acp]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.Acp\] .*lowercase/],
     ["an id with a colon, which would split the run key", '[surfaces."a:b"]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.a:b\] /],
     ["a non-web surface without kind", '[surfaces.acp]\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.acp\] .*kind/],
-    ["a kind Aliquot does not know", '[surfaces.teams]\nkind = "teams"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.teams\] .*kind/],
+    ["a kind Aliquot does not know", '[surfaces.pager]\nkind = "pager"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.pager\] .*kind/],
     ["kind web at another id", '[surfaces.door2]\nkind = "web"\nplacement = "lab"\n', /^lab\.toml: \[surfaces\.door2\] .*web/],
     ["another kind at id web", '[surfaces.web]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.web\] .*web/],
     ["token_env on web, which the door would ignore", '[surfaces.web]\nplacement = "lab"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.web\] .*token_env/],
@@ -88,6 +88,7 @@ test("each surface rule refuses its entry with one line naming the surface", () 
     ["a web-only key on a non-web surface", '[surfaces.acp]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "T"\nport = 3001\n', /^lab\.toml: \[surfaces\.acp\] .*port/],
     ["slack in lab", '[surfaces.slack]\nkind = "slack"\nplacement = "lab"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.slack\] .*Slack/],
     ["slack at institution", '[surfaces.slack]\nkind = "slack"\nplacement = "institution"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.slack\] .*Slack/],
+    ["teams in lab", '[surfaces.teams]\nkind = "teams"\nplacement = "lab"\ntoken_env = "T"\n', /^lab\.toml: \[surfaces\.teams\] .*Teams/],
     ["two surfaces naming one token_env", `${acp}[surfaces.phone]\nkind = "phone"\nplacement = "zdr"\ntoken_env = "ALIQUOT_ACP_TOKEN"\n`, /^lab\.toml: \[surfaces\.phone\] .*ALIQUOT_ACP_TOKEN.*acp/],
   ];
   for (const [what, toml, message] of refused) {
@@ -95,20 +96,25 @@ test("each surface rule refuses its entry with one line naming the surface", () 
   }
   const slack = parseConfig(`${base}[surfaces.slack]\nkind = "slack"\nplacement = "approved"\ntoken_env = "SLACK_TOKEN"\n`, "/l/lab.toml");
   assert.deepEqual(slack.surfaces.at(-1), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "SLACK_TOKEN" });
+  const teams = parseConfig(`${base}[surfaces.teams]\nkind = "teams"\nplacement = "institution"\ntoken_env = "TEAMS_TOKEN"\n`, "/l/lab.toml");
+  assert.deepEqual(teams.surfaces.at(-1), { id: "teams", kind: "teams", placement: "institution", tokenEnv: "TEAMS_TOKEN" });
 });
 
 test("a channel floor may name any surface id, digits and dashes included", () => {
   assert.deepEqual(parseConfig(`${base}[channel_floors]\n"acp-2:lab" = "D2"\n`, "/l/lab.toml").channelFloors, { "acp-2:lab": "D2" });
 });
 
-test("lab.example.toml serves acp at zdr, and its commented slack surface parses once uncommented", () => {
+test("lab.example.toml serves acp at zdr, and its commented slack and teams surfaces parse once uncommented", () => {
   const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
   const text = readFileSync(path, "utf8");
   assert.deepEqual(parseConfig(text, path).surfaces.find((s) => s.id === "acp"), { id: "acp", kind: "acp", placement: "zdr", tokenEnv: "ALIQUOT_ACP_TOKEN" });
-  const at = text.indexOf("# [surfaces.slack]");
-  const end = text.indexOf("\n\n", at);
-  const slack = `${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(end)}`;
-  assert.deepEqual(parseConfig(slack, path).surfaces.find((s) => s.id === "slack"), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "ALIQUOT_SLACK_TOKEN" });
+  const uncomment = (id: string) => {
+    const at = text.indexOf(`# [surfaces.${id}]`);
+    const end = text.indexOf("\n\n", at);
+    return parseConfig(`${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(end)}`, path).surfaces.find((s) => s.id === id);
+  };
+  assert.deepEqual(uncomment("slack"), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "ALIQUOT_SLACK_TOKEN" });
+  assert.deepEqual(uncomment("teams"), { id: "teams", kind: "teams", placement: "institution", tokenEnv: "ALIQUOT_TEAMS_TOKEN" });
 });
 
 test("lab.example.toml's OpenRouter block parses once uncommented and routes Claude only to the providers with zero-retention Claude endpoints", () => {

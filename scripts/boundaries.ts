@@ -46,6 +46,10 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/door-client.ts": ["module:http", "module:https"],
   // aliquot slack: Slack's Web API and Socket Mode, over https (http and ws on loopback for a test).
   "packages/core/src/surfaces/slack-wire.ts": ["module:http", "module:https"],
+  // aliquot teams: the messaging endpoint the Bot Framework posts to, its keys, the tenant's login and the connector.
+  "packages/core/src/surfaces/teams-wire.ts": ["module:http", "module:https"],
+  // A stand-in for the Bot Framework, used by the tests and pnpm demo --teams. It is not deployed.
+  "scripts/fake-teams.ts": ["module:http"],
   // run_code's Docker Engine client, over the daemon's unix socket.
   "packages/core/src/sandbox.ts": ["module:http"],
   // The agent worker: the one spawn in core, the loopback MCP server, and the CONNECT proxy.

@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadAnchorKey } from "../packages/core/src/anchor.ts";
 import { loadConfig } from "../packages/core/src/config.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 
@@ -148,4 +149,26 @@ test("without write access to both files init names the exact grant and writes n
   assert.equal(r.status, 2);
   assert.equal(r.stderr.split("\n")[0], `init writes ${l.cfg} and ${l.env}, and this process may not. Run it with write access to exactly those paths:`);
   assert.deepEqual([existsSync(l.cfg), existsSync(l.env)], [false, false]);
+});
+
+test("--anchor-key writes a new Ed25519 key, mode 600, and an [anchor] table; it never replaces a key and needs a grant for it", async () => {
+  const l = lab();
+  const key = join(l.dir, "config", "anchor.key");
+  const denied = init(l, "", ["--yes", "--sample", "P-00123", "--anchor-key", key]);
+  assert.equal(denied.status, 2);
+  assert.equal(denied.stderr.split("\n")[0], `init writes ${l.cfg}, ${l.env} and ${key}, and this process may not. Run it with write access to exactly those paths:`);
+  assert.equal(existsSync(key), false);
+
+  const r = init(l, "", ["--yes", "--sample", "P-00123", "--anchor-key", key], [l.cfg, l.env, key]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(statSync(key).mode & 0o777, 0o600);
+  assert.equal(loadAnchorKey(key).asymmetricKeyType, "ed25519");
+  assert.deepEqual((await loadConfig(l.cfg)).anchor, { path: join(l.dir, "config", "anchors.log"), everyMinutes: 15 });
+  assert.ok(r.stdout.includes(`Set LABH_ANCHOR_KEY_FILE=${key} for the worker and aliquot anchor`), r.stdout);
+
+  const before = readFileSync(key, "utf8");
+  const again = init(l, "", ["--force", "--yes", "--sample", "P-00123", "--anchor-key", key], [l.cfg, key]);
+  assert.equal(again.status, 2);
+  assert.match(again.stderr, /init never replaces an anchor key/);
+  assert.equal(readFileSync(key, "utf8"), before);
 });
