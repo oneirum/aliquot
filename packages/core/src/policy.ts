@@ -46,8 +46,26 @@ export interface ClassRule {
   readonly residency: string | null;
   /** What a member is told when this class refuses a message. */
   readonly message: string;
+  /** The lab's own regular expressions for this class, run as detector "class-pattern". */
+  readonly patterns: readonly string[];
+  /** The campus tier this class maps to under lab.toml's preset, or null with no preset. */
+  readonly campusTier: CampusTier | null;
   /** One of the five classes every policy has. Its level is fixed. */
   readonly builtin: boolean;
+}
+
+/** A campus tier as a reviewer reads it: "UW-Madison" "Restricted", and the page the mapping rests on. */
+export interface CampusTier {
+  readonly campus: string;
+  readonly tier: string;
+  readonly source: string;
+}
+
+/** The campus a preset names and its tiers, for buildPolicy. */
+export interface Campus {
+  readonly campus: string;
+  readonly preset: string;
+  readonly tiers: readonly string[];
 }
 
 export interface Policy {
@@ -55,6 +73,8 @@ export interface Policy {
   readonly classes: readonly ClassRule[];
   /** The lab's participant-id regexes, run as the participant-id detector. */
   readonly labPatterns: readonly RegExp[];
+  /** The campus lab.toml's preset names, or null. Every class has a campusTier when it is set. */
+  readonly campus?: Campus | null;
 }
 
 /** A detector: patterns, plus an optional filter over each match. Local and pure, like the gate. */
@@ -67,6 +87,19 @@ interface Detector {
 
 const PHONE = String.raw`(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}`;
 const DATE = String.raw`(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})`;
+/** A payment card number passes the Luhn check; most other long digit runs do not. */
+function luhn(match: string): boolean {
+  const digits = match.replace(/\D/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i]);
+    if (i % 2 === 1) d = d * 2 > 9 ? d * 2 - 9 : d * 2;
+    sum += d;
+  }
+  return sum % 10 === 0;
+}
+
 /** Scholarly and public hosts whose links are citations, not identifiers of a person. */
 const PUBLIC_LINK_HOSTS = /^(?:[a-z0-9-]+\.)*(?:doi\.org|ncbi\.nlm\.nih\.gov|europepmc\.org|arxiv\.org|openalex\.org|biorxiv\.org|medrxiv\.org|clinicaltrials\.gov|osf\.io|zenodo\.org|github\.com)$/i;
 
@@ -116,6 +149,7 @@ export const DETECTORS: Readonly<Record<string, Detector>> = {
   "phi-ip": { patterns: [/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g], safeHarbor: "(O) IP addresses" },
   "phi-biometric": { patterns: [/\b(?:fingerprint|voiceprint|retinal?\s+scan|iris\s+scan|face\s?print)\s*(?:id|template|no\.?|#)[:#\s]*[A-Z0-9-]{4,}\b/gi], safeHarbor: "(P) Biometric identifiers" },
   "dua-marker": { patterns: [/^[ \t]*(?:DUA|Data\s+Use\s+Agreement|dbGaP)[ \t]*[:#][ \t]*\S+/gim, /\bphs\d{6}(?:\.v\d+(?:\.p\d+)?)?\b/g, /\bEGA[SD]\d{11}\b/g] },
+  "card-number": { patterns: [/\b\d(?:[ -]?\d){12,18}\b/g], keep: luhn },
   "export-marker": { patterns: [/\b(?:ITAR|EAR99|export[- ]controlled)\b/gi, /\bECCN[:#\s]*\d[A-E]\d{3}\b/gi, /\bUSML\s+Category\s+[IVXL]+\b/g] },
 };
 
@@ -130,7 +164,7 @@ const REVIEW_REFUSED = "This message carries review-confidential content, which 
 
 /** The five classes every policy has, one per level, in the shape that reproduces the gate before classes existed. */
 export function defaultClasses(egress: EgressPolicy): ClassRule[] {
-  const c = (id: string, level: DataClass, modelTier: ModelTier, detectors: readonly string[], message: string, record: RecordMode = "text"): ClassRule => ({ id, level, modelTier, record, retentionDays: null, detectors, residency: null, message, builtin: true });
+  const c = (id: string, level: DataClass, modelTier: ModelTier, detectors: readonly string[], message: string, record: RecordMode = "text"): ClassRule => ({ id, level, modelTier, record, retentionDays: null, detectors, residency: null, message, patterns: [], campusTier: null, builtin: true });
   return [
     c("public", "D0", "hosted", [], "This message is public."),
     c("internal", "D1", "hosted", [], "This message is internal to the lab."),
@@ -160,7 +194,10 @@ export interface DeclaredClass {
   readonly retention_days?: number;
   readonly residency?: string;
   readonly detectors?: readonly string[];
+  readonly patterns?: readonly string[];
   readonly message?: string;
+  readonly campus_tier?: string;
+  readonly source?: string;
 }
 
 /**
@@ -170,7 +207,7 @@ export interface DeclaredClass {
  * it, and naming it in two lab classes is an error. Throws with the lab.toml
  * key on any inconsistency, so a policy that loads is one the lattice enforces.
  */
-export function buildPolicy(declared: Readonly<Record<string, DeclaredClass>>, egress: EgressPolicy, labPatterns: readonly RegExp[]): Policy {
+export function buildPolicy(declared: Readonly<Record<string, DeclaredClass>>, egress: EgressPolicy, labPatterns: readonly RegExp[], campus: Campus | null = null): Policy {
   const fail = (id: string, why: string): never => {
     throw new Error(`lab.toml: [classes.${id}] ${why}`);
   };
@@ -181,9 +218,21 @@ export function buildPolicy(declared: Readonly<Record<string, DeclaredClass>>, e
       if (!DETECTORS[n]) return fail(id, `names detector ${n}, which does not exist; the detectors are ${[...Object.keys(DETECTORS), ...Object.keys(DETECTOR_GROUPS)].join(", ")}`);
       return [n];
     });
+  const tierOf = (d: DeclaredClass | undefined): CampusTier | null => (campus && d?.campus_tier ? { campus: campus.campus, tier: d.campus_tier, source: d.source ?? "" } : null);
   const claimed = new Map<string, string>();
   for (const [id, d] of Object.entries(declared)) {
     if (!CLASS_ID.test(id)) fail(id, "is not a class id: lowercase letters, digits, _ and -, starting with a letter");
+    for (const p of d.patterns ?? []) {
+      let re: RegExp;
+      try {
+        re = new RegExp(p);
+      } catch (err) {
+        return fail(id, `pattern ${JSON.stringify(p)} does not compile: ${(err as Error).message}`);
+      }
+      if (re.test("")) fail(id, `pattern ${JSON.stringify(p)} matches the empty string, so it would put every message in this class`);
+    }
+    if (d.campus_tier !== undefined && !campus) fail(id, "names campus_tier, which needs a preset: set preset in lab.toml");
+    if (d.campus_tier !== undefined && campus && !campus.tiers.includes(d.campus_tier)) fail(id, `campus_tier = "${d.campus_tier}" is not a tier of preset ${campus.preset}: ${campus.tiers.join(", ")}`);
     for (const det of d.detectors ? expand(id, d.detectors) : []) {
       const first = claimed.get(det);
       if (first && first !== id) fail(id, `names detector ${det}, which [classes.${first}] already names; a detector puts content in one class`);
@@ -201,6 +250,8 @@ export function buildPolicy(declared: Readonly<Record<string, DeclaredClass>>, e
       ...(d?.retention_days !== undefined ? { retentionDays: d.retention_days } : {}),
       ...(d?.residency ? { residency: d.residency } : {}),
       ...(d?.message ? { message: d.message } : {}),
+      ...(d?.patterns ? { patterns: d.patterns } : {}),
+      campusTier: tierOf(d),
       detectors: d?.detectors ? expand(b.id, d.detectors) : b.detectors.filter((det) => (claimed.get(det) ?? b.id) === b.id),
     };
   });
@@ -217,6 +268,8 @@ export function buildPolicy(declared: Readonly<Record<string, DeclaredClass>>, e
       residency: d.residency ?? null,
       detectors: expand(id, d.detectors ?? []),
       message: d.message ?? `This message carries ${id} data, which ${modelTier === "none" ? "no model" : "only a model on lab or institution hardware"} may read under this lab's policy.`,
+      patterns: d.patterns ?? [],
+      campusTier: tierOf(d),
       builtin: false,
     });
   }
@@ -225,8 +278,9 @@ export function buildPolicy(declared: Readonly<Record<string, DeclaredClass>>, e
     if (c.modelTier !== "none" && c.record !== "text") fail(c.id, `has record = "${c.record}", but a class a model reads is stored as text so the run can read it; bound how long with retention_days`);
     if (c.retentionDays !== null && (!Number.isInteger(c.retentionDays) || c.retentionDays < 0)) fail(c.id, "retention_days must be a whole number of days");
     if (c.level === "R" && c.modelTier === "local" && egress.reviewConfidential === "refuse") fail(c.id, 'is at level R with model_tier = "local", which needs [policy] review_confidential = "lab-only"');
+    if (campus && !c.campusTier) fail(c.id, `has no campus_tier; under preset ${campus.preset} every class names one of ${campus.tiers.join(", ")}`);
   }
-  return { classes: out, labPatterns };
+  return { classes: out, labPatterns, campus };
 }
 
 export interface Span {
@@ -297,6 +351,7 @@ export function classify(policy: Policy, input: Classifiable): Classification {
         for (const m of input.text.matchAll(re)) if (!d.keep || d.keep(m[0])) spans.push({ detector: id, class: c.id, span: [m.index, m.index + m[0].length] });
       }
     }
+    for (const p of c.patterns) for (const m of input.text.matchAll(new RegExp(p, "g"))) spans.push({ detector: "class-pattern", class: c.id, span: [m.index, m.index + m[0].length] });
   }
   spans.sort((a, b) => a.span[0] - b.span[0]);
   let top = classOfLevel(policy, base);
@@ -313,6 +368,11 @@ export function classify(policy: Policy, input: Classifiable): Classification {
   return { class: top.id, level, rule, spans };
 }
 
+/** A class as a member and a reviewer read it: `phi`, or `phi (UW-Madison Restricted)` under a preset. */
+export function classLabel(c: ClassRule): string {
+  return c.campusTier ? `${c.id} (${c.campusTier.campus} ${c.campusTier.tier})` : c.id;
+}
+
 /** The rule a refusal applied, as a member reads it: `model_tier = "none"`. */
 export function ruleText(c: ClassRule): string {
   return `model_tier = "${c.modelTier}"`;
@@ -321,7 +381,7 @@ export function ruleText(c: ClassRule): string {
 /** What a member is told when the gate refuses a message for its class. Names the class and the rule, then the lab's message. */
 export function refusalText(c: ClassRule, cls: Classification): string {
   const why = cls.rule.startsWith("detector:") ? `, found by detector ${cls.rule.slice("detector:".length)}` : "";
-  return `Not sent. Data class ${c.id}${why}; rule ${ruleText(c)}. ${c.message}`;
+  return `Not sent. Data class ${classLabel(c)}${why}; rule ${ruleText(c)}. ${c.message}`;
 }
 
 /** Retention for content of a class, for the retention job (owned by the keys and retention unit). */
@@ -350,7 +410,7 @@ export function runRefusalText(policy: Policy, refusal: EgressRefusal, messageCl
   if (level === null) return null;
   const own = messageClass && policy.classes.find((c) => c.id === messageClass.id && c.level === level);
   const candidates = own ? [own] : classesAtLevel(policy, level);
-  const names = candidates.map((c) => c.id);
+  const names = candidates.map(classLabel);
   const named = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
   const found = own && messageClass?.rule.startsWith("detector:") ? `, found by detector ${messageClass.rule.slice("detector:".length)}` : "";
   const tiers = [...new Set(candidates.map((c) => ruleText(c)))].join(" / ");
@@ -370,5 +430,5 @@ export function residencyRuleText(c: ClassRule): string {
 export function residencyRefusal(c: ClassRule, cls: Classification, endpointId: string, region: string | null): string | null {
   if (c.residency === null || region === c.residency) return null;
   const why = cls.rule.startsWith("detector:") ? `, found by detector ${cls.rule.slice("detector:".length)}` : "";
-  return `Not sent. Data class ${c.id}${why}; rule ${residencyRuleText(c)}: this agent's model endpoint ${endpointId} ${region ? `is in region ${region}` : "names no region"}. ${c.message}`;
+  return `Not sent. Data class ${classLabel(c)}${why}; rule ${residencyRuleText(c)}: this agent's model endpoint ${endpointId} ${region ? `is in region ${region}` : "names no region"}. ${c.message}`;
 }

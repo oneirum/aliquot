@@ -13,6 +13,14 @@ interface DataClassInfo {
   retentionDays: number | null;
   residency: string | null;
   detectors: string[];
+  campusTier: { campus: string; tier: string; source: string } | null;
+}
+interface Preset {
+  id: string;
+  campus: string;
+  scheme: string;
+  source: string;
+  note: string;
 }
 interface KbClasses {
   kbId: string;
@@ -29,15 +37,15 @@ const RECORD: Record<DataClassInfo["record"], string> = { text: "keeps the text"
  */
 export function ClassesPanel() {
   const [fields] = useAllFormFields();
-  const [data, setData] = useState<{ classes: DataClassInfo[]; knowledgeBases: KbClasses[] } | null>(null);
+  const [data, setData] = useState<{ classes: DataClassInfo[]; knowledgeBases: KbClasses[]; preset: Preset | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/knowledge-bases/catalog/classes", { credentials: "include" })
       .then(async (res) => {
-        const body = (await res.json()) as { classes?: DataClassInfo[]; knowledgeBases?: KbClasses[]; error?: string };
+        const body = (await res.json()) as { classes?: DataClassInfo[]; knowledgeBases?: KbClasses[]; preset?: Preset | null; error?: string };
         if (!res.ok || !body.classes || !body.knowledgeBases) throw new Error(body.error ?? `The studio answered ${res.status}.`);
-        setData({ classes: body.classes, knowledgeBases: body.knowledgeBases });
+        setData({ classes: body.classes, knowledgeBases: body.knowledgeBases, preset: body.preset ?? null });
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
@@ -50,6 +58,11 @@ export function ClassesPanel() {
       <PanelStyle />
       <h4>Data classes</h4>
       <p className="aq-help">{mine ? "What this lab's policy does with each class, and which of this knowledge base's published sources and entries carry it." : "What this lab's policy does with each class. Publish this knowledge base to see which of its entries carry each."}</p>
+      {data?.preset ? (
+        <p className="aq-where" data-testid="classes-preset">
+          {data.preset.campus} tiers from <a href={data.preset.source}>{data.preset.scheme}</a>, by preset {data.preset.id}. {data.preset.note}
+        </p>
+      ) : null}
       {error ? <Status kind="error">The classes did not load: {error}</Status> : null}
       {!data && !error ? <Status kind="busy">Loading the classes…</Status> : null}
       {data ? (
@@ -60,6 +73,13 @@ export function ClassesPanel() {
             return (
               <li className="aq-tool" key={c.id} data-testid="class-row" data-class={c.id}>
                 <code>{c.id}</code> <span className="aq-where">{c.level}</span>
+                {c.campusTier ? (
+                  <span className="aq-on" data-testid="class-campus-tier">
+                    <a href={c.campusTier.source}>
+                      {c.campusTier.campus} {c.campusTier.tier}
+                    </a>
+                  </span>
+                ) : null}
                 {sources.length || entries.length ? <span className="aq-on">{entries.length} {entries.length === 1 ? "entry" : "entries"} here</span> : null}
                 <p>
                   {TIER[c.modelTier]}; the record {RECORD[c.record]}

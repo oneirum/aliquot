@@ -88,7 +88,7 @@ test("classify names the strictest class, the rule and every span", () => {
 });
 
 test("every Safe Harbor detector finds its identifier and leaves ordinary lab text alone", () => {
-  const all = buildPolicy({ phi: { model_tier: "none", detectors: ["hipaa-safe-harbor"] }, dua: { model_tier: "local", detectors: ["dua-marker"] }, exp: { model_tier: "none", detectors: ["export-marker"] } }, DEFAULT_POLICY, []);
+  const all = buildPolicy({ phi: { model_tier: "none", detectors: ["hipaa-safe-harbor"] }, dua: { model_tier: "local", detectors: ["dua-marker"] }, exp: { model_tier: "none", detectors: ["export-marker"] }, card: { model_tier: "none", detectors: ["card-number"] } }, DEFAULT_POLICY, []);
   const hits = (text: string) => [...new Set(classify(all, { t: "message", text, floor: "D1" }).spans.map((s) => s.detector))].sort();
   const POSITIVE: Record<string, string> = {
     "phi-name": "Patient name: Maria Lopez",
@@ -112,6 +112,7 @@ test("every Safe Harbor detector finds its identifier and leaves ordinary lab te
     email: "a@b.org",
     "dua-marker": "phs000123.v2.p1",
     "export-marker": "EAR99",
+    "card-number": "card 4111 1111 1111 1111",
   };
   for (const [det, text] of Object.entries(POSITIVE)) assert.ok(hits(text).includes(det), `${det} on "${text}": got ${hits(text).join(",")}`);
   for (const text of [

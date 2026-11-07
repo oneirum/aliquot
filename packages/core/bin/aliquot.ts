@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { configProblem, databaseUrlFromEnv, loadConfig } from "../src/config.ts";
 import { connect } from "../src/db.ts";
-import { askAnswers, defaultAnswers, InitAborted, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
+import { askAnswers, defaultAnswers, InitAborted, OFFERED_CAMPUSES, parseCampus, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
 import { loadEvents, recentRunIds, verifyChain, type RunId } from "../src/record.ts";
 import { ANCHOR_KEY_ENV, AnchorRefused, newAnchorKeyPem, describeAnchorProblem, loadAnchorKey, loadAnchorVerifyKey, verifyAnchors, writeAnchor } from "../src/anchor.ts";
 import { loadAudit, verifyAudit } from "../src/audit.ts";
@@ -72,10 +72,12 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       $MICROSOFT_APP_TENANT_ID and $ALIQUOT_SURFACE_TOKEN set to the teams surface's token.
                       docs/teams.md has the app manifest and the tenant admin's steps.
   init [--config config/lab.toml] [--env .env] [--force] [--yes --sample <id>... [--pattern <regex>...]]
-       [--anchor-key <file> [--anchor-log <file>]]
+       [--campus uw-madison|umich|harvard|none] [--anchor-key <file> [--anchor-log <file>]]
                       write lab.toml from a few questions, testing the participant id patterns against
                       sample ids, and write .env with new secrets when it does not exist yet. --force
                       replaces lab.toml, never .env. --yes takes every default and needs --sample.
+                      The last question (--campus with --yes) names the campus preset whose tiers each
+                      data class shows (presets/<campus>.toml, a starting point for the data steward).
                       Run it as pnpm aliquot:init, which allows writes to config/lab.toml and .env only.
                       --anchor-key also writes a new Ed25519 anchor key there (mode 600, never over an existing
                       file) and an [anchor] table whose log is --anchor-log (default anchors.log beside lab.toml);
@@ -102,6 +104,7 @@ try {
       yes: { type: "boolean", default: false },
       pattern: { type: "string", multiple: true, default: [] },
       sample: { type: "string", multiple: true, default: [] },
+      campus: { type: "string" },
       door: { type: "string" },
       links: { type: "string" },
       listen: { type: "string", default: "127.0.0.1:3978" },
@@ -134,7 +137,7 @@ if (command === "ask" || command === "acp" || command === "mcp") process.exit(aw
 if (command === "slack") process.exit(await slack(positionals.slice(1)));
 if (command === "teams") process.exit(await teams(positionals.slice(1)));
 const limit = Number(values.limit);
-const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0 || values["anchor-key"] !== undefined || values["anchor-log"] !== undefined;
+const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0 || values.campus !== undefined || values["anchor-key"] !== undefined || values["anchor-log"] !== undefined;
 const verifyOnly = values.anchors || values["public-key"] !== undefined;
 const valid =
   extra.length === 0 &&
@@ -322,7 +325,12 @@ async function init(): Promise<number> {
 
   let answers;
   if (values.yes) {
-    const r = defaultAnswers(values.pattern, values.sample);
+    const campus = values.campus === undefined ? null : parseCampus(values.campus);
+    if (campus === undefined) {
+      fail(`--campus ${values.campus} is not a campus; the campuses are ${Object.keys(OFFERED_CAMPUSES).join(", ")} or none.`);
+      return 2;
+    }
+    const r = defaultAnswers(values.pattern, values.sample, campus);
     r.lines.forEach(say);
     if (!r.answers) {
       fail("The patterns did not pass. Nothing was written.");

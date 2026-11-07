@@ -13,7 +13,8 @@ import { AUTH_HEADERS, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
-import { buildPolicy, ceilingOfStore, MODEL_TIERS, RECORD_MODES, type Policy } from "./policy.ts";
+import { buildPolicy, ceilingOfStore, type Policy } from "./policy.ts";
+import { declaredClass, loadPreset, mergeClasses, type Preset } from "./preset.ts";
 
 const placement = z.enum(PLACEMENTS);
 
@@ -153,22 +154,9 @@ const schema = z.object({
   policy: z.object({ review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"), participant_id_patterns: z.array(z.string()).default([]) }).default({ review_confidential: "refuse", participant_id_patterns: [] }),
   agents: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
   /** [classes.<id>]: the lab's data classes over the five built-ins (policy.ts). */
-  classes: z
-    .record(
-      z.string(),
-      z
-        .object({
-          level: z.enum(DATA_CLASSES).optional(),
-          model_tier: z.enum(MODEL_TIERS).optional(),
-          record: z.enum(RECORD_MODES).optional(),
-          retention_days: z.number().int().min(0).optional(),
-          residency: z.string().regex(/^[a-z]{2}$/, "residency is a two-letter country code, such as us").optional(),
-          detectors: z.array(z.string()).optional(),
-          message: z.string().trim().min(1).optional(),
-        })
-        .strict(),
-    )
-    .default({}),
+  classes: z.record(z.string(), declaredClass).default({}),
+  /** A campus preset (preset.ts): a shipped id such as "uw-madison", or a path to the lab's own file. */
+  preset: z.string().trim().min(1).optional(),
   /**
    * "surface:channel" -> the class every message there starts at. Unlisted channels start at D1. Detectors only raise it.
    * A floor below D1 is allowed only for the channel [surfaces.web] channel binds, because anywhere else the sender names the channel.
@@ -212,6 +200,8 @@ export interface LabConfig {
   readonly participantIdPatterns: readonly RegExp[];
   /** The data classes: the built-ins merged with [classes]. With no [classes] table, the behaviour before classes existed. */
   readonly classes: Policy;
+  /** lab.toml's campus preset, or null. Its tiers are on each class in `classes`. */
+  readonly preset: Preset | null;
   /** Absolute paths. This build reads agents and knowledge bases from fixture files; the studio replaces the agent list. */
   readonly agentFixtures: readonly string[];
   readonly kbFixtures: readonly string[];
@@ -260,7 +250,8 @@ export function parseConfig(text: string, path: string): LabConfig {
     throw new Error(`lab.toml: channel_floors ${lowered.map(([k]) => k).join(", ")} is below D1, which only the channel [surfaces.web] channel binds may be; the sender names any other channel`);
   const egress: EgressPolicy = { reviewConfidential: c.policy.review_confidential };
   const participantIdPatterns = c.policy.participant_id_patterns.map((p) => new RegExp(p));
-  const classes = buildPolicy(c.classes, egress, participantIdPatterns);
+  const preset = c.preset ? loadPreset(c.preset, dir) : null;
+  const classes = buildPolicy(mergeClasses(preset, c.classes), egress, participantIdPatterns, preset && { campus: preset.campus, preset: preset.id, tiers: preset.tiers });
   for (const k of classes.classes) {
     if (k.modelTier !== "none" || k.record !== "text") continue;
     const refusal = ceilingOfStore(k.level, c.store.placement, egress);
@@ -301,6 +292,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     policy: egress,
     participantIdPatterns,
     classes,
+    preset,
     agentFixtures: c.agents.fixtures.map((f) => resolve(dir, f)),
     kbFixtures: c.knowledge_bases.fixtures.map((f) => resolve(dir, f)),
     channelFloors: c.channel_floors,

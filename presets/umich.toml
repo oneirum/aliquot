@@ -1,0 +1,67 @@
+# The University of Michigan's data classification levels (Low, Moderate, High, Restricted) mapped to Aliquot's data
+# classes. lab.toml takes it with preset = "umich"; the lab's own [classes.<id>] keys win over the ones here.
+#
+# Research data has its own rule at U-M: "Sensitive Identifiable Human Subject Research data is High, de-identified
+# Human Subject Research data is Moderate, and other unpublished research is Moderate, unless specifically classified
+# as Low by the researcher" (https://safecomputing.umich.edu/protect-the-u/protect-research-data).
+
+[preset]
+campus = "U-M"
+scheme = "U-M data classification levels"
+tiers = ["Low", "Moderate", "High", "Restricted"]
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+note = "A starting point for your data steward, not the University of Michigan's official interpretation. Check each line with your unit's data steward or Information Assurance before the lab relies on it."
+
+[classes.public]
+campus_tier = "Low"         # "Information in the public domain", "Published research"
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+
+[classes.internal]
+campus_tier = "Moderate"    # "other unpublished research is Moderate" unless the researcher classifies it Low
+source = "https://safecomputing.umich.edu/protect-the-u/protect-research-data"
+
+[classes.confidential]
+campus_tier = "Moderate"    # contact details; U-M lists directory information as Low, and Aliquot is stricter here
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+
+[classes.restricted]
+campus_tier = "Moderate"    # coded participant ids: "Human subject research" is Moderate; identifiers are in phi (High)
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+
+[classes.review-confidential]
+campus_tier = "Moderate"    # others' unpublished work under review: "Intellectual or other proprietary property"
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+
+[classes.phi]
+campus_tier = "High"        # "Protected health information (HIPAA)", "Social Security numbers"
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+model_tier = "none"
+record = "hash"
+retention_days = 30
+detectors = ["phi-name", "phi-address", "phi-zip", "phi-date", "phi-age", "phi-fax", "phi-health-plan", "phi-account", "phi-license", "phi-vehicle", "phi-device", "phi-ip", "phi-biometric", "ssn", "mrn", "dob"]
+message = "This message carries a HIPAA identifier, which U-M classifies High. Remove it, or ask the lab's honest broker for a de-identified extract."
+
+[classes.controlled_access]
+campus_tier = "High"        # "Sensitive identifiable human subject research"; NIH also bars generative AI (NOT-OD-25-081)
+source = "https://safecomputing.umich.edu/protect-the-u/protect-research-data"
+model_tier = "none"
+record = "hash"
+retention_days = 365
+detectors = ["dua-marker"]
+message = "This message names a controlled-access dataset. Its data use certification keeps it out of AI tools; work with it on the lab's analysis server."
+
+[classes.export_controlled]
+campus_tier = "High"        # "Export controlled information (ITAR, EAR)", "Controlled Unclassified Information (CUI)"
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+model_tier = "local"
+residency = "us"
+detectors = ["export-marker"]
+message = "This message carries export-controlled material, which stays on lab or institution systems in the United States."
+
+[classes.payment_card]
+campus_tier = "Restricted"  # "Credit card numbers (PCI)": the most prescriptive controls, often third-party certified
+source = "https://safecomputing.umich.edu/protect-the-u/safely-use-sensitive-data/examples-by-level"
+model_tier = "none"
+record = "none"
+detectors = ["card-number"]
+message = "This message carries a payment card number, which U-M classifies Restricted. Nothing of it is kept; remove it and send again."

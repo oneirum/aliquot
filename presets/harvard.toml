@@ -1,0 +1,72 @@
+# Harvard's five data security levels mapped to Aliquot's data classes. lab.toml takes it with preset = "harvard"; the
+# lab's own [classes.<id>] keys win over the ones here.
+#
+# Harvard's research data policy now sorts research data into Sensitive ("data historically assessed at Level 3, 4
+# or 5") and non-Sensitive (Level 1 or 2), and for Sensitive Data the Information Security Reviewer assigns the level
+# (https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf). Each tier below says both.
+# Harvard's per-type examples are in its data classification table (https://privsec.harvard.edu/data-classification-table),
+# which refused Aliquot's fetch; the levels here rest on the level names and the policy text, so check each one.
+# A document a researcher labels DSL3, DSL4 or DSL5 is put in the class for that level by its patterns.
+
+[preset]
+campus = "Harvard"
+scheme = "Harvard data security levels"
+tiers = ["Level 1 Public (non-Sensitive)", "Level 2 Low Risk (non-Sensitive)", "Level 3 Medium Risk (Sensitive)", "Level 4 High Risk (Sensitive)", "Level 5 Extreme Risk (Sensitive)"]
+source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
+note = "A starting point for your data steward, not Harvard's official interpretation. For Sensitive Data the Information Security Reviewer assigns the level; check each line with yours before the lab relies on it."
+
+[classes.public]
+campus_tier = "Level 1 Public (non-Sensitive)"
+source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
+
+[classes.internal]
+campus_tier = "Level 2 Low Risk (non-Sensitive)"
+source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
+
+[classes.confidential]
+campus_tier = "Level 2 Low Risk (non-Sensitive)"  # members' contact details
+source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
+
+[classes.restricted]
+campus_tier = "Level 3 Medium Risk (Sensitive)"   # coded participant ids; Level 3 and up needs a security review
+source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
+patterns = ["\\bDSL[ -]?3\\b"]
+
+[classes.review-confidential]
+campus_tier = "Level 3 Medium Risk (Sensitive)"   # others' unpublished work under confidential review
+source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
+
+[classes.controlled_access]
+campus_tier = "Level 3 Medium Risk (Sensitive)"   # "Data exchanged pursuant to a DUA" needs review; NIH bars generative AI (NOT-OD-25-081)
+source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
+model_tier = "none"
+record = "hash"
+retention_days = 365
+detectors = ["dua-marker"]
+message = "This message names a controlled-access dataset. Its data use certification keeps it out of AI tools; work with it on the lab's analysis server."
+
+[classes.phi]
+campus_tier = "Level 4 High Risk (Sensitive)"     # HIPAA identifiers; the policy lists HIPAA among the regulations that make data Sensitive
+source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
+model_tier = "none"
+record = "hash"
+retention_days = 30
+detectors = ["phi-name", "phi-address", "phi-zip", "phi-date", "phi-age", "phi-fax", "phi-health-plan", "phi-account", "phi-license", "phi-vehicle", "phi-device", "phi-ip", "phi-biometric", "ssn", "mrn", "dob"]
+patterns = ["\\bDSL[ -]?4\\b"]
+message = "This message carries a HIPAA identifier or content labelled Level 4. Remove it, or ask the lab's honest broker for a de-identified extract."
+
+[classes.export_controlled]
+campus_tier = "Level 4 High Risk (Sensitive)"     # export controls are among the regulations that make data Sensitive; the Export Control Council sets the obligations
+source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
+model_tier = "local"
+residency = "us"
+detectors = ["export-marker"]
+message = "This message carries export-controlled material, which stays on lab or institution systems in the United States."
+
+[classes.extreme_risk]
+campus_tier = "Level 5 Extreme Risk (Sensitive)"  # "FASRC has no systems rated for DSL5 data"
+source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
+model_tier = "none"
+record = "none"
+patterns = ["\\bDSL[ -]?5\\b", "\\b(?:Data Security )?Level 5 data\\b"]
+message = "This message carries content labelled Level 5, which no system here is rated for. Nothing of it is kept."
