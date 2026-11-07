@@ -148,13 +148,13 @@ export const pct = (n: number, of: number) => (of ? `${((100 * n) / of).toFixed(
 /** The four headline numbers, as `pnpm trust` prints them. */
 export function headline(n: TrustNumbers, live: LiveNumbers | null): string[] {
   const claimLine = live
-    ? `1. Unsupported claims: ${pct(live.claims.unsupported, live.claims.of)} (${live.claims.unsupported} of ${live.claims.of} claims, ${live.model} answers judged by ${live.judge}, ${live.date}); wrong entry cited ${pct(n.citation.wrong, n.citation.of)} (${n.citation.wrong} of ${n.citation.of} answers)`
+    ? `1. Unsupported claims: ${pct(live.claims.unsupported, live.claims.of)} (${live.claims.unsupported} of ${live.claims.of} claims, ${live.model} answers judged by ${live.judge}, ${live.date}); wrong entry cited in ${live.citations.wrong} of ${live.citations.of} answers, none named in ${live.citations.none}`
     : `1. Unsupported claims: ${pct(n.claims.unsupported, n.claims.of)} (${n.claims.unsupported} of ${n.claims.of}, lexical check of the scripted model's answers; run --live for a model's); wrong entry cited ${pct(n.citation.wrong, n.citation.of)} (${n.citation.wrong} of ${n.citation.of} answers)`;
   return [
     claimLine,
     `2. Refusals: answered ${n.underRefusal.n} of ${n.underRefusal.of} questions it should refuse (${n.underRefusal.hostedRequests} hosted model requests carried them); refused ${n.overRefusal.n} of ${n.overRefusal.of} it should answer`,
-    `3. Not found: the knowledge base handed an entry to the model for ${n.notFound.retrievedSomething} of ${n.notFound.of} questions it does not cover${live ? `; ${live.model} said it could not find ${live.notFound.said} of ${live.notFound.of}` : ""}`,
-    `4. Injection success: ${pct(n.injection.succeeded, n.injection.of)} with a model that obeys every planted instruction (${n.injection.succeeded} of ${n.injection.of})${live ? `; ${pct(live.injection.succeeded, live.injection.of)} with ${live.model} (${live.injection.succeeded} of ${live.injection.of})` : ""}`,
+    `3. Not found: the knowledge base handed an entry to the model for ${n.notFound.retrievedSomething} of ${n.notFound.of} questions it does not cover${live ? `; ${live.model} said it could not find ${live.notFound.said} of ${live.notFound.of}, searched again for ${live.notFound.searchedAgain} and answered ${live.notFound.answered}` : ""}`,
+    `4. Injection success: ${pct(n.injection.succeeded, n.injection.of)} with a model that obeys every planted instruction (${n.injection.succeeded} of ${n.injection.of})${live ? `; ${pct(live.injection.succeeded, live.injection.of)} with ${live.model} (${live.injection.succeeded} of ${live.injection.of}; it warned the member about ${live.injection.flagged})` : ""}`,
   ];
 }
 
@@ -166,9 +166,10 @@ export interface LiveNumbers {
   readonly tokens: { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number };
   readonly claims: { readonly unsupported: number; readonly of: number };
   readonly answersWithUnsupported: { readonly n: number; readonly of: number };
-  readonly notFound: { readonly said: number; readonly of: number };
+  readonly notFound: { readonly said: number; readonly searchedAgain: number; readonly answered: number; readonly of: number };
+  readonly citations: { readonly right: number; readonly wrong: number; readonly none: number; readonly of: number };
   readonly falseNotFound: { readonly n: number; readonly of: number };
-  readonly injection: { readonly succeeded: number; readonly of: number; readonly byGoal: Record<string, { readonly succeeded: number; readonly of: number }> };
+  readonly injection: { readonly succeeded: number; readonly of: number; readonly flagged: number; readonly byGoal: Record<string, { readonly succeeded: number; readonly of: number }> };
   readonly examples: readonly { readonly id: string; readonly question: string; readonly claim: string }[];
 }
 
@@ -203,11 +204,12 @@ ${matrixTable(n)}
 
 - Answered ${n.underRefusal.n} of ${n.underRefusal.of} questions that should be refused. Each went to the hosted model: ${n.underRefusal.hostedRequests} requests on the wire. What the classifier missed: ${n.underRefusal.kinds.join("; ") || "nothing"}.
 - Refused ${n.overRefusal.n} of ${n.overRefusal.of} questions that should be answered: ${n.overRefusal.byDetector} because the classifier flagged harmless text (${n.overRefusal.kinds.join("; ") || "none"}), ${n.overRefusal.byInjection} because a planted instruction made the model call a literature tool, whose refusal ends the run.
-- The knowledge base returned at least one entry for ${n.notFound.retrievedSomething} of ${n.notFound.of} questions no entry covers, so saying "not found" is left to the model.${live ? ` ${live.model} said it could not find ${live.notFound.said} of ${live.notFound.of}, and said "not found" for ${live.falseNotFound.n} of ${live.falseNotFound.of} questions an entry does answer.` : ""}
+- The knowledge base returned at least one entry for ${n.notFound.retrievedSomething} of ${n.notFound.of} questions no entry covers, so saying "not found" is left to the model.${live ? ` ${live.model} said it could not find ${live.notFound.said} of ${live.notFound.of}, made up an answer for ${live.notFound.answered}, and asked for another search on ${live.notFound.searchedAgain} (the model tier replays one turn, so a second search is not followed). It said "not found" for ${live.falseNotFound.n} of ${live.falseNotFound.of} questions an entry does answer.` : ""}
 
 ## Citations and claims
 
-- Wrong entry cited: ${n.citation.wrong} of ${n.citation.of} answered questions name an entry other than the one that answers them; ${n.citation.forged} name a path that does not exist (a forged citation); the right entry was not among those read for ${n.citation.retrievalMiss}.
+- Retrieval: the entry that answers the question was not among the three \`kb_search\` returned for ${n.citation.retrievalMiss} of ${n.citation.of} answered questions. BM25 does no stemming, so "recorded" does not match "records".
+- Scripted model, which cites the top search hit: ${n.citation.wrong} of ${n.citation.of} answers cite an entry other than the one that answers them, ${n.citation.forged} a path that does not exist (obeying a planted instruction).${live ? `\n- ${live.model}, which picks among the entries it read: of ${live.citations.of} answered questions, ${live.citations.right} cite the right entry, ${live.citations.wrong} cite only other entries, ${live.citations.none} name no entry (Aliquot's record lists the entries read either way).` : ""}
 - Deterministic claim check (${n.claims.method}): ${n.claims.unsupported} of ${n.claims.of} claims unsupported. Nearly all are planted text the scripted model repeated.
 ${
   live
