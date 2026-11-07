@@ -62,12 +62,12 @@ export type HashedEntry = KbEntry & { readonly hash: EntryHash };
 export interface EntryProvenance {
   /** The [sources.<id>] that produced it. */
   readonly source: string;
-  readonly kind: "folder" | "gdrive";
-  /** The file's path inside the synced folder, or its Drive file id and name. */
+  readonly kind: "folder" | "gdrive" | "graph";
+  /** The file's path inside the synced folder, Drive folder or SharePoint library. */
   readonly location: string;
   /** Keyed address of the document text as ingested: the entry's version. */
   readonly version: Sha256;
-  /** When the document last changed, from the file's mtime or Drive's modifiedTime. */
+  /** When the document last changed, from the file's mtime, Drive's modifiedTime or Graph's lastModifiedDateTime. */
   readonly modifiedAt: string;
   /** "lab", "member:<id>" or "group:<name>". Visible to a viewer any one of them names. */
   readonly scope: readonly string[];

@@ -98,6 +98,26 @@ Put a knowledge base definition and its source files in `config/`, then compile 
 
 A source may be Markdown, text, Word (.docx) or PDF. PDF needs the sandbox (next section).
 
+## SharePoint and OneDrive: what the tenant admin consents to
+
+A `kind = "graph"` source (see [sources.md](sources.md#sharepoint-and-onedrive)) reads one drive through Microsoft
+Graph with an app registration the lab's tenant admin creates. It only reads: root delta, each file's permissions and
+each file's content. The admin consents to one of these application permissions:
+
+| Permission | Type | What it lets the app read | When |
+|---|---|---|---|
+| `Sites.Selected` | Application | Only the sites an admin then grants it, with `POST /v1.0/sites/<site id>/permissions` and `"roles": ["read"]` | Preferred: the app sees the lab's one site and nothing else |
+| `Sites.Read.All` | Application | Every site in the tenant | Only if the tenant does not allow `Sites.Selected` |
+| `Files.Read.All` | Delegated | The files the signed-in person can read | A member's own OneDrive, with a token they obtain |
+
+No write permission, no `User.Read.All` and no directory permission: who a SharePoint address is in the lab comes from
+`[directory.emails]` and `site_groups` in `lab.toml`, not from Entra. The app gets its token with the client
+credentials flow and the lab puts it in the env var `token_env` names; Aliquot does not fetch or refresh it yet.
+Place `graph.microsoft.com` and the tenant's SharePoint host (`contoso.sharepoint.com`, and
+`contoso-my.sharepoint.com` for OneDrive) in `[hosts]` at `approved` or higher: the requests carry drive and item ids
+and signed download URLs, never document text. This list has been checked against Microsoft's documentation, not yet
+against a live tenant.
+
 ## The sandbox: PDF sources and run_code
 
 	docker build -t aliquot-sandbox sandbox
