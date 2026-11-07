@@ -8,6 +8,16 @@ url_env = "DATABASE_URL"           # e.g. postgres://postgres:labh@localhost:543
 [store]
 placement = "lab"                  # where Postgres runs; a hosted database cannot hold D3 and refuses at startup
 key_env = "LABH_PAYLOAD_KEY"       # 64 hex characters: openssl rand -hex 32
+# To rotate the key, or to keep D3 under a key of its own, name each key by id in place of key_env (docs/install.md,
+# "Rotate the key"). key_env = "X" is the same as [store.keys] k1 = "X". New payloads go under current, or under the
+# key their class names; a stored payload is read with the key whose id it carries.
+# current = "k2"
+# [store.keys]
+# k1 = "LABH_PAYLOAD_KEY"
+# k2 = "LABH_PAYLOAD_KEY_2"
+# k3 = "LABH_PAYLOAD_KEY_3"
+# [store.class_keys]
+# D3 = "k3"
 
 [endpoints.local]
 base_url = "http://localhost:11434/v1"   # Ollama on the host; use http://host.docker.internal:11434/v1 from inside docker
@@ -133,6 +143,10 @@ contact_email_env = "LABH_CONTACT_EMAIL"
 [policy]
 review_confidential = "refuse"           # or "lab-only"
 participant_id_patterns = ["\\bP-\\d{5}\\b"]   # anything matching is D3
+# Retention: aliquot retention --apply redacts a run's payload bodies this many days after the last run that names
+# them. Events keep their hashes, so every record still verifies. One number for every class, or days per class; a
+# class not listed is kept, for example { D3 = 90, D2 = 365 }. Without it nothing is redacted.
+# retention_days = 365
 
 # An agent published in the studio answers in the channels it names (surface:channel, for example web:lab).
 # Until the router arrives, the fixture agent answers in every other channel. Knowledge bases come from fixtures.

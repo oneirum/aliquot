@@ -40,13 +40,13 @@ test("init on defaults writes a lab.toml that loads and a .env with four fresh s
 
   const c = await loadConfig(l.cfg);
   assert.deepEqual(
-    { patterns: c.participantIdPatterns.map(String), endpoints: c.endpoints.map((e) => [e.id, e.baseUrl, e.placement]), port: c.web.port, sandbox: c.sandbox?.image, key: c.store.keyEnv, db: c.databaseUrlEnv, surfaces: c.surfaces },
+    { patterns: c.participantIdPatterns.map(String), endpoints: c.endpoints.map((e) => [e.id, e.baseUrl, e.placement]), port: c.web.port, sandbox: c.sandbox?.image, key: c.store.keyEnvs, db: c.databaseUrlEnv, surfaces: c.surfaces },
     {
       patterns: ["/\\bP-\\d{5}\\b/"],
       endpoints: [["local", "http://ollama:11434/v1", "lab"]],
       port: 8080,
       sandbox: DIGEST,
-      key: "LABH_PAYLOAD_KEY",
+      key: { k1: "LABH_PAYLOAD_KEY" },
       db: "DATABASE_URL",
       surfaces: [c.web, { id: "acp", kind: "acp", placement: "zdr", tokenEnv: "ALIQUOT_ACP_TOKEN" }, { id: "studio", kind: "studio", placement: "lab", tokenEnv: "ALIQUOT_STUDIO_TOKEN" }],
     },

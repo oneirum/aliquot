@@ -121,3 +121,48 @@ test("lab.example.toml's OpenRouter block parses once uncommented and routes Cla
   assert.equal(openrouter?.placement, "zdr");
   assert.deepEqual(openrouter?.providerRouting, { zdr: true, data_collection: "deny", allow_fallbacks: false, only: ["amazon-bedrock", "google-vertex"] });
 });
+
+test("[store] key_env is the one-key form: key k1, current; without it the key is LABH_PAYLOAD_KEY", () => {
+  const keys = (toml: string) => {
+    const { keyEnvs, current, classKeys } = parseConfig(`${base}${toml}`, "/l/lab.toml").store;
+    return { keyEnvs, current, classKeys };
+  };
+  assert.deepEqual(keys(""), { keyEnvs: { k1: "LABH_PAYLOAD_KEY" }, current: "k1", classKeys: {} });
+  assert.deepEqual(keys('[store]\nkey_env = "LAB_KEY"\n'), { keyEnvs: { k1: "LAB_KEY" }, current: "k1", classKeys: {} });
+  assert.deepEqual(keys('[store]\ncurrent = "k2"\n[store.keys]\nk1 = "LABH_PAYLOAD_KEY"\nk2 = "LABH_PAYLOAD_KEY_2"\nk3 = "LABH_PAYLOAD_KEY_3"\n[store.class_keys]\nD3 = "k3"\n'), {
+    keyEnvs: { k1: "LABH_PAYLOAD_KEY", k2: "LABH_PAYLOAD_KEY_2", k3: "LABH_PAYLOAD_KEY_3" },
+    current: "k2",
+    classKeys: { D3: "k3" },
+  });
+});
+
+test("each [store] key rule refuses with one line", () => {
+  const refuse = (toml: string, why: RegExp) => assert.throws(() => parseConfig(`${base}[store]\n${toml}`, "/l/lab.toml"), why);
+  refuse('key_env = "A"\n[store.keys]\nk1 = "A"\n', /names both key_env and \[store.keys\]/);
+  refuse('[store.keys]\nk1 = "A"\nk2 = "B"\n', /current is missing: name which of k1, k2 new payloads go under/);
+  refuse('current = "k9"\n[store.keys]\nk1 = "A"\n', /current = "k9" is not a key in \[store.keys\]/);
+  refuse('[store.keys]\nk1 = "A"\n[store.class_keys]\nD3 = "k3"\n', /class_keys D3 = "k3" is not a key/);
+  refuse('current = "k1"\n[store.keys]\nk1 = "A"\nk2 = "A"\n', /keys k1 and k2 both read A/);
+  refuse('[store.keys]\n"K 1" = "A"\n', /a key id is lowercase letters/);
+  refuse('currrent = "k1"\n', /currrent/);
+});
+
+test("[policy] retention_days is one number for every class or days per class; without it nothing is redacted", () => {
+  const days = (toml: string) => parseConfig(`${base}[policy]\n${toml}`, "/l/lab.toml").retentionDays;
+  assert.deepEqual(days(""), {});
+  assert.deepEqual(days("retention_days = 365\n"), { D0: 365, D1: 365, D2: 365, D3: 365, R: 365 });
+  assert.deepEqual(days("retention_days = { D3 = 90, D2 = 365 }\n"), { D3: 90, D2: 365 });
+  assert.throws(() => days("retention_days = 0\n"));
+  assert.throws(() => days("retention_days = { D9 = 1 }\n"));
+});
+
+test("lab.example.toml's commented key and retention tables parse once uncommented", () => {
+  const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
+  const text = readFileSync(path, "utf8");
+  const at = text.indexOf('# current = "k2"');
+  const end = text.indexOf("\n\n", at);
+  const keyed = `${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[A-Za-z_0-9]+ = ).*)$/gm, "$1")}${text.slice(end)}`.replace(/^key_env = .*$/m, "");
+  assert.deepEqual(parseConfig(keyed, path).store, { placement: "lab", keyEnvs: { k1: "LABH_PAYLOAD_KEY", k2: "LABH_PAYLOAD_KEY_2", k3: "LABH_PAYLOAD_KEY_3" }, current: "k2", classKeys: { D3: "k3" } });
+  assert.equal(parseConfig(text.replace("# retention_days = 365\n", "retention_days = 365\n"), path).retentionDays.D1, 365);
+  assert.deepEqual(parseConfig(text.replace("# retention_days = 365\n", "retention_days = { D3 = 90, D2 = 365 }\n"), path).retentionDays, { D3: 90, D2: 365 });
+});

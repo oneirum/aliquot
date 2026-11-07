@@ -12,7 +12,7 @@ import { createKbReader, storedSnapshots } from "../packages/core/src/kb.ts";
 import { attachedFiles, compileClass, compileResult, filesIn, kbPublishClass, loadOverrides, parseEntries, parseKbDefinition, parseVerdict, publishSnapshot, readSources, renderCoverage, requestCompile, runCompileJob, type KbDefinition } from "../packages/core/src/kb-compile.ts";
 import { createQueue } from "../packages/core/src/queue.ts";
 import { createHttpEgress, EgressRefused } from "../packages/core/src/tools.ts";
-import { createPayloadStore } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey } from "../packages/core/src/record.ts";
 import { freshDatabase } from "./db.ts";
 import { FREEZER_SOP_MARKDOWN, freezerSop } from "./docx-fixture.ts";
 import { startFakeModel } from "./fake-model.ts";
@@ -43,7 +43,7 @@ wiki.listen(0, "127.0.0.1");
 await once(wiki, "listening");
 after(() => wiki.close());
 const wikiUrl = `http://127.0.0.1:${(wiki.address() as { port: number }).port}/onboarding-note.md`;
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
 const queue = createQueue(db);
 const sourceDeps = { http: createHttpEgress({ policy: DEFAULT_POLICY, hosts: {}, fetchImpl: fetch }), address: store.address, db, actor: "test", labPatterns: [] as RegExp[] };
 const gateway = createGateway(

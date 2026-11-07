@@ -4,8 +4,9 @@
  *
  * Storage:
  *   run_events(run_id, seq, at, cls, prev_hash, hash, event jsonb)   append-only, hash-chained per run
- *   payloads(hash, cls, ciphertext, nonce, key_id, created_at)        addressed by HMAC-SHA256 of (class, plaintext) under the address
- *                                                                     subkey, AES-256-GCM under the cipher subkey; both HKDF from one master
+ *   payloads(hash, cls, ciphertext, nonce, key_id, created_at,        addressed by HMAC-SHA256 of (class, plaintext) under the lab's address
+ *            redacted_at, redaction_reason)                           subkey, AES-256-GCM under the cipher subkey of the master key_id names
+ *   payload_keys(key_id, nonce, wrapped)                              the one address subkey, wrapped under each master the lab has held
  *   run_inbox(id, run_id, at, item jsonb, consumed_seq)               written by front doors only
  *
  * Invariants:
@@ -22,7 +23,7 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import type { Db } from "./db.ts";
 import { decideEgress, describeRefusal, join, Labelled, type DataClass, type EgressPolicy, type EgressRefusal, type Placement } from "./dataclass.ts";
-import { canonicalJson, keyedAddresser, sha256, type Addresser, type AgentVersionHash, type EntryHash, type PayloadHash, type Sha256, type SnapshotId, type ToolHash } from "./hash.ts";
+import { addresserOf, addressSubkey, canonicalJson, sha256, type Addresser, type AgentVersionHash, type EntryHash, type PayloadHash, type Sha256, type SnapshotId, type ToolHash } from "./hash.ts";
 import type { RouteDecision } from "./router.ts";
 import type { ModelTarget } from "./gateway.ts";
 import type { Unrunnable } from "./agent.ts";
@@ -213,30 +214,31 @@ export interface StoredEvent {
   readonly event: RunEvent;
 }
 
-/** The class of an event is the join of the classes of the bodies it references. Control events are D0. */
-export function eventClass(e: RunEvent): DataClass {
+/** Every body an event references, with what it is to the event. Retention, the record page and eventClass read this one list. */
+export function eventRefs(e: RunEvent): readonly { readonly role: string; readonly ref: PayloadRef }[] {
+  const of = (role: string, ref: PayloadRef | null | undefined) => (ref ? [{ role, ref }] : []);
   switch (e.t) {
     case "run.started":
-      return join(e.input.cls, ...e.history.map((h) => h.cls));
+      return [...of("input", e.input), ...e.history.map((ref) => ({ role: "history", ref }))];
     case "model.requested":
-      return e.prompt.cls;
+      return of("prompt", e.prompt);
     case "model.completed":
-      return join(e.output.cls, ...e.toolCalls.map((c) => c.args.cls), ...(e.providerState ? [e.providerState.cls] : []));
+      return [...of("output", e.output), ...e.toolCalls.map((c) => ({ role: `${c.name} input`, ref: c.args })), ...of("provider state", e.providerState)];
     case "tool.requested":
-      return e.input.cls;
+      return of("input", e.input);
     case "tool.completed":
-      return e.output.cls;
+      return of("output", e.output);
     case "inbox.consumed":
-      return e.item.t === "steer" ? e.item.text.cls : "D0";
+      return e.item.t === "steer" ? of("steer", e.item.text) : [];
     case "run.faulted":
-      return reasonClass(e.reason);
+      return reasonRefs(e.reason);
     case "run.finished":
-      return join(e.answer?.cls ?? "D0", e.reason ? reasonClass(e.reason) : "D0");
+      return [...of("answer", e.answer), ...(e.reason ? reasonRefs(e.reason) : [])];
     case "model.failed":
     case "tool.failed":
-      return e.failure.detail?.cls ?? "D0";
+      return of("failure detail", e.failure.detail);
     case "agent.session":
-      return e.refusedTargets?.cls ?? "D0";
+      return of("refused targets", e.refusedTargets);
     case "tool.outcome-unknown":
     case "tool.withheld":
     case "egress.refused":
@@ -246,7 +248,7 @@ export function eventClass(e: RunEvent): DataClass {
     case "stop":
     case "limit.hit":
     case "reply.posted":
-      return "D0";
+      return [];
     default: {
       const never: never = e;
       return never;
@@ -254,9 +256,14 @@ export function eventClass(e: RunEvent): DataClass {
   }
 }
 
-function reasonClass(r: FailureReason): DataClass {
-  if (r.t === "agent-not-confined") return r.why.cls;
-  return r.t === "retries-exhausted" && r.error ? r.error.cls : "D0";
+function reasonRefs(r: FailureReason): readonly { readonly role: string; readonly ref: PayloadRef }[] {
+  if (r.t === "agent-not-confined") return [{ role: "reason", ref: r.why }];
+  return r.t === "retries-exhausted" && r.error ? [{ role: "error", ref: r.error }] : [];
+}
+
+/** The class of an event is the join of the classes of the bodies it references. Control events are D0. */
+export function eventClass(e: RunEvent): DataClass {
+  return join(...eventRefs(e).map((r) => r.ref.cls));
 }
 
 export function eventHash(runId: RunId, seq: number, at: string, cls: DataClass, prevHash: Sha256 | null, event: RunEvent): Sha256 {
@@ -316,17 +323,52 @@ export class RecordCorrupt extends Error {
 /** A body the run needs cannot be read back. Terminal: the run cannot be continued without it. */
 export class PayloadUnavailable extends Error {
   readonly hash: PayloadHash;
-  /** class-mismatch: the row's class is not the ref's, which the address rules out unless the row was tampered with. */
+  /**
+   * key-mismatch: the row is under a key id this process does not hold. class-mismatch: the row's class is not the
+   * ref's, which the address rules out unless the row was tampered with.
+   */
   readonly why: "redacted" | "missing" | "key-mismatch" | "class-mismatch";
-  constructor(hash: PayloadHash, why: PayloadUnavailable["why"]) {
-    super(`payload ${hash} is ${why === "key-mismatch" ? "under another key" : why === "class-mismatch" ? "stored at another class than the ref names" : why}`);
+  constructor(hash: PayloadHash, why: PayloadUnavailable["why"], keyId: string | null = null) {
+    super(`payload ${hash} is ${why === "key-mismatch" ? `under key ${keyId ?? "(none)"}, which this process does not hold` : why === "class-mismatch" ? "stored at another class than the ref names" : why}`);
     this.name = "PayloadUnavailable";
     this.hash = hash;
     this.why = why;
   }
 }
 
+/** A put at a class whose key id this process does not hold. The lab keeps that key apart from this process on purpose. */
+export class KeyNotHeld extends Error {
+  readonly keyId: string;
+  readonly cls: DataClass;
+  constructor(keyId: string, cls: DataClass) {
+    super(`${cls} payloads are stored under key ${keyId}, which this process does not hold`);
+    this.name = "KeyNotHeld";
+    this.keyId = keyId;
+    this.cls = cls;
+  }
+}
+
 export type Redacted = { readonly redacted: true; readonly hash: PayloadHash; readonly cls: DataClass };
+
+/**
+ * Payload masters by key id. New payloads go under `current`, or under the key a class names in `classKeys`, so a
+ * lab can hold D3's key apart. Reads pick the key by the id stamped on the row. An id the lab names but this process
+ * was not given is simply absent from `keys`.
+ */
+export interface Keyring {
+  readonly keys: ReadonlyMap<string, Uint8Array>;
+  readonly current: string;
+  readonly classKeys: Readonly<Partial<Record<DataClass, string>>>;
+}
+
+export function oneKey(key: Uint8Array, id = "k1"): Keyring {
+  return { keys: new Map([[id, key]]), current: id, classKeys: {} };
+}
+
+/** The key id a payload at this class is written under. */
+export function keyFor(ring: Keyring, cls: DataClass): string {
+  return ring.classKeys[cls] ?? ring.current;
+}
 
 /**
  * Content-addressed by (class, plaintext), encrypted at rest. put() takes
@@ -341,44 +383,79 @@ export interface PayloadStore {
   readonly address: Addresser;
   /** The body at the ref's class, which its address commits to. */
   get(ref: PayloadRef): Promise<Labelled<unknown> | Redacted>;
-  /** Deletes bodies past their class's retention. Events keep hashes. Idempotent. */
-  sweepRetention(now: Date): Promise<number>;
+  /** Key ids this process holds. A body under any other id is unavailable here. */
+  readonly held: ReadonlySet<string>;
+  /**
+   * Re-encrypts up to `limit` bodies that are not under their class's key, when this process holds both keys. The
+   * hash, the class and the bytes stay; only the ciphertext, nonce and key id change, together. Returns how many rows
+   * it looked at: zero means nothing it can move is left.
+   */
+  reencrypt(limit: number): Promise<number>;
 }
 
 export interface StoreConfig {
   readonly placement: Placement;
   readonly policy: EgressPolicy;
-  /** 32 bytes. The master key: the address and cipher subkeys derive from it and it is never used directly. key_id names it on every row. */
-  readonly key: Uint8Array;
-  readonly keyId: string;
+  /** 32-byte masters. Each derives its cipher subkey and is never used directly. */
+  readonly keyring: Keyring;
+  /**
+   * The address subkey. A one-key store derives it from its master, as every store did before rotation; boot passes
+   * labAddressKey, the lab's from payload_keys, so addresses, which sit in hash-chained events and KB names, never move.
+   */
+  readonly addressKey?: Uint8Array;
 }
 
 const GCM_TAG_BYTES = 16;
 /** HKDF info for the cipher subkey. Fixed for the life of the data; the address subkey's is in hash.ts. */
 const CIPHER_INFO = "labh:payload:cipher:v1";
+/** HKDF info for the subkey that wraps the lab's address subkey in payload_keys. */
+const WRAP_INFO = "labh:payload:address-wrap:v1";
+
+function subkey(master: Uint8Array, info: string): Buffer {
+  if (master.length !== 32) throw new Error("payload key must be 32 bytes");
+  return Buffer.from(hkdfSync("sha256", master, "", info, 32));
+}
+
+function seal(key: Buffer, plaintext: Buffer, aad: string): { readonly nonce: Buffer; readonly ciphertext: Buffer } {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  cipher.setAAD(Buffer.from(aad));
+  return { nonce, ciphertext: Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]) };
+}
+
+function unseal(key: Buffer, nonce: Buffer, ciphertext: Buffer, aad: string): Buffer {
+  const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+  decipher.setAAD(Buffer.from(aad));
+  decipher.setAuthTag(ciphertext.subarray(ciphertext.length - GCM_TAG_BYTES));
+  return Buffer.concat([decipher.update(ciphertext.subarray(0, ciphertext.length - GCM_TAG_BYTES)), decipher.final()]);
+}
 
 export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
-  if (config.key.length !== 32) throw new Error("payload key must be 32 bytes");
-  const cipherKey = Buffer.from(hkdfSync("sha256", config.key, "", CIPHER_INFO, 32));
-  const address = keyedAddresser(config.key);
+  const ring = config.keyring;
+  const ciphers = new Map([...ring.keys].map(([id, master]) => [id, subkey(master, CIPHER_INFO)]));
+  const currentMaster = ring.keys.get(ring.current);
+  if (!currentMaster) throw new Error(`the current payload key ${ring.current} is not held`);
+  const address = addresserOf(config.addressKey ?? addressSubkey(currentMaster));
+  const held = new Set(ciphers.keys());
   return {
     address,
+    held,
     async put(content) {
       const decision = decideEgress(content, { kind: "store", placement: config.placement }, config.policy);
       if (!decision.allow) throw new StoreRefused(decision.refusal);
+      const keyId = keyFor(ring, content.cls);
+      const cipherKey = ciphers.get(keyId);
+      if (!cipherKey) throw new KeyNotHeld(keyId, content.cls);
       const plaintext = Buffer.from(canonicalJson(content.value), "utf8");
       // Keyed: the address is in events that leave the store (the run record, the web API), so an unkeyed
       // digest would let anyone confirm a guessed body (a participant id) against it.
       const hash = address(content.cls, content.value) as string as PayloadHash;
-      const nonce = randomBytes(12);
-      const cipher = createCipheriv("aes-256-gcm", cipherKey, nonce);
-      cipher.setAAD(Buffer.from(hash));
-      const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
-      // The same bytes at the same class are one row already; at another class the address differs.
+      const { nonce, ciphertext } = seal(cipherKey, plaintext, hash);
+      // The same bytes at the same class are one row already, under whichever key wrote it first; at another class the address differs.
       await db.query(
         `insert into payloads (hash, cls, ciphertext, nonce, key_id, bytes) values ($1, $2, $3, $4, $5, $6)
          on conflict (hash) do nothing`,
-        [hash, content.cls, ciphertext, nonce, config.keyId, plaintext.length],
+        [hash, content.cls, ciphertext, nonce, keyId, plaintext.length],
       );
       return { hash, cls: content.cls, bytes: plaintext.length };
     },
@@ -391,17 +468,77 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
       if (!row) throw new PayloadUnavailable(ref.hash, "missing");
       if (row.cls !== ref.cls) throw new PayloadUnavailable(ref.hash, "class-mismatch");
       if (!row.ciphertext || !row.nonce) return { redacted: true, hash: ref.hash, cls: ref.cls };
-      if (row.key_id !== config.keyId) throw new PayloadUnavailable(ref.hash, "key-mismatch");
-      const decipher = createDecipheriv("aes-256-gcm", cipherKey, row.nonce);
-      decipher.setAAD(Buffer.from(ref.hash));
-      decipher.setAuthTag(row.ciphertext.subarray(row.ciphertext.length - GCM_TAG_BYTES));
-      const plaintext = Buffer.concat([decipher.update(row.ciphertext.subarray(0, row.ciphertext.length - GCM_TAG_BYTES)), decipher.final()]);
+      const cipherKey = row.key_id === null ? undefined : ciphers.get(row.key_id);
+      if (!cipherKey) throw new PayloadUnavailable(ref.hash, "key-mismatch", row.key_id);
+      const plaintext = unseal(cipherKey, row.nonce, row.ciphertext, ref.hash);
       return Labelled.stamp(JSON.parse(plaintext.toString("utf8")) as unknown, ref.cls, `store:${ref.hash}`);
     },
-    async sweepRetention() {
-      throw new Error("retention sweep is not part of this build");
+    async reencrypt(limit) {
+      // A row moves only when this process holds both its key and its target, so a batch never returns a row it must skip.
+      const rows = await db.query<{ hash: string; cls: DataClass; ciphertext: Buffer; nonce: Buffer; key_id: string }>(
+        `select hash, cls, ciphertext, nonce, key_id from payloads
+         where ciphertext is not null and key_id = any($1) and coalesce($2::jsonb ->> cls, $3) = any($1) and key_id <> coalesce($2::jsonb ->> cls, $3)
+         order by hash limit $4`,
+        [[...held], JSON.stringify(ring.classKeys), ring.current, limit],
+      );
+      for (const r of rows.rows) {
+        const target = keyFor(ring, r.cls);
+        const sealed = seal(ciphers.get(target)!, unseal(ciphers.get(r.key_id)!, r.nonce, r.ciphertext, r.hash), r.hash);
+        // Conditional on the row as read, so a concurrent redaction or another re-encrypt wins and this one changes nothing.
+        await db.query("update payloads set ciphertext = $2, nonce = $3, key_id = $4 where hash = $1 and key_id = $5 and ciphertext = $6", [r.hash, sealed.ciphertext, sealed.nonce, target, r.key_id, r.ciphertext]);
+      }
+      return rows.rows.length;
     },
   };
+}
+
+/**
+ * The lab's address subkey, for createPayloadStore. payload_keys keeps that one subkey wrapped under every master the lab has
+ * held, so a process holding any of them addresses exactly as the first did, and an old master can be dropped once
+ * no body is under it. The first open of a lab records the subkey of the master its payloads were already addressed
+ * under (the oldest payload's key, or the current key in a new lab). Each open wraps it under every key it holds.
+ */
+export async function labAddressKey(db: Db, ring: Keyring): Promise<Uint8Array> {
+  const rows = (await db.query<{ key_id: string; nonce: Buffer; wrapped: Buffer }>("select key_id, nonce, wrapped from payload_keys order by key_id")).rows;
+  let addressKey: Buffer;
+  const mine = rows.find((r) => ring.keys.has(r.key_id));
+  if (mine) {
+    try {
+      addressKey = unseal(subkey(ring.keys.get(mine.key_id)!, WRAP_INFO), mine.nonce, mine.wrapped, `payload_keys:${mine.key_id}`);
+    } catch {
+      throw new Error(`payload key ${mine.key_id} is not the key this lab knows as ${mine.key_id}: its stored payloads would not decrypt`);
+    }
+  } else if (rows.length) {
+    throw new Error(`this lab's payloads are addressed under a key kept with ${rows.map((r) => r.key_id).join(", ")}, and this process holds none of them`);
+  } else {
+    const oldest = (await db.query<{ key_id: string }>("select key_id from payloads where key_id is not null order by created_at, hash limit 1")).rows[0]?.key_id ?? ring.current;
+    const master = ring.keys.get(oldest);
+    if (!master) throw new Error(`this lab's first payloads are under key ${oldest}, which this process does not hold; start once with it before rotating`);
+    addressKey = addressSubkey(master);
+  }
+  for (const [id, master] of ring.keys) {
+    if (rows.some((r) => r.key_id === id)) continue;
+    const wrapped = seal(subkey(master, WRAP_INFO), addressKey, `payload_keys:${id}`);
+    await db.query("insert into payload_keys (key_id, nonce, wrapped) values ($1, $2, $3) on conflict (key_id) do nothing", [id, wrapped.nonce, wrapped.ciphertext]);
+  }
+  return addressKey;
+}
+
+/** Why a body was redacted. A redaction from before tombstones were kept has no reason. */
+export type RedactionReason = "retention";
+
+/** What the payloads table says about one body, without reading it. */
+export type PayloadState =
+  | { readonly t: "stored"; readonly keyId: string | null }
+  | { readonly t: "redacted"; readonly at: string | null; readonly reason: RedactionReason | null };
+
+/** Hashes absent from the result have no row. */
+export async function payloadStates(db: Db, hashes: readonly PayloadHash[]): Promise<ReadonlyMap<PayloadHash, PayloadState>> {
+  const res = await db.query<{ hash: PayloadHash; stored: boolean; key_id: string | null; redacted_at: Date | null; redaction_reason: RedactionReason | null }>(
+    "select hash, ciphertext is not null as stored, key_id, redacted_at, redaction_reason from payloads where hash = any($1)",
+    [hashes],
+  );
+  return new Map(res.rows.map((r): [PayloadHash, PayloadState] => [r.hash, r.stored ? { t: "stored", keyId: r.key_id } : { t: "redacted", at: r.redacted_at?.toISOString() ?? null, reason: r.redaction_reason }]));
 }
 
 export interface Lease {

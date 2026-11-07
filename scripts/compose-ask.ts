@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import { connect } from "../packages/core/src/db.ts";
-import { createPayloadStore, loadEvents, type RunId } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, loadEvents, type RunId } from "../packages/core/src/record.ts";
 
 const [mode, base, given] = process.argv.slice(2);
 assert.ok((mode === "ask" || (mode === "verify" && given)) && base, "usage: compose-ask.ts ask <base-url> | verify <base-url> <run-id>");
@@ -55,7 +55,7 @@ if (mode === "ask") {
   console.log(runId);
 } else {
   const db = connect(process.env.DATABASE_URL!);
-  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(process.env.LABH_PAYLOAD_KEY ?? "", "hex"), keyId: "k1" });
+  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(Buffer.from(process.env.LABH_PAYLOAD_KEY ?? "", "hex")) });
   const finished = (await loadEvents(db, runId as RunId)).find((e) => e.event.t === "run.finished")?.event;
   assert.ok(finished && finished.t === "run.finished" && finished.answer, "the run has no stored answer");
   const body = await store.get(finished.answer);

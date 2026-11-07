@@ -15,6 +15,7 @@ import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
 
 const placement = z.enum(PLACEMENTS);
+const KEY_ID = /^[a-z0-9][a-z0-9_-]*$/;
 
 const IMAGE_BY_DIGEST = /^(?:[a-z0-9][a-z0-9._\/:-]*@)?sha256:([0-9a-f]{64})$/;
 
@@ -129,7 +130,16 @@ function parseSurfaces(tables: Record<string, unknown>): readonly [WebSurfaceCon
 
 const schema = z.object({
   database: z.object({ url_env: z.string().default("DATABASE_URL") }).default({ url_env: "DATABASE_URL" }),
-  store: z.object({ placement: placement.default("lab"), key_env: z.string().default("LABH_PAYLOAD_KEY") }).default({ placement: "lab", key_env: "LABH_PAYLOAD_KEY" }),
+  store: z
+    .object({
+      placement: placement.default("lab"),
+      key_env: z.string().min(1).optional(),
+      keys: z.record(z.string().regex(KEY_ID, "a key id is lowercase letters, digits, _ and -, because every payload row names one"), z.string().min(1)).optional(),
+      current: z.string().optional(),
+      class_keys: z.partialRecord(z.enum(DATA_CLASSES), z.string()).default({}),
+    })
+    .strict()
+    .default({ placement: "lab", class_keys: {} }),
   endpoints: z.record(
     z.string(),
     z.object({
@@ -147,7 +157,13 @@ const schema = z.object({
   ),
   surfaces: z.record(z.string(), z.unknown()).default({}),
   hosts: z.record(z.string(), placement).default({}),
-  policy: z.object({ review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"), participant_id_patterns: z.array(z.string()).default([]) }).default({ review_confidential: "refuse", participant_id_patterns: [] }),
+  policy: z
+    .object({
+      review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"),
+      participant_id_patterns: z.array(z.string()).default([]),
+      retention_days: z.union([z.number().int().positive(), z.partialRecord(z.enum(DATA_CLASSES), z.number().int().positive())]).optional(),
+    })
+    .default({ review_confidential: "refuse", participant_id_patterns: [] }),
   agents: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
   /**
    * "surface:channel" -> the class every message there starts at. Unlisted channels start at D1. Detectors only raise it.
@@ -179,7 +195,7 @@ const schema = z.object({
 export interface LabConfig {
   readonly path: string;
   readonly databaseUrlEnv: string;
-  readonly store: { readonly placement: Placement; readonly keyEnv: string };
+  readonly store: StoreKeys & { readonly placement: Placement };
   readonly endpoints: readonly ModelEndpoint[];
   /** Agent CLIs. Their ids share one namespace with endpoints, because an agent names either as model.endpointId. */
   readonly agentBackends: readonly AgentBackend[];
@@ -199,6 +215,38 @@ export interface LabConfig {
   readonly contactEmailEnv: string | null;
   /** [lab] name: what the web pages show as the lab's name, or null to show the machine's hostname. */
   readonly labName: string | null;
+  /** [policy] retention_days by class: how long a run's payload bodies are kept after the last run that names them. A class not listed is kept. */
+  readonly retentionDays: Readonly<Partial<Record<DataClass, number>>>;
+}
+
+/**
+ * Which env var holds each payload key id, which id new payloads go under, and the classes that name their own key.
+ * The one-key form, key_env = "X", is { k1: "X" } with k1 current, which is how every store stamped its rows before.
+ */
+export interface StoreKeys {
+  readonly keyEnvs: Readonly<Record<string, string>>;
+  readonly current: string;
+  readonly classKeys: Readonly<Partial<Record<DataClass, string>>>;
+}
+
+function storeKeys(s: { key_env?: string | undefined; keys?: Record<string, string> | undefined; current?: string | undefined; class_keys: Partial<Record<DataClass, string>> }): StoreKeys {
+  const fail = (why: string): never => {
+    throw new Error(`lab.toml: [store] ${why}`);
+  };
+  if (s.key_env !== undefined && s.keys !== undefined) fail('names both key_env and [store.keys]; key_env = "X" is the one-key form of [store.keys] k1 = "X"');
+  const keyEnvs = s.keys ?? { k1: s.key_env ?? "LABH_PAYLOAD_KEY" };
+  const ids = Object.keys(keyEnvs);
+  if (!ids.length) fail("[store.keys] names no key");
+  const current = s.current ?? (ids.length === 1 ? ids[0]! : fail(`current is missing: name which of ${ids.join(", ")} new payloads go under`));
+  if (!(current in keyEnvs)) fail(`current = "${current}" is not a key in [store.keys]`);
+  for (const [cls, id] of Object.entries(s.class_keys)) if (!(id in keyEnvs)) fail(`class_keys ${cls} = "${id}" is not a key in [store.keys]`);
+  const owner = new Map<string, string>();
+  for (const [id, env] of Object.entries(keyEnvs)) {
+    const first = owner.get(env);
+    if (first) fail(`keys ${first} and ${id} both read ${env}; one env var is one key`);
+    owner.set(env, id);
+  }
+  return { keyEnvs, current, classKeys: s.class_keys };
 }
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
@@ -236,7 +284,7 @@ export function parseConfig(text: string, path: string): LabConfig {
   return {
     path,
     databaseUrlEnv: c.database.url_env,
-    store: { placement: c.store.placement, keyEnv: c.store.key_env },
+    store: { placement: c.store.placement, ...storeKeys(c.store) },
     endpoints: Object.entries(c.endpoints).map(([id, e]) => ({
       id,
       baseUrl: e.base_url,
@@ -273,6 +321,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
+    retentionDays: typeof c.policy.retention_days === "number" ? Object.fromEntries(DATA_CLASSES.map((cls) => [cls, c.policy.retention_days])) : (c.policy.retention_days ?? {}),
   };
 }
 

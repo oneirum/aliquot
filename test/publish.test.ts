@@ -10,7 +10,7 @@ import type { SnapshotId, ToolHash } from "../packages/core/src/hash.ts";
 import { confirmPublish, draftHashOf, PublishRefused, publishedAgentFor, requestPublish } from "../packages/core/src/publish.ts";
 import { mayPreview, type Actor } from "../packages/core/src/roles.ts";
 import { createQueue } from "../packages/core/src/queue.ts";
-import { createPayloadStore } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey } from "../packages/core/src/record.ts";
 import { WEB_SURFACE } from "../packages/core/src/surfaces/web.ts";
 import { testDraft } from "../packages/core/src/surfaces/studio-door.ts";
 import { freshDatabase } from "./db.ts";
@@ -147,7 +147,7 @@ test("publish moves the head and appends one audit row; republishing an edit mak
 });
 
 test("intake runs the head bound to the channel; a studio test runs the unpublished draft with trigger test", async () => {
-  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
   const intakeDeps: IntakeDeps = {
     db,
     store,

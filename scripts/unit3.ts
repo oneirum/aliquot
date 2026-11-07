@@ -19,7 +19,7 @@ import { loadAudit, verifyAudit } from "../packages/core/src/audit.ts";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { diffSnapshots, estimateTokens, loadManifest, storedSnapshots, type KbEntry } from "../packages/core/src/kb.ts";
-import { createPayloadStore, loadEvents, verifyChain, type PayloadRef, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, loadEvents, verifyChain, type PayloadRef, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { startFakeModel, type FakeModel } from "../test/fake-model.ts";
 import { freshDatabase } from "../test/db.ts";
 import { checker, ensurePostgres, post, processes, waitFor, waitLine } from "./procs.ts";
@@ -56,7 +56,7 @@ const wikiUrl = `http://127.0.0.1:${wikiPort}/onboarding-note.md`;
 
 const payloadKey = randomBytes(32).toString("hex");
 const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey };
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(Buffer.from(payloadKey, "hex")) });
 
 const READ_CAP = 60;
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;

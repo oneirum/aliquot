@@ -1,7 +1,7 @@
 # The Aliquot stack on one machine: docker compose up -d starts Postgres, the worker, the web door and the
 # production studio. It reads two files you make once with `docker compose run --rm init`: config/lab.toml
 # (what is where) and .env (its secrets). Every port is published on 127.0.0.1 unless .env sets LABH_BIND;
-# put the lab's reverse proxy in front of the web door and the studio. LABH_PAYLOAD_KEY goes to the sealed
+# put the lab's reverse proxy in front of the web door and the studio. LABH_PAYLOAD_KEY (and _2, _3) go to the sealed
 # services only, the worker and the web door; the studio reaches core through the door with ALIQUOT_STUDIO_TOKEN.
 #
 # For development and the checks, docker compose up -d postgres still starts only the database.
@@ -15,6 +15,8 @@ x-app: &app
   environment: &app-env
     DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-labh}@postgres:5432/labh
     LABH_PAYLOAD_KEY: ${LABH_PAYLOAD_KEY:-}
+    LABH_PAYLOAD_KEY_2: ${LABH_PAYLOAD_KEY_2:-}    # a rotated key, or a class's own key ([store.keys] in lab.toml)
+    LABH_PAYLOAD_KEY_3: ${LABH_PAYLOAD_KEY_3:-}
     LABH_CONFIG: /etc/aliquot/lab.toml
   volumes: ["./config:/etc/aliquot:ro"]
 
