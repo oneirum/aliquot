@@ -143,7 +143,7 @@ With no `[classes]` table a lab has the five built-in classes, which behave exac
 
 ### Your campus's tiers
 
-A reviewer at UW-Madison reads "Restricted", at Michigan "High", at Harvard "Level 4". `preset = "uw-madison"` (or `"umich"`, `"harvard"`) at the top of `lab.toml` maps the campus's tiers onto the classes, adds the classes the campus needs (PHI, controlled-access, export-controlled, and at Michigan payment cards), and shows the campus tier beside the class everywhere a class is named: in every refusal, in the studio's Data classes panel, and on each class's record.
+A reviewer at UW-Madison reads "Restricted", at Michigan "High", at Harvard "Level 4". `preset = "uw-madison"` (or `"umich"`, `"harvard"`) at the top of `lab.toml` maps the campus's tiers onto the classes, adds the classes the campus needs (PHI, controlled-access, export-controlled, and at Michigan payment cards), and shows the campus tier beside the class wherever a member or a reviewer reads one: every refusal (chat, Slack, Teams, a run's notice, a knowledge base source refused at compile) and the studio's Data classes panel, which links each tier to the page it rests on. `pnpm walk:policy --preset uw-madison` walks it on the synthetic lab.
 
 ```text
 Not sent. Data class phi (UW-Madison Restricted), found by detector ssn; rule model_tier = "none". This message
@@ -151,7 +151,7 @@ carries a HIPAA identifier or personal information UW-504 calls Restricted. Remo
 for a de-identified extract.
 ```
 
-Each file in [`presets/`](presets) is a starting point for your data steward, not the campus's own interpretation: every line cites the campus page it rests on, and the lab's own `[classes.<id>]` keys win over the preset's one key at a time (`retention_days = 7` under `[classes.phi]` keeps the rest). A class the lab adds names its `campus_tier`, or `lab.toml` does not load. A campus not listed copies one of these files, edits it, and names it by path (`preset = "./our-campus.toml"`). `aliquot init` asks for the campus last (`--campus` with `--yes`). A class may also take `patterns`, the lab's own regular expressions, which is how a Harvard document labelled DSL3, DSL4 or DSL5 lands in that level's class.
+Each file in [`presets/`](presets) is a starting point for your data steward, not the campus's own interpretation: every line cites the campus page it rests on, and the lab's own `[classes.<id>]` keys win over the preset's one key at a time (`retention_days = 7` under `[classes.phi]` keeps the rest). A class the lab adds names its `campus_tier`, or `lab.toml` does not load. A campus not listed copies one of these files, edits it, and names it by path (`preset = "./our-campus.toml"`). `aliquot init` asks for the campus last (`--campus` with `--yes`), and `pnpm presets:table` prints the tables below. A class may also take `patterns`, the lab's own regular expressions, which is how a Harvard document labelled DSL3, DSL4 or DSL5 lands in that level's class.
 
 **UW-Madison** (`preset = "uw-madison"`, UW-504)
 
@@ -184,15 +184,15 @@ Each file in [`presets/`](presets) is a starting point for your data steward, no
 
 | Campus tier | Aliquot class | Level | Who may read it | Mapping rests on |
 |---|---|---|---|---|
-| Level 1 Public (non-Sensitive) | `public` | D0 | an approved hosted model | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
-| Level 2 Low Risk (non-Sensitive) | `internal` | D1 | an approved hosted model | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
-| Level 2 Low Risk (non-Sensitive) | `confidential` | D2 | an approved hosted model | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
-| Level 3 Medium Risk (Sensitive) | `restricted` | D3 | a lab or institution model only | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
-| Level 3 Medium Risk (Sensitive) | `review-confidential` | R | no model: refused at the door | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
-| Level 3 Medium Risk (Sensitive) | `controlled_access` | D3 | no model: refused at the door | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
-| Level 4 High Risk (Sensitive) | `phi` | D3 | no model: refused at the door | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
-| Level 4 High Risk (Sensitive) | `export_controlled` | D3 | a lab or institution model only, region us | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
-| Level 5 Extreme Risk (Sensitive) | `extreme_risk` | D3 | no model: refused at the door | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
+| Level 1 Public, non-Sensitive | `public` | D0 | an approved hosted model | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
+| Level 2 Low Risk, non-Sensitive | `internal` | D1 | an approved hosted model | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
+| Level 2 Low Risk, non-Sensitive | `confidential` | D2 | an approved hosted model | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
+| Level 3 Medium Risk, Sensitive | `restricted` | D3 | a lab or institution model only | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
+| Level 3 Medium Risk, Sensitive | `review-confidential` | R | no model: refused at the door | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
+| Level 3 Medium Risk, Sensitive | `controlled_access` | D3 | no model: refused at the door | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
+| Level 4 High Risk, Sensitive | `phi` | D3 | no model: refused at the door | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
+| Level 4 High Risk, Sensitive | `export_controlled` | D3 | a lab or institution model only, region us | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
+| Level 5 Extreme Risk, Sensitive | `extreme_risk` | D3 | no model: refused at the door | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
 
 ## The chat page and the record
 

@@ -52,11 +52,11 @@ const CASES: Record<(typeof PRESETS)[number], { campus: string; samples: readonl
   harvard: {
     campus: "Harvard",
     samples: [
-      { tier: "Level 1 Public (non-Sensitive)", text: "When is the lab's public seminar?", floor: "D0", cls: "public", outcome: "hosted" },
-      { tier: "Level 2 Low Risk (non-Sensitive)", text: "Summarize last week's lab meeting notes.", floor: "D1", cls: "internal", outcome: "hosted" },
-      { tier: "Level 3 Medium Risk (Sensitive)", text: "Here is the DSL3 interview codebook for the coders.", floor: "D1", cls: "restricted", outcome: "local only" },
-      { tier: "Level 4 High Risk (Sensitive)", text: "ssn 123-45-6789 for the payroll form", floor: "D1", cls: "phi", outcome: "refused" },
-      { tier: "Level 5 Extreme Risk (Sensitive)", text: "This file is DSL5 and must not leave the enclave.", floor: "D1", cls: "extreme_risk", outcome: "refused" },
+      { tier: "Level 1 Public, non-Sensitive", text: "When is the lab's public seminar?", floor: "D0", cls: "public", outcome: "hosted" },
+      { tier: "Level 2 Low Risk, non-Sensitive", text: "Summarize last week's lab meeting notes.", floor: "D1", cls: "internal", outcome: "hosted" },
+      { tier: "Level 3 Medium Risk, Sensitive", text: "Here is the DSL3 interview codebook for the coders.", floor: "D1", cls: "restricted", outcome: "local only" },
+      { tier: "Level 4 High Risk, Sensitive", text: "ssn 123-45-6789 for the payroll form", floor: "D1", cls: "phi", outcome: "refused" },
+      { tier: "Level 5 Extreme Risk, Sensitive", text: "This file is DSL5 and must not leave the enclave.", floor: "D1", cls: "extreme_risk", outcome: "refused" },
     ],
   },
 };

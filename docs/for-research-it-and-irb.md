@@ -65,6 +65,16 @@ scholarly hosts such as doi.org or PubMed), IP addresses and labelled biometric 
 text and are not checked. "Any other unique identifying number" is the lab's own participant id patterns. Patterns
 miss what they do not match: see "Not covered yet".
 
+### Your campus's tiers
+
+`preset = "uw-madison"`, `"umich"` or `"harvard"` in `lab.toml` maps that campus's tiers (UW-504's Public, Internal,
+Sensitive and Restricted; Michigan's Low, Moderate, High and Restricted; Harvard's data security levels 1 to 5) onto the
+classes above, and every refusal and the studio's class list then name the tier beside the class, for example
+`Data class phi (UW-Madison Restricted)`. Each mapping line in `presets/<id>.toml` cites the campus page it rests on;
+the README's "Your campus's tiers" tables list them. A preset is a starting point for the data steward, not the
+campus's own interpretation: the lab's `[classes]` keys override it key by key, and a class the lab adds must name its
+campus tier or `lab.toml` does not load.
+
 ## Where each class may go
 
 Each destination has a placement, which the lab declares in `lab.toml`. The table of ceilings is code, not

@@ -11,33 +11,33 @@
 [preset]
 campus = "Harvard"
 scheme = "Harvard data security levels"
-tiers = ["Level 1 Public (non-Sensitive)", "Level 2 Low Risk (non-Sensitive)", "Level 3 Medium Risk (Sensitive)", "Level 4 High Risk (Sensitive)", "Level 5 Extreme Risk (Sensitive)"]
+tiers = ["Level 1 Public, non-Sensitive", "Level 2 Low Risk, non-Sensitive", "Level 3 Medium Risk, Sensitive", "Level 4 High Risk, Sensitive", "Level 5 Extreme Risk, Sensitive"]
 source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
 note = "A starting point for your data steward, not Harvard's official interpretation. For Sensitive Data the Information Security Reviewer assigns the level; check each line with yours before the lab relies on it."
 
 [classes.public]
-campus_tier = "Level 1 Public (non-Sensitive)"
+campus_tier = "Level 1 Public, non-Sensitive"
 source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
 
 [classes.internal]
-campus_tier = "Level 2 Low Risk (non-Sensitive)"
+campus_tier = "Level 2 Low Risk, non-Sensitive"
 source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
 
 [classes.confidential]
-campus_tier = "Level 2 Low Risk (non-Sensitive)"  # members' contact details
+campus_tier = "Level 2 Low Risk, non-Sensitive"  # members' contact details
 source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
 
 [classes.restricted]
-campus_tier = "Level 3 Medium Risk (Sensitive)"   # coded participant ids; Level 3 and up needs a security review
+campus_tier = "Level 3 Medium Risk, Sensitive"   # coded participant ids; Level 3 and up needs a security review
 source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
 patterns = ["\\bDSL[ -]?3\\b"]
 
 [classes.review-confidential]
-campus_tier = "Level 3 Medium Risk (Sensitive)"   # others' unpublished work under confidential review
+campus_tier = "Level 3 Medium Risk, Sensitive"   # others' unpublished work under confidential review
 source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
 
 [classes.controlled_access]
-campus_tier = "Level 3 Medium Risk (Sensitive)"   # "Data exchanged pursuant to a DUA" needs review; NIH bars generative AI (NOT-OD-25-081)
+campus_tier = "Level 3 Medium Risk, Sensitive"   # "Data exchanged pursuant to a DUA" needs review; NIH bars generative AI (NOT-OD-25-081)
 source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
 model_tier = "none"
 record = "hash"
@@ -46,7 +46,7 @@ detectors = ["dua-marker"]
 message = "This message names a controlled-access dataset. Its data use certification keeps it out of AI tools; work with it on the lab's analysis server."
 
 [classes.phi]
-campus_tier = "Level 4 High Risk (Sensitive)"     # HIPAA identifiers; the policy lists HIPAA among the regulations that make data Sensitive
+campus_tier = "Level 4 High Risk, Sensitive"     # HIPAA identifiers; the policy lists HIPAA among the regulations that make data Sensitive
 source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
 model_tier = "none"
 record = "hash"
@@ -56,7 +56,7 @@ patterns = ["\\bDSL[ -]?4\\b"]
 message = "This message carries a HIPAA identifier or content labelled Level 4. Remove it, or ask the lab's honest broker for a de-identified extract."
 
 [classes.export_controlled]
-campus_tier = "Level 4 High Risk (Sensitive)"     # export controls are among the regulations that make data Sensitive; the Export Control Council sets the obligations
+campus_tier = "Level 4 High Risk, Sensitive"     # export controls are among the regulations that make data Sensitive; the Export Control Council sets the obligations
 source = "https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf"
 model_tier = "local"
 residency = "us"
@@ -64,7 +64,7 @@ detectors = ["export-marker"]
 message = "This message carries export-controlled material, which stays on lab or institution systems in the United States."
 
 [classes.extreme_risk]
-campus_tier = "Level 5 Extreme Risk (Sensitive)"  # "FASRC has no systems rated for DSL5 data"
+campus_tier = "Level 5 Extreme Risk, Sensitive"  # "FASRC has no systems rated for DSL5 data"
 source = "https://docs.rc.fas.harvard.edu/kb/data-security-levels"
 model_tier = "none"
 record = "none"
