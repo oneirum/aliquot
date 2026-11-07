@@ -286,6 +286,9 @@ interface CoreScope {
   readonly tableSandbox: TableSandbox | null;
   readonly post: FormPost;
   readonly secret: (env: string) => string | undefined;
+  /** The run's member, whose own REDCap rights a REDCap table answers under, and today's UTC day. */
+  readonly member: string | null;
+  readonly today: string;
 }
 
 /** Keyed by the context the runner built for a core tool, so any other tool, whose context is never a key, cannot reach the sandbox. */
@@ -298,7 +301,8 @@ function coreScope(ctx: ToolContext): CoreScope {
 }
 
 export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): ToolRunner {
-  const accessOf = (journal: RunJournal) => duaAccess(deps.duas ?? [], memberOf(journal.events()), utcDay((deps.clock ?? Date).now()));
+  const today = () => utcDay((deps.clock ?? Date).now());
+  const accessOf = (journal: RunJournal) => duaAccess(deps.duas ?? [], memberOf(journal.events()), today());
   const scoped = (journal: RunJournal, knowledgeBases: readonly AttachedKb[], withheld: Withheld[]) => {
     const access = accessOf(journal);
     return { access, kb: scopeKb(deps.kb, (snapshot) => knowledgeBases.find((b) => b.snapshot === snapshot)?.kbId, access, withheld) };
@@ -387,6 +391,8 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
           tableSandbox: sandbox && image ? { image, aggregate: (files, engine, s) => sandbox.aggregate(files, engine, s) } : null,
           post,
           secret: deps.secret ?? ((name) => process.env[name]),
+          member: memberOf(journal.events()),
+          today: today(),
           access,
           withheld,
         });
@@ -569,7 +575,7 @@ export const dataQueryTool = defineTool({
     const columns = Object.entries(table.columns).filter(([, c]) => c === "free").map(([name]) => name);
     // Only an aggregate leaves the sandbox, so the answer is the table's aggregate class, not the class of its rows.
     ctx.touched(table.aggregateClass);
-    const record = await executeQuery(table, q, { read: tableReader({ post: scope.post, secret: scope.secret }), sandbox: scope.tableSandbox, signal: ctx.signal });
+    const record = await executeQuery(table, q, { read: tableReader({ post: scope.post, secret: scope.secret }), sandbox: scope.tableSandbox, signal: ctx.signal, member: scope.member, today: scope.today });
     return { ...record, freeColumns: columns };
   },
 });

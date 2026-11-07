@@ -1,0 +1,46 @@
+[
+ {
+  "username": "rlee",
+  "email": "rlee@lab0.example.edu",
+  "firstname": "Rosa",
+  "lastname": "Lee",
+  "expiration": "",
+  "data_access_group": "madison",
+  "data_access_group_id": "1",
+  "data_export": "1",
+  "forms_export": { "enrollment": 1, "dosing": 1 }
+ },
+ {
+  "username": "kpatel",
+  "email": "kpatel@lab0.example.edu",
+  "firstname": "Kiran",
+  "lastname": "Patel",
+  "expiration": "",
+  "data_access_group": "",
+  "data_access_group_id": "",
+  "data_export": "2",
+  "forms_export": { "enrollment": 2, "dosing": 2 }
+ },
+ {
+  "username": "mchen",
+  "email": "mchen@lab0.example.edu",
+  "firstname": "Mei",
+  "lastname": "Chen",
+  "expiration": "2026-01-31",
+  "data_access_group": "",
+  "data_access_group_id": "",
+  "data_export": "1",
+  "forms_export": { "enrollment": 1, "dosing": 1 }
+ },
+ {
+  "username": "ostone",
+  "email": "ostone@lab0.example.edu",
+  "firstname": "Owen",
+  "lastname": "Stone",
+  "expiration": "",
+  "data_access_group": "milwaukee",
+  "data_access_group_id": "2",
+  "data_export": "0",
+  "forms_export": { "enrollment": 0, "dosing": 1 }
+ }
+]

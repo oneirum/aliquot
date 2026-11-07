@@ -14,5 +14,11 @@
  "arm2_n": 15,
  "ae_grade_ge2_count": 6,
  "ae_grade3_count": 4,
- "redcap_rows": 30
+ "redcap_rows": 30,
+ "dag_madison_n": 12,
+ "dag_madison_ae_grade_ge2_count": 3,
+ "dag_madison_arm1_n": 6,
+ "dag_madison_arm1_mean_weight": 68.35,
+ "dag_madison_arm2_n": 6,
+ "dag_madison_arm2_mean_weight": 80.7
 }
