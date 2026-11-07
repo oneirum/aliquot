@@ -78,6 +78,7 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/compose-ask.ts": ["network-globals"],
   "scripts/walk-policy.ts": ["network-globals"],
   "scripts/dua-lab.ts": ["network-globals"],
+  "scripts/walk-dua.ts": ["module:child_process"],
   "scripts/unit3.ts": ["module:http"],
   // The sign-on walk drives the door over HTTP like a browser, picks a free port, and starts the door once without [auth]. It is not deployed.
   "scripts/walk-signon.ts": ["network-globals", "module:child_process", "module:net"],
