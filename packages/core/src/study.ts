@@ -12,13 +12,13 @@
  * - freeze is idempotent: freezing the same hash again returns the existing row.
  *   Freezing another hash while one is active is refused: the owner unfreezes first.
  * - Unfreeze needs the study owner and a reason, and is exported as a protocol deviation.
- * - Every write appends to the audit stream in the same transaction.
+ * - Every write appends to the audit stream in the same transaction, as the member and the OS user who made it.
  * - The freezes guard (migration 0006) refuses a delete, and any update but the one that ends a freeze.
  */
 
 import { atMost, rank, type DataClass } from "./dataclass.ts";
-import { verifyRunnable, type AgentId, type AgentListing, type Deployed, type MemberId } from "./agent.ts";
-import { appendAudit } from "./audit.ts";
+import { listingOf, parseAgentDocument, resolveAgent, verifyRunnable, versionHash, type AgentDocument, type AgentId, type AgentListing, type Catalog, type Deployed, type MemberId } from "./agent.ts";
+import { appendAudit, declaredActor } from "./audit.ts";
 import type { Db } from "./db.ts";
 import type { ChannelRef } from "./gate.ts";
 import type { AgentVersionHash } from "./hash.ts";
@@ -117,7 +117,7 @@ export async function createStudy(db: Db, s: NewStudy): Promise<Study> {
     throw new StudyRefused(`study ${s.id} exists with other details`);
   }
   if (rank(s.dataFloor) >= rank("D3") && !s.irbProtocol) throw new StudyRefused(`a study with a ${s.dataFloor} floor must name its IRB protocol`);
-  await appendAudit(db, s.owner, { t: "study.created", studyId: s.id, title: s.title, owner: s.owner, irbProtocol: s.irbProtocol ?? null, dataFloor: s.dataFloor }, async (tx) => {
+  await appendAudit(db, declaredActor(s.owner), { t: "study.created", studyId: s.id, title: s.title, owner: s.owner, irbProtocol: s.irbProtocol ?? null, dataFloor: s.dataFloor }, async (tx) => {
     await tx.query("insert into studies (id, title, owner, prereg_url, irb_protocol, consent_scope, data_floor) values ($1, $2, $3, $4, $5, $6, $7)", [
       s.id,
       s.title,
@@ -137,7 +137,7 @@ export async function bindChannel(db: Db, studyId: string, channel: ChannelRef, 
   const held = (await db.query<{ study_id: string }>("select study_id from study_channels where surface = $1 and channel_id = $2", [channel.surface, channel.channelId])).rows[0];
   if (held?.study_id === studyId) return (await getStudy(db, studyId))!;
   if (held) throw new StudyRefused(`channel ${channel.surface}:${channel.channelId} belongs to study ${held.study_id}`);
-  await appendAudit(db, actor, { t: "study.channel-bound", studyId, surface: channel.surface, channelId: channel.channelId }, async (tx) => {
+  await appendAudit(db, declaredActor(actor), { t: "study.channel-bound", studyId, surface: channel.surface, channelId: channel.channelId }, async (tx) => {
     await tx.query("insert into study_channels (study_id, surface, channel_id) values ($1, $2, $3)", [studyId, channel.surface, channel.channelId]);
   });
   return (await getStudy(db, studyId))!;
@@ -182,10 +182,34 @@ export async function freeze(db: Db, studyId: string, hash: AgentVersionHash, ac
   if (rank(study.dataFloor) >= rank("D3") && check.listing.irbProtocol !== study.irbProtocol) {
     throw new StudyRefused(`${agent.agentId} names IRB protocol ${check.listing.irbProtocol ?? "none"}; study ${studyId} runs under ${study.irbProtocol}`);
   }
-  await appendAudit(db, actor, { t: "agent.frozen", studyId, agentId: agent.agentId, version: hash, note }, async (tx) => {
+  await appendAudit(db, declaredActor(actor), { t: "agent.frozen", studyId, agentId: agent.agentId, version: hash, note }, async (tx) => {
     await tx.query("insert into freezes (study_id, agent_id, hash, frozen_by, note, listing) values ($1, $2, $3, $4, $5, $6)", [studyId, agent.agentId, hash, actor, note, JSON.stringify(check.listing)]);
   });
   return (await activeFreezes(db, studyId)).find((f) => f.agentId === agent.agentId)!;
+}
+
+/**
+ * The listing a freeze of `hash` checks and stores. Only a version whose listing is known can be frozen: the agent's
+ * current version (its published head, or its lab.toml document resolved now), or a version an earlier freeze stored
+ * a listing for. Any other hash is refused, because its ceiling and IRB protocol cannot be checked.
+ */
+export async function freezeListing(db: Db, hash: AgentVersionHash, fixtures: { readonly agents: readonly AgentDocument[]; readonly catalog: () => Promise<Catalog> }): Promise<AgentListing> {
+  const short = hash.slice(0, 12);
+  const agentId = (await db.query<{ agent_id: AgentId }>("select agent_id from agent_versions where hash = $1", [hash])).rows[0]?.agent_id;
+  if (!agentId) throw new StudyRefused(`no stored version ${short}: freeze an agent id, or a hash this deployment has run or published`);
+  const head = (await db.query<{ version: AgentVersionHash; document: unknown; listing: AgentListing }>("select version, document, listing from agent_heads where agent_id = $1", [agentId])).rows[0];
+  const parsed = head ? parseAgentDocument(head.document) : null;
+  const doc = parsed?.ok ? parsed.doc : head ? undefined : fixtures.agents.find((a) => a.agentId === agentId);
+  // Intake resolves the head again per run, so the current version is what the document resolves to now, or what it did at publish.
+  const resolved = doc ? resolveAgent(doc, await fixtures.catalog()) : null;
+  const now = resolved?.ok ? versionHash(resolved.agent) : (head?.version ?? null);
+  const listing = head?.listing ?? (doc ? listingOf(doc) : null);
+  if (listing && (hash === now || hash === head?.version)) return listing;
+  const stored = (await db.query<{ listing: AgentListing }>("select listing from freezes where hash = $1 order by at limit 1", [hash])).rows[0];
+  if (stored) return stored.listing;
+  throw new StudyRefused(
+    `${short} is not ${agentId}'s current version${now ? ` (${now.slice(0, 12)})` : ""}, and no listing is stored for it, so its ceiling and IRB protocol cannot be checked. Freeze the current version, or publish this one again first.`,
+  );
 }
 
 export async function unfreeze(db: Db, studyId: string, agentId: AgentId, actor: MemberId, reason: string): Promise<Deviation> {
@@ -193,7 +217,7 @@ export async function unfreeze(db: Db, studyId: string, agentId: AgentId, actor:
   if (!reason.trim()) throw new StudyRefused("an unfreeze needs a reason; it is recorded as a protocol deviation");
   const active = (await activeFreezes(db, studyId)).find((f) => f.agentId === agentId);
   if (!active) throw new StudyRefused(`study ${studyId} has no active freeze of ${agentId}`);
-  await appendAudit(db, actor, { t: "agent.unfrozen", studyId, agentId, version: active.hash, reason }, async (tx) => {
+  await appendAudit(db, declaredActor(actor), { t: "agent.unfrozen", studyId, agentId, version: active.hash, reason }, async (tx) => {
     await tx.query("update freezes set unfrozen_at = now(), unfrozen_by = $3, reason = $4 where study_id = $1 and agent_id = $2 and unfrozen_at is null", [studyId, agentId, actor, reason]);
   });
   return (await deviations(db, studyId)).findLast((d) => d.agentId === agentId)!;

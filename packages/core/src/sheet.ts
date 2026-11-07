@@ -39,7 +39,7 @@ export function renderSheet(s: SheetInput): string {
   out.push("");
   out.push("## Surfaces");
   out.push("");
-  out.push(table(["Surface", "Kind", "Placement", "Answers shown", "Identifies with"], c.surfaces.map((x) => [x.id, x.kind, x.placement, upTo(x.placement, "chat"), x.kind === "web" ? "nothing (no sign-in yet)" : `bearer token from $${x.tokenEnv}`])));
+  out.push(table(["Surface", "Kind", "Placement", "Answers shown", "Identifies with"], c.surfaces.map((x) => [x.id, x.kind, x.placement, upTo(x.placement, "chat"), x.kind === "web" ? webIdentity(c.signOn) : `bearer token from $${x.tokenEnv}`])));
   out.push("");
   out.push("## Model endpoints");
   out.push("");
@@ -64,7 +64,9 @@ export function renderSheet(s: SheetInput): string {
   const classKeys = Object.entries(c.store.classKeys);
   if (classKeys.length) out.push(`- Classes under their own key: ${classKeys.map(([cls, id]) => `${cls} under ${id}`).join(", ")}. A process not given that key cannot read those bodies.`);
   out.push("- Bodies are addressed by HMAC-SHA256 under the lab's address key, kept wrapped under each payload key, so a hash never changes when `aliquot keys rotate` and `aliquot keys reencrypt` move payloads to a new key.");
-  out.push("- Run records and the audit stream are hash-chained and hold payload hashes and classes, not text.");
+  out.push(
+    "- Run records and the audit stream are hash-chained. Run events name message, prompt and answer text by payload hash and class; the text is in the payload store. The audit stream holds study titles, freeze notes, unfreeze reasons and member ids as written, and some events carry short strings inline (tool names, error reasons).",
+  );
   out.push("");
   out.push("## Retention");
   out.push("");
@@ -116,4 +118,8 @@ export async function labSheet(core: Pick<SharedCore, "db" | "config" | "registr
     agents: docs.map(({ d, source }) => ({ agentId: d.agentId, name: d.name, source, endpointId: d.model.endpointId, modelId: d.model.modelId, ceiling: d.ceiling })),
     studies,
   });
+}
+
+function webIdentity(signOn: LabConfig["signOn"]): string {
+  return signOn ? `sign-on through ${signOn.issuer} ([auth], claim ${signOn.emailClaim})` : "the member id it is given (no [auth] sign-on)";
 }

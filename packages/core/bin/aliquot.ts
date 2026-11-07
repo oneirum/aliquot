@@ -100,9 +100,9 @@ ${REPLAY_USAGE}
 
 Exit codes: 0 ok, 1 no such run, init found no pattern that passes, ask was refused or got no answer, or export
 was refused (no such run or study, --out not empty), 2 usage or setup problem (ask: the door could not be
-reached; replay: no readable bundle), 3 a hash chain is broken or an anchor does not hold, 4 a re-executed run did
-not agree exactly with its record, 5 a run could not be re-executed (its bodies are above the bundle's clearance,
-or its tools are not in this build).
+reached; replay: no readable bundle), 3 a hash chain or a body hash is broken or an anchor does not hold, 4 a
+re-executed run did not agree exactly with its record, 5 a run could not be re-executed (its bodies are above the
+bundle's clearance or the endpoint's placement, it took a steer mid-run, or its tools are not in this build).
 `;
 
 function usage(): never {
@@ -150,6 +150,7 @@ try {
       out: { type: "string" },
       reexecute: { type: "boolean", default: false },
       endpoint: { type: "string" },
+      "endpoint-placement": { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -167,10 +168,10 @@ if (command === "init") {
   if (runId !== undefined || values.json || (values["anchor-log"] !== undefined && values["anchor-key"] === undefined) || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
   process.exit(await init());
 }
-if (command === "replay") process.exit(await replayCommand(positionals.slice(1), { json: values.json, reexecute: values.reexecute, endpoint: values.endpoint }));
+if (command === "replay") process.exit(await replayCommand(positionals.slice(1), { json: values.json, reexecute: values.reexecute, endpoint: values.endpoint, endpointPlacement: values["endpoint-placement"] }));
 if (command === "export") {
   const { runs, study, clearance, out } = values;
-  process.exit(await exportCommand(positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, runs, study, clearance, out }));
+  process.exit(await exportCommand(positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, runs, study, clearance, out, as: values.as }));
 }
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 if (command === "slack") process.exit(await slack(positionals.slice(1)));

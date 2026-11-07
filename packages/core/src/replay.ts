@@ -19,8 +19,9 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join as joinPath } from "node:path";
 import { z } from "zod";
 import { AgentUnavailable, instructionsOf, LOOP_CONTRACT, versionHash, type ResolvedAgent } from "./agent.ts";
-import { cardFor, outlineOf, type AgentCard, type CardCore } from "./card.ts";
-import { DATA_CLASSES, decideEgress, DEFAULT_POLICY, describeRefusal, join, Labelled, type DataClass, type EgressRefusal, type Placement, type SurfaceId } from "./dataclass.ts";
+import { appendAudit, declaredActor } from "./audit.ts";
+import { agentCardSchema, cardFor, outlineOf, type AgentCard, type CardCore } from "./card.ts";
+import { atMost, ceilingOf, DATA_CLASSES, decideEgress, DEFAULT_POLICY, describeRefusal, join, Labelled, type DataClass, type EgressRefusal, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Surface } from "./frontdoor.ts";
 import { createGateway } from "./gateway.ts";
 import { canonicalJson, sha256, type AgentVersionHash, type EntryHash, type PayloadHash, type Sha256, type SnapshotId, type ToolHash } from "./hash.ts";
@@ -61,6 +62,8 @@ export interface PayloadEntry {
   readonly cls: DataClass;
   readonly bytes: number;
   readonly disclosure: Disclosure;
+  /** Plain sha256 of the payload file's canonical {cls, body}, so a reviewer can check the body offline. Null when not included. */
+  readonly sha256: Sha256 | null;
 }
 
 export interface BundleRun {
@@ -73,6 +76,8 @@ export interface BundleRun {
 
 export interface BundleIndex {
   readonly format: typeof BUNDLE_FORMAT;
+  /** The id the lab's audit stream records this export under (export.created). */
+  readonly id: string;
   readonly createdAt: string;
   readonly clearance: DataClass;
   readonly layout: readonly string[];
@@ -89,12 +94,13 @@ export interface BundleIndex {
 const LAYOUT = [
   "bundle.json: this index. clearance is the most restricted class a body in this bundle may have. payloads lists every body the events name, with whether it is included and why not.",
   "events/<run>.jsonl: the run record, one stored event per line. An event's hash is sha256 of the RFC 8785 canonical JSON of {runId, seq, at, cls, prev, event}, and prev is the previous event's hash. runs[].head is the last hash.",
-  "payloads/<hash>.json: {cls, body} for each body at or below clearance. The hash is a keyed address (HMAC under the lab's key): it names the body but cannot be recomputed from it.",
+  "payloads/<hash>.json: {cls, body} for each body at or below clearance. The hash is a keyed address (HMAC under the lab's key): it names the body but cannot be recomputed from it. payloads[].sha256 in this index is plain sha256 of the file's canonical {cls, body}, which anyone can recompute.",
   "agents/<hash>.json: the resolved agent. sha256 of its canonical JSON is the hash every run names. Withheld when its instructions are above clearance.",
   "cards/<hash>.json: the agent card (schemas/agent-card.schema.json): model and placement, tools and their spec hashes, knowledge bases, data ceilings, the system prompt's hash.",
   "snapshots/<id>.json: a pinned knowledge base snapshot's manifest and the entries the runs retrieved. Withheld above clearance. Snapshot ids and entry hashes are keyed addresses.",
   "prov.json: W3C PROV-JSON derived from this bundle. Each run is an activity, the agent version a software agent, the member a person, the bodies and snapshots entities.",
-  "To verify: aliquot replay <dir> recomputes every chain and prints the audit view. --reexecute --endpoint <url> runs each run again against a model, with tools answered from this record.",
+  "To verify: aliquot replay <dir> recomputes every chain and body hash and prints the audit view. --reexecute --endpoint <url> --endpoint-placement <placement> runs each run again against a model, with tools answered from this record.",
+  "What verifying proves: the bundle is internally consistent. It does not prove the bundle is the lab's record unless runs[].head is compared with the lab's anchor or with a hash given out of band.",
 ];
 
 export type ExportScope = { readonly runs: readonly RunId[] } | { readonly study: string };
@@ -110,7 +116,8 @@ export class ExportRefused extends Error {
 const INCLUDED: Disclosure = { t: "included" };
 const withheld = (refusal: EgressRefusal): Disclosure => ({ t: "withheld", refusal, why: describeRefusal(refusal) });
 
-export async function exportBundle(core: CardCore, scope: ExportScope, opts: { readonly clearance: DataClass; readonly out: string }): Promise<BundleIndex> {
+/** actor: the member running the export (self-declared), recorded with the OS user in export.created. */
+export async function exportBundle(core: CardCore, scope: ExportScope, opts: { readonly clearance: DataClass; readonly out: string; readonly actor?: string }): Promise<BundleIndex> {
   const to = { kind: "export", clearance: opts.clearance } as const;
   const study = "study" in scope ? await studyBlock(core, scope.study) : null;
   const ids = "runs" in scope ? scope.runs : await studyRunIds(core.db, scope.study);
@@ -131,19 +138,24 @@ export async function exportBundle(core: CardCore, scope: ExportScope, opts: { r
   for (const ref of runs.flatMap((r) => r.events.flatMap((e) => eventRefs(e.event).map((r) => r.ref)))) {
     if (payloads.has(ref.hash)) continue;
     let disclosure: Disclosure;
+    let digest: Sha256 | null = null;
     try {
       const body = await core.store.get(ref);
       if ("redacted" in body) disclosure = { t: "unavailable", why: "redacted by the lab's retention" };
       else {
         const decision = decideEgress(body, to, core.config.policy);
         disclosure = decision.allow ? INCLUDED : withheld(decision.refusal);
-        if (decision.allow) await write(`payloads/${ref.hash}.json`, { cls: ref.cls, body: body.value });
+        if (decision.allow) {
+          const file = { cls: ref.cls, body: body.value };
+          await write(`payloads/${ref.hash}.json`, file);
+          digest = sha256(canonicalJson(file));
+        }
       }
     } catch (err) {
       if (!(err instanceof PayloadUnavailable)) throw err;
       disclosure = { t: "unavailable", why: err.message };
     }
-    payloads.set(ref.hash, { hash: ref.hash, cls: ref.cls, bytes: ref.bytes, disclosure });
+    payloads.set(ref.hash, { hash: ref.hash, cls: ref.cls, bytes: ref.bytes, disclosure, sha256: digest });
   }
 
   const agents: { hash: AgentVersionHash; body: Disclosure }[] = [];
@@ -191,9 +203,10 @@ export async function exportBundle(core: CardCore, scope: ExportScope, opts: { r
   }
 
   for (const { run, events } of runs) await writeFile(joinPath(opts.out, "events", `${run.runId}.jsonl`), events.map((e) => `${JSON.stringify(e)}\n`).join(""), { flag: "wx" });
-  const index: BundleIndex = { format: BUNDLE_FORMAT, createdAt: new Date().toISOString(), clearance: opts.clearance, layout: LAYOUT, runs: runs.map((r) => r.run), agents, snapshots, tools, study, payloads: [...payloads.values()] };
+  const index: BundleIndex = { format: BUNDLE_FORMAT, id: randomUUID(), createdAt: new Date().toISOString(), clearance: opts.clearance, layout: LAYOUT, runs: runs.map((r) => r.run), agents, snapshots, tools, study, payloads: [...payloads.values()] };
   await write("bundle.json", index);
   await write("prov.json", provOf(index, runs, cards));
+  await appendAudit(core.db, declaredActor(opts.actor ?? null), { t: "export.created", bundleId: index.id, scope, clearance: opts.clearance, runs: index.runs.length });
   return index;
 }
 
@@ -258,6 +271,7 @@ export function provOf(index: BundleIndex, runs: readonly { readonly run: Bundle
         used(e.input, "input", at);
         for (const h of e.history) used(h, "history", at);
       } else if (e.t === "model.requested") generated(e.prompt, "prompt", at);
+      else if (e.t === "tool.requested") generated(e.input, "tool-input", at);
       else if (e.t === "model.completed") {
         generated(e.output, "model-output", at);
         for (const c of e.toolCalls) generated(c.args, "tool-input", at);
@@ -286,6 +300,7 @@ const cls = z.enum(DATA_CLASSES);
 // Every id that becomes part of a file path is checked here, so a bundle.json cannot name a path outside the bundle.
 const indexSchema = z.object({
   format: z.literal(BUNDLE_FORMAT),
+  id: z.string(),
   createdAt: z.string(),
   clearance: cls,
   layout: z.array(z.string()),
@@ -300,7 +315,7 @@ const indexSchema = z.object({
       deviations: z.array(z.looseObject({ agentId: z.string(), hash: z.string(), frozenBy: z.string(), frozenAt: z.string(), note: z.string(), by: z.string(), reason: z.string(), at: z.string() })),
     })
     .nullable(),
-  payloads: z.array(z.object({ hash: hex64, cls, bytes: z.number().int(), disclosure: disclosureSchema })),
+  payloads: z.array(z.object({ hash: hex64, cls, bytes: z.number().int(), disclosure: disclosureSchema, sha256: hex64.nullable() })),
 });
 
 interface Bundle {
@@ -354,18 +369,34 @@ async function runEvents(b: Bundle, run: BundleRun): Promise<{ readonly events: 
   }
   const foreign = events.findIndex((e) => e?.runId !== run.runId);
   const chain = verifyChain(events);
-  const bad = [chain, foreign < 0 ? null : foreign].filter((n): n is number => n !== null);
+  // The index names the run's agent; the record must start by running that same version.
+  const first = events[0]?.event;
+  const wrongStart = first?.t === "run.started" && first.agent === run.agent ? null : 0;
+  const bad = [chain, foreign < 0 ? null : foreign, wrongStart].filter((n): n is number => n !== null);
   if (bad.length) return { events, firstBad: Math.min(...bad) };
   return { events, firstBad: events.length === run.events && events.at(-1)?.hash === run.head ? null : Math.min(events.length, run.events) };
 }
 
-/** The body a ref names, when the bundle includes it at the ref's class. Paths come from the validated index only. */
-async function bodyOf(b: Bundle, ref: PayloadRef): Promise<{ readonly body: unknown } | null> {
+type Body = { readonly t: "body"; readonly body: unknown } | { readonly t: "broken" };
+
+/**
+ * The body a ref names, when the bundle includes it at the ref's class. broken: the file is missing or does not
+ * hash to the sha256 the index commits to. Paths come from the validated index only.
+ */
+async function bodyOf(b: Bundle, ref: PayloadRef): Promise<Body | null> {
   const entry = b.payloads.get(ref.hash);
   if (entry?.disclosure.t !== "included" || entry.cls !== ref.cls) return null;
-  const file = await readJson<{ cls?: unknown; body?: unknown }>(joinPath(b.dir, "payloads", `${entry.hash}.json`));
-  return file.cls === ref.cls ? { body: file.body } : null;
+  let file: { cls?: unknown; body?: unknown };
+  try {
+    file = await readJson<{ cls?: unknown; body?: unknown }>(joinPath(b.dir, "payloads", `${entry.hash}.json`));
+  } catch {
+    return { t: "broken" };
+  }
+  if (entry.sha256 === null || sha256(canonicalJson({ cls: file.cls, body: file.body })) !== entry.sha256) return { t: "broken" };
+  return file.cls === ref.cls ? { t: "body", body: file.body } : null;
 }
+
+const BROKEN_BODY = "the payload file does not hash to its sha256 in bundle.json";
 
 function whyNot(b: Bundle, ref: PayloadRef): string {
   const d = b.payloads.get(ref.hash)?.disclosure;
@@ -384,11 +415,13 @@ async function agentOf(b: Bundle, hash: string): Promise<AgentBody> {
   return agent.schema === 2 ? { t: "verified", agent } : { t: "mismatch", why: `schema ${String(agent.schema)} is not one this build runs` };
 }
 
+/** The card, when it parses as one and names this version. Its placements are the lab's word, not something the hash proves. */
 async function cardOf(b: Bundle, hash: string): Promise<AgentCard | null> {
   const entry = b.index.agents.find((a) => a.hash === hash);
   if (!entry) return null;
   try {
-    return await readJson<AgentCard>(joinPath(b.dir, "cards", `${entry.hash}.json`));
+    const parsed = agentCardSchema.safeParse(await readJson<unknown>(joinPath(b.dir, "cards", `${entry.hash}.json`)));
+    return parsed.success && parsed.data.hash === hash ? parsed.data : null;
   } catch {
     return null;
   }
@@ -414,7 +447,11 @@ export interface AuditToolCall {
 }
 
 export interface AuditRun extends RecordView {
-  readonly version: { readonly hash: string; readonly body: AgentBody["t"]; readonly why: string | null; readonly model: string | null; readonly endpoint: string | null; readonly placement: string | null };
+  /** model and endpoint come from the verified agent body; from the card only when the body is not in the bundle. Placement is the card's word. */
+  readonly version: { readonly hash: string; readonly body: AgentBody["t"]; readonly why: string | null; readonly model: string | null; readonly endpoint: string | null; readonly placement: string | null; readonly from: "agent" | "card" | null };
+  readonly head: string;
+  /** Included bodies whose file does not hash to the index's sha256: a break, as a bad event is. */
+  readonly brokenBodies: readonly string[];
   /** In call order, latest attempt of each. Only from the verified part of the chain. */
   readonly toolCalls: readonly AuditToolCall[];
   readonly answer: Shown | null;
@@ -441,9 +478,15 @@ async function auditRun(b: Bundle, run: BundleRun): Promise<AuditRun> {
   const { events, firstBad } = await runEvents(b, run);
   // A reader is shown only what verifies: rows, calls and bodies stop at the first bad event.
   const trusted = firstBad === null ? events : events.slice(0, firstBad);
+  const read = new Map<string, Body | null>();
+  const body = async (ref: PayloadRef): Promise<Body | null> => {
+    if (!read.has(ref.hash)) read.set(ref.hash, await bodyOf(b, ref));
+    return read.get(ref.hash) ?? null;
+  };
   const shown = async (ref: PayloadRef): Promise<Shown> => {
-    const found = await bodyOf(b, ref);
-    return found ? { t: "body", body: found.body } : { t: "withheld", cls: ref.cls, why: whyNot(b, ref) };
+    const found = await body(ref);
+    if (found?.t === "body") return { t: "body", body: found.body };
+    return { t: "withheld", cls: ref.cls, why: found ? BROKEN_BODY : whyNot(b, ref) };
   };
   const agent = await agentOf(b, run.agent);
   const card = await cardOf(b, run.agent);
@@ -469,10 +512,15 @@ async function auditRun(b: Bundle, run: BundleRun): Promise<AuditRun> {
   }
   const refs = new Map(trusted.flatMap((e) => eventRefs(e.event).map((r) => r.ref)).map((r) => [r.hash as string, r]));
   const withheldRefs = [...refs.values()].filter((r) => b.payloads.get(r.hash)?.disclosure.t !== "included").map((r) => ({ hash: r.hash, cls: r.cls, why: whyNot(b, r) }));
+  const brokenBodies: string[] = [];
+  for (const r of refs.values()) if ((await body(r))?.t === "broken") brokenBodies.push(r.hash);
+  const model = agent.t === "verified" ? { model: agent.agent.model.modelId, endpoint: agent.agent.model.endpointId, from: "agent" as const } : card ? { model: card.model.modelId, endpoint: card.model.endpointId, from: "card" as const } : { model: null, endpoint: null, from: null };
   return {
     ...recordView(run.runId, trusted),
     chain: { events: events.length, firstBad },
-    version: { hash: run.agent, body: agent.t, why: agent.t === "verified" ? null : agent.why, model: card?.model.modelId ?? null, endpoint: card?.model.endpointId ?? null, placement: card?.model.placement ?? null },
+    version: { hash: run.agent, body: agent.t, why: agent.t === "verified" ? null : agent.why, ...model, placement: card?.model.placement ?? null },
+    head: run.head,
+    brokenBodies,
     toolCalls: [...calls.values()],
     answer,
     withheld: withheldRefs,
@@ -483,7 +531,10 @@ const text = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify
 const showLine = (s: Shown): string => (s.t === "body" ? text(s.body) : `withheld (${s.cls}): ${s.why}`);
 
 export function formatAudit(v: AuditView): string {
-  const out = [`bundle   ${v.format}, clearance ${v.clearance}, exported ${v.createdAt}`];
+  const out = [
+    `bundle   ${v.format}, clearance ${v.clearance}, exported ${v.createdAt}`,
+    "proves   the bundle is internally consistent, not that it is the lab's record: compare each head with the lab's anchor or a hash given out of band",
+  ];
   if (v.study) {
     const s = v.study;
     out.push(`study    ${s.study.id}: ${s.study.title}`);
@@ -493,8 +544,10 @@ export function formatAudit(v: AuditView): string {
   }
   for (const r of v.runs) {
     const ver = r.version;
-    out.push("", formatRecordView(r));
-    out.push(`version  body ${ver.body}${ver.why ? ` (${ver.why})` : ""}; model ${ver.model ?? "unknown"} at ${ver.endpoint ?? "unknown"}, placement ${ver.placement ?? "unknown"}`);
+    out.push("", formatRecordView(r), `head     ${r.head}`);
+    const said = ver.from === "card" ? " (from the card, not checked against a version body)" : "";
+    out.push(`version  body ${ver.body}${ver.why ? ` (${ver.why})` : ""}; model ${ver.model ?? "unknown"} at ${ver.endpoint ?? "unknown"}${said}, placement ${ver.placement ?? "unknown"} per the card`);
+    for (const h of r.brokenBodies) out.push(`BROKEN   body ${h.slice(0, 12)}: ${BROKEN_BODY}`);
     r.toolCalls.forEach((c, i) => {
       out.push(`tool ${i + 1}   ${c.tool} (spec ${c.specHash.slice(0, 12) || "none"}) ${showLine(c.input)}${c.failure ? `; failed: ${c.failure}` : ""}`);
       for (const ret of c.retrieved) out.push(`           retrieved from ${ret.snapshot.slice(0, 12)}${ret.truncated ? " (truncated)" : ""}: ${ret.entries.map((e) => (e.path ? `${e.path} "${e.title}"` : e.hash.slice(0, 12))).join(", ") || "nothing"}`);
@@ -515,7 +568,7 @@ export type ReplayReport =
       readonly t: "replayed";
       readonly original: RunId;
       readonly replay: RunId;
-      readonly agreement: { readonly exact: boolean; readonly sameTools: boolean; readonly sameAnswer: boolean };
+      readonly agreement: { readonly exact: boolean; readonly sameTools: boolean; readonly sameAnswer: boolean; readonly sameOutcome: boolean };
       readonly tools: { readonly recorded: readonly ToolStep[]; readonly replay: readonly ToolStep[] };
       readonly answer: { readonly recorded: unknown; readonly replay: unknown };
       readonly outcome: { readonly recorded: RunOutcome | null; readonly replay: RunOutcome | null };
@@ -544,19 +597,24 @@ const NO_HTTP: HttpEgress = {
   },
 };
 
-export async function reexecute(dir: string, opts: { readonly endpoint: string; readonly log?: (line: string) => void }): Promise<ReplayReport[]> {
+/**
+ * endpointPlacement is where the operator says the endpoint runs (default public). It sets every egress decision of
+ * the replay; the card's placements are the lab's deployment, not the reviewer's.
+ */
+export async function reexecute(dir: string, opts: { readonly endpoint: string; readonly endpointPlacement?: Placement; readonly log?: (line: string) => void }): Promise<ReplayReport[]> {
   const b = await openBundle(dir);
   const out: ReplayReport[] = [];
-  for (const run of b.index.runs) out.push(await reexecuteRun(b, run, opts.endpoint, opts.log ?? (() => {})));
+  for (const run of b.index.runs) out.push(await reexecuteRun(b, run, opts.endpoint, opts.endpointPlacement ?? "public", opts.log ?? (() => {})));
   return out;
 }
 
-async function reexecuteRun(b: Bundle, run: BundleRun, endpoint: string, log: (line: string) => void): Promise<ReplayReport> {
+async function reexecuteRun(b: Bundle, run: BundleRun, endpoint: string, placement: Placement, log: (line: string) => void): Promise<ReplayReport> {
   const skip = (why: string): ReplayReport => ({ t: "skipped", original: run.runId, why });
   const { events, firstBad } = await runEvents(b, run);
   if (firstBad !== null) return skip(`its chain is broken at event ${firstBad}`);
   const started = events[0]?.event;
   if (started?.t !== "run.started") return skip("its record does not start with run.started");
+  if (events.some((e) => e.event.t === "inbox.consumed")) return skip("it took a steer or another message mid-run, and re-execution does not deliver recorded inbox items yet");
   const found = await agentOf(b, run.agent);
   if (found.t !== "verified") return skip(`the agent version's body is ${found.t}: ${found.why}`);
   const agent = found.agent;
@@ -573,7 +631,7 @@ async function reexecuteRun(b: Bundle, run: BundleRun, endpoint: string, log: (l
     else short.push(kb.cls);
   }
   const needed = events.flatMap(({ event: e }): PayloadRef[] => {
-    if (e.t === "run.started") return [e.input];
+    if (e.t === "run.started") return [e.input, ...e.history];
     if (e.t === "model.completed") return e.toolCalls.map((c) => c.args);
     if (e.t === "tool.completed") return [e.output];
     if (e.t === "tool.failed") return e.failure.detail ? [e.failure.detail] : [];
@@ -583,11 +641,16 @@ async function reexecuteRun(b: Bundle, run: BundleRun, endpoint: string, log: (l
   const bodies = new Map<string, Labelled<unknown>>();
   for (const ref of needed) {
     const body = await bodyOf(b, ref);
+    if (body?.t === "broken") return skip(`payload ${ref.hash.slice(0, 12)}: ${BROKEN_BODY}`);
     // Stamped at the class the verified event names for it, never at a class the payload file claims.
     if (body) bodies.set(ref.hash, Labelled.stamp(body.body, ref.cls, `bundle:${ref.hash}`));
     else short.push(ref.cls);
   }
   if (short.length) return skip(`re-execution needs clearance ${join(...short)}, and this bundle is ${b.index.clearance}`);
+  // Refused before any request: the gateway would refuse too, but only after the run had started.
+  const sends = join(instructionsOf(agent).cls, ...agent.knowledgeBases.map((k) => k.cls), ...needed.map((r) => r.cls));
+  const ceiling = ceilingOf("model", placement);
+  if (ceiling === "none" || !atMost(sends, ceiling)) return skip(`it would send ${sends} to the model, and an endpoint placed ${placement} receives up to ${ceiling}; pass --endpoint-placement if ${endpoint} runs somewhere that may receive ${sends}`);
 
   const recordedBody = (ref: PayloadRef) => bodies.get(ref.hash)!.value;
   const outcomes = new Map<string, RecordedOutcome>();
@@ -638,13 +701,9 @@ async function reexecuteRun(b: Bundle, run: BundleRun, endpoint: string, log: (l
       else await j.record({ t: "tool.outcome-unknown", callId: call.callId });
     },
   };
-  const card = await cardOf(b, run.agent);
-  const placements = new Map<string, Placement>();
-  for (const m of card ? [card.model, ...card.modelsByClass] : []) if (m.placement) placements.set(m.endpointId, m.placement);
   const endpointIds = new Set([agent.model.endpointId, ...(agent.modelsByClass ?? []).map((m) => m.target.endpointId)]);
-  // Each endpoint keeps the placement the card recorded, so the egress decision is the one the lab made. Unknown is public.
   const gateway = createGateway(
-    [...endpointIds].map((id) => ({ id, baseUrl: endpoint, placement: placements.get(id) ?? "public", supportsLogprobs: false })),
+    [...endpointIds].map((id) => ({ id, baseUrl: endpoint, placement, supportsLogprobs: false })),
     DEFAULT_POLICY,
   );
   const surface: Surface = {
@@ -679,15 +738,17 @@ async function reexecuteRun(b: Bundle, run: BundleRun, endpoint: string, log: (l
   const answers = { recorded: before?.answer ? recordedBody(before.answer) : null, replay: after?.answer ? (replayBody(after.answer) ?? null) : null };
   const sameTools = canonicalJson(original.map((s) => s.call)) === canonicalJson(again.map((s) => s.call));
   const sameAnswer = canonicalJson(answers.recorded) === canonicalJson(answers.replay);
+  const outcome = { recorded: before?.outcome ?? null, replay: after?.outcome ?? null };
+  const sameOutcome = outcome.recorded === outcome.replay;
   const lastStep = journal.events().findLast((e) => e.event.t === "model.completed")?.event;
   return {
     t: "replayed",
     original: run.runId,
     replay: replayId,
-    agreement: { exact: sameTools && sameAnswer, sameTools, sameAnswer },
+    agreement: { exact: sameTools && sameAnswer && sameOutcome, sameTools, sameAnswer, sameOutcome },
     tools: { recorded: original.map((s) => s.call), replay: again.map((s) => s.call) },
     answer: answers,
-    outcome: { recorded: before?.outcome ?? null, replay: after?.outcome ?? null },
+    outcome,
     divergence: firstDivergence(original.map((s) => s.call), again, lastStep?.t === "model.completed" ? lastStep.step : 0),
     unfinished: result.t === "finished" ? null : result.t === "retry" || result.t === "unstartable" ? result.error : result.t,
   };
@@ -751,7 +812,11 @@ export function formatReplay(reports: readonly ReplayReport[]): string {
   return reports
     .flatMap((r) => {
       if (r.t === "skipped") return [`replay   ${r.original}: skipped, ${r.why}`];
-      const verdict = r.agreement.exact ? "agrees exactly" : r.divergence ? `DIVERGED at step ${r.divergence.step}: asked ${step(r.divergence.asked)}, the record has ${step(r.divergence.expected)}` : "same tool calls, DIFFERENT answer";
+      const verdict = r.agreement.exact ? "agrees exactly" : r.divergence
+          ? `DIVERGED at step ${r.divergence.step}: asked ${step(r.divergence.asked)}, the record has ${step(r.divergence.expected)}`
+          : r.agreement.sameAnswer
+            ? "same tool calls and answer, DIFFERENT outcome"
+            : "same tool calls, DIFFERENT answer";
       return [
         `replay   ${r.original} as ${r.replay}: ${verdict}`,
         `  tools recorded  ${r.tools.recorded.map(step).join("; ") || "none"}`,

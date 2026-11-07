@@ -17,7 +17,7 @@
 
 import { z } from "zod";
 import { listingOf, modelFor, resolveAgent, versionHash, type AgentDocument, type AgentId, type AgentListing, type Catalog, type ResolvedAgent } from "./agent.ts";
-import { decideEgress, join, MARKS, rank, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
+import { atMost, decideEgress, join, Labelled, MARKS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { appendAudit, type AuditEvent } from "./audit.ts";
 import { gateClassified, type GateDeps, type GateResult, type InboundMessage } from "./gate.ts";
@@ -26,8 +26,8 @@ import type { AgentVersionHash } from "./hash.ts";
 import { loadVersion } from "./publish.ts";
 import { ENGINES, type Engine, type Queue } from "./queue.ts";
 import type { PayloadRef, PayloadStore, RunId, ThreadKey, Trigger } from "./record.ts";
-import { eligibleOptions, picked, route, ROUTE_BASES, type RouteDecision } from "./router.ts";
-import { pinFor, type Freeze } from "./study.ts";
+import { audienceAdmits, eligibleOptions, picked, route, ROUTE_BASES, type RouteDecision } from "./router.ts";
+import { pinFor, type Freeze, type Study } from "./study.ts";
 
 /** An agent as a member sees it when it answers or when they pick one: its name and the first sentence of its description. */
 export interface AgentChoice {
@@ -144,8 +144,8 @@ export async function intakeTest(msg: InboundMessage, draft: AgentDocument, deps
 type Admitted = Extract<GateResult, { t: "admit" }>;
 type Chosen =
   | { readonly t: "agent"; readonly doc: AgentDocument; readonly route: RunRoute }
-  /** A study channel's frozen version: run by its hash, never resolved again. */
-  | { readonly t: "pinned"; readonly freeze: Freeze }
+  /** A study channel's frozen version: run by its hash, never resolved again. cls is the message's class raised to the study's floor. */
+  | { readonly t: "pinned"; readonly freeze: Freeze; readonly cls: DataClass }
   | Extract<IntakeResult, { t: "refused" | "asked-user" }>;
 
 const threadOf = (msg: InboundMessage) => `${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}` as ThreadKey;
@@ -160,7 +160,7 @@ export function choiceOf(listing: AgentListing): AgentChoice {
  */
 async function chooseAgent(msg: InboundMessage, admitted: Admitted, deps: IntakeDeps, pick: AgentId | undefined): Promise<Chosen> {
   const pin = await pinFor(deps.db, msg.channel);
-  if (pin) return choosePinned(pin.study, pin.freezes, pick);
+  if (pin) return choosePinned(pin.study, pin.freezes, admitted, pick);
   const docs = await deps.agentsFor(msg.channel);
   if (!docs.length) return { t: "refused", userFacing: "No agent is published for this channel." };
   if (docs.length === 1 && pick === undefined) return { t: "agent", doc: docs[0]!, route: { t: "direct" } };
@@ -179,14 +179,23 @@ async function chooseAgent(msg: InboundMessage, admitted: Admitted, deps: Intake
   }
 }
 
-/** One active freeze runs; with several the member picks from the frozen agents only; with none the channel refuses. */
-function choosePinned(study: { readonly id: string; readonly owner: string }, freezes: readonly Freeze[], pick: AgentId | undefined): Chosen {
+/**
+ * The message takes the study's floor first (classes only go up). Of the active freezes, only those whose frozen
+ * listing admits that class and this member can run: one runs, several are offered, none refuses. A study channel is
+ * never routed, so these are the only checks between the message and the frozen version.
+ */
+function choosePinned(study: Study, freezes: readonly Freeze[], admitted: Admitted, pick: AgentId | undefined): Chosen {
   if (!freezes.length) return { t: "refused", userFacing: `This channel belongs to study ${study.id}, which has no frozen agent. Ask the study owner, ${study.owner}.` };
-  const freeze = pick === undefined ? (freezes.length === 1 ? freezes[0] : undefined) : freezes.find((f) => f.agentId === pick);
-  if (freeze) return { t: "pinned", freeze };
+  const cls = join(admitted.cls, study.dataFloor);
+  const fits = freezes.filter((f) => atMost(cls, f.listing.ceiling));
+  const open = fits.filter((f) => audienceAdmits(f.listing.audience, admitted.member, admitted.audiences));
+  const freeze = pick === undefined ? (open.length === 1 ? open[0] : undefined) : open.find((f) => f.agentId === pick);
+  if (freeze) return { t: "pinned", freeze, cls };
   if (pick !== undefined) return { t: "refused", userFacing: "That agent was not one of the choices for this message." };
-  const top = freezes.map((f) => f.agentId);
-  return { t: "asked-user", choices: freezes.map((f) => choiceOf(f.listing)), route: { t: "ask-user", top3: top, probs: {}, confidence: 0, router: "pinned" } };
+  if (!fits.length) return { t: "refused", userFacing: `Not sent. This message is ${cls} in study ${study.id}, above what its frozen agent may receive (${freezes.map((f) => `${f.agentId} up to ${f.listing.ceiling}`).join(", ")}). Ask the study owner, ${study.owner}.` };
+  if (!open.length) return { t: "refused", userFacing: `The frozen agent in study ${study.id} is not open to you. Ask the study owner, ${study.owner}.` };
+  const top = open.map((f) => f.agentId);
+  return { t: "asked-user", choices: open.map((f) => choiceOf(f.listing)), route: { t: "ask-user", top3: top, probs: {}, confidence: 0, router: "pinned" } };
 }
 
 /** The agent of the newest run in this thread, so a follow-up stays with it. */
@@ -202,11 +211,13 @@ async function admit(msg: InboundMessage, key: string, trigger: (member: string)
   const chosen = await choose(admitted);
   if (chosen.t === "pinned") {
     const { freeze } = chosen;
+    const text = admitted.text;
+    const raised = { ...admitted, cls: chosen.cls, text: Labelled.derive(text.value, [text], text.origin, chosen.cls) };
     const agent = await loadVersion(deps.db, freeze.hash);
-    const refused = await residencyRefused(msg, agent, admitted.text, classification, policy, deps);
+    const refused = await residencyRefused(msg, agent, raised.text, classification, policy, deps);
     if (refused) return refused;
     const run = { hash: freeze.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: freeze.studyId, route: { t: "pinned", studyId: freeze.studyId }, answeredBy: choiceOf(freeze.listing), dataClass } as const;
-    return enqueueRun(msg, admitted, run, key, trigger, deps);
+    return enqueueRun(msg, raised, run, key, trigger, deps);
   }
   if (chosen.t !== "agent") return chosen;
   const { doc } = chosen;

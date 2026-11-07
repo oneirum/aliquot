@@ -13,6 +13,7 @@
  * cannot fork the chain.
  */
 
+import { userInfo } from "node:os";
 import type { AgentId } from "./agent.ts";
 import type { DataClass, EgressRefusal } from "./dataclass.ts";
 import type { Db, Tx } from "./db.ts";
@@ -60,7 +61,20 @@ export type AuditEvent =
   | { readonly t: "study.channel-bound"; readonly studyId: string; readonly surface: string; readonly channelId: string }
   | { readonly t: "agent.frozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly note: string }
   /** A protocol deviation: the study owner ended a freeze before the study did, with the reason. */
-  | { readonly t: "agent.unfrozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly reason: string };
+  | { readonly t: "agent.unfrozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly reason: string }
+  /** A reviewer bundle left the database: what it covers, at what clearance, and the id its bundle.json carries. */
+  | { readonly t: "export.created"; readonly bundleId: string; readonly scope: { readonly runs: readonly string[] } | { readonly study: string }; readonly clearance: DataClass; readonly runs: number };
+
+/**
+ * The actor of a CLI write. --as is self-declared, so the row also names the operating-system user who ran it.
+ */
+export function declaredActor(member: string | null): string {
+  let os = "unknown";
+  try {
+    os = userInfo().username;
+  } catch {}
+  return member ? `${member} (os user ${os})` : `os user ${os}`;
+}
 
 export interface AuditRow {
   readonly seq: number;

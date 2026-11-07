@@ -226,8 +226,10 @@ try {
 
   say("PI", "I export the study for the reviewer at D1 clearance.");
   await step("the study's bundle is written at D1", async () => {
-    const r = await aliquot(["export", "--study", "sleep-2026", "--clearance", "D1", "--out", bundle], { writes: [join(work, "bundles")] });
+    const r = await aliquot(["export", "--study", "sleep-2026", "--clearance", "D1", "--out", bundle, "--as", "pi-lab0"], { writes: [join(work, "bundles")] });
     assert.equal(r.code, 0, r.err);
+    const audit = await db.query<{ actor: string }>("select actor from audit_events where event->>'t' = 'export.created'");
+    assert.match(audit.rows[0]?.actor ?? "", /^pi-lab0 \(os user .+\)$/, "the audit stream records the export, with the OS user beside --as");
   });
 
   say("reviewer", "I have only the bundle: no database, no lab.toml, no payload key.");
@@ -236,10 +238,14 @@ try {
     const bare = { PATH: env.PATH!, HOME: env.HOME! };
     const r = await aliquot(["replay", reviewer], { env: bare, cwd: reviewer });
     assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /proves {3}the bundle is internally consistent, not that it is the lab's record/);
   });
-  await step("re-execution with recorded tools against the endpoint agrees exactly", async () => {
+  await step("re-execution sends nothing to an endpoint whose placement the reviewer has not given; placed lab, it agrees exactly", async () => {
     const bare = { PATH: env.PATH!, HOME: env.HOME! };
-    const r = await aliquot(["replay", reviewer, "--reexecute", "--endpoint", agentModel.url], { env: bare, cwd: reviewer });
+    const unplaced = await aliquot(["replay", reviewer, "--reexecute", "--endpoint", agentModel.url], { env: bare, cwd: reviewer });
+    assert.equal(unplaced.code, 5, unplaced.err);
+    assert.match(unplaced.out, /skipped, it would send D1 to the model, and an endpoint placed public receives up to D0/);
+    const r = await aliquot(["replay", reviewer, "--reexecute", "--endpoint", agentModel.url, "--endpoint-placement", "lab"], { env: bare, cwd: reviewer });
     assert.equal(r.code, 0, r.err);
   });
 

@@ -2,12 +2,12 @@
 // the payload key, which snapshot ids are checked with) and call no model and no network.
 import { parseAgentDocument, resolveAgent, versionHash, type AgentId, type MemberId } from "../src/agent.ts";
 import { bootShared, servedNow, type SharedCore } from "../src/boot-shared.ts";
-import { cardFor, listingNow } from "../src/card.ts";
+import { cardFor } from "../src/card.ts";
 import { configProblem } from "../src/config.ts";
 import { isDataClass } from "../src/door-client.ts";
 import type { AgentVersionHash } from "../src/hash.ts";
 import { labSheet } from "../src/sheet.ts";
-import { activeFreezes, bindChannel, createStudy, deviations, freeze, getStudy, StudyRefused, unfreeze } from "../src/study.ts";
+import { activeFreezes, bindChannel, createStudy, deviations, freeze, freezeListing, getStudy, StudyRefused, unfreeze } from "../src/study.ts";
 
 export interface StudyFlags {
   readonly config: string;
@@ -27,7 +27,9 @@ export const STUDY_USAGE = `  study create <id> --title <t> --as <owner> [--floo
   study unfreeze <id> <agent-id> --as <owner> --reason <why>     recorded as a protocol deviation
   study show <id>     the study, its channels, what is frozen in them, and every deviation
                       A study channel runs its frozen version and is never routed. --as names the member acting;
-                      only the study's owner may change it. Every change is in the audit stream.
+                      only the study's owner may change it. --as is self-declared, so every change is in the audit
+                      stream with the OS user who ran the command beside it. freeze takes the agent's current
+                      version, or a version an earlier freeze stored a listing for.
   card <hash>         the agent card of a version as JSON: model and placement, tools with their spec hashes,
                       knowledge base snapshots, data ceilings, the system prompt's hash. schemas/agent-card.schema.json
   sheet               the research IT and IRB sheet for this lab.toml and its studies, as Markdown`;
@@ -115,10 +117,8 @@ async function study(core: SharedCore, words: readonly string[], flags: StudyFla
   if (verb === "freeze") {
     if (!arg || !flags.note) return usage();
     const hash = /^[0-9a-f]{64}$/.test(arg) ? (arg as AgentVersionHash) : await currentVersion(core, arg as AgentId);
-    const agentId = (await core.db.query<{ agent_id: AgentId }>("select agent_id from agent_versions where hash = $1", [hash])).rows[0]?.agent_id;
-    const now = agentId ? await listingNow(core, agentId) : null;
-    if (!now) throw new StudyRefused(`no published or fixture agent for version ${hash.slice(0, 12)}`);
-    const f = await freeze(core.db, id, hash, actor, flags.note, { listing: now.listing, deployed: await servedNow(core) });
+    const listing = await freezeListing(core.db, hash, core);
+    const f = await freeze(core.db, id, hash, actor, flags.note, { listing, deployed: await servedNow(core) });
     out(`study ${id} froze ${f.agentId} at ${f.hash}`, f);
     return 0;
   }

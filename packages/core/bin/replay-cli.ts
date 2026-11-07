@@ -4,20 +4,23 @@
 import { resolve } from "node:path";
 import { bootShared, type SharedCore } from "../src/boot-shared.ts";
 import { configProblem } from "../src/config.ts";
-import type { DataClass } from "../src/dataclass.ts";
+import { PLACEMENTS, type DataClass, type Placement } from "../src/dataclass.ts";
 import type { RunId } from "../src/record.ts";
 import { audit, BundleUnreadable, exportBundle, ExportRefused, formatAudit, formatReplay, reexecute, type ExportScope } from "../src/replay.ts";
 
-export const REPLAY_USAGE = `  export (--runs <id,...> | --study <id>) --clearance D0..D3 --out <dir>
+export const REPLAY_USAGE = `  export (--runs <id,...> | --study <id>) --clearance D0..D3 --out <dir> [--as <member>]
                       write a reviewer bundle: the runs' records, their agent versions and cards, the knowledge base
                       snapshots they pin, and every body at or below --clearance. A body above it is listed by hash
                       and class only. --out must be empty, under a path this process may write: run it as
-                      pnpm aliquot:export, which allows writes under bundles/ only.
-  replay <dir> [--reexecute --endpoint <url>]
+                      pnpm aliquot:export, which allows writes under bundles/ only. The audit stream records the
+                      export with --as (self-declared) and the OS user who ran it.
+  replay <dir> [--reexecute --endpoint <url> [--endpoint-placement lab|institution|approved|zdr|public]]
                       verify every chain in a bundle and print the audit view, from the directory alone: no lab.toml,
                       database or key. --reexecute runs each run again against the OpenAI-compatible model at
                       --endpoint, every tool call answered from the record, and reports agreement or the first
-                      divergence.`;
+                      divergence. --endpoint-placement says where that endpoint runs (default public); a run whose
+                      bodies that placement may not receive is skipped before any request. Verifying shows the bundle
+                      is internally consistent, not that it is the lab's: compare each head with the lab's anchor.`;
 
 /** Exit codes past the shared ones: a broken chain is 3, as for record. */
 export const REPLAY_EXIT = { diverged: 4, skipped: 5 } as const;
@@ -29,9 +32,11 @@ export interface ExportFlags {
   readonly study?: string;
   readonly clearance?: string;
   readonly out?: string;
+  readonly as?: string;
 }
 
 const CLEARANCE = /^D[0-3]$/;
+const isPlacement = (p: string): p is Placement => (PLACEMENTS as readonly string[]).includes(p);
 
 function usage(): number {
   process.stderr.write(`usage:\n${REPLAY_USAGE}\n`);
@@ -67,7 +72,7 @@ export async function exportCommand(words: readonly string[], flags: ExportFlags
     return 2;
   }
   try {
-    const index = await exportBundle(core, scope, { clearance: flags.clearance as DataClass, out });
+    const index = await exportBundle(core, scope, { clearance: flags.clearance as DataClass, out, ...(flags.as ? { actor: flags.as } : {}) });
     const held = index.payloads.filter((p) => p.disclosure.t !== "included").length;
     process.stdout.write(
       flags.json
@@ -84,15 +89,17 @@ export async function exportCommand(words: readonly string[], flags: ExportFlags
   }
 }
 
-export async function replayCommand(words: readonly string[], flags: { readonly json: boolean; readonly reexecute: boolean; readonly endpoint?: string }): Promise<number> {
+export async function replayCommand(words: readonly string[], flags: { readonly json: boolean; readonly reexecute: boolean; readonly endpoint?: string; readonly endpointPlacement?: string }): Promise<number> {
   const [dir, ...rest] = words;
   if (!dir || rest.length || flags.reexecute !== !!flags.endpoint) return usage();
   if (flags.endpoint && !/^https?:\/\/[^/]/.test(flags.endpoint)) return usage();
+  const placement = flags.endpointPlacement ?? "public";
+  if (!isPlacement(placement) || (flags.endpointPlacement && !flags.endpoint)) return usage();
   try {
     const view = await audit(dir);
-    const reports = flags.endpoint ? await reexecute(dir, { endpoint: flags.endpoint }) : null;
+    const reports = flags.endpoint ? await reexecute(dir, { endpoint: flags.endpoint, endpointPlacement: placement }) : null;
     process.stdout.write(flags.json ? `${JSON.stringify(reports ? { audit: view, replay: reports } : view, null, 2)}\n` : `${formatAudit(view)}${reports ? `\n\n${formatReplay(reports)}` : ""}\n`);
-    if (view.runs.some((r) => r.chain.firstBad !== null)) return 3;
+    if (view.runs.some((r) => r.chain.firstBad !== null || r.brokenBodies.length)) return 3;
     if (reports?.some((r) => r.t === "replayed" && !r.agreement.exact)) return REPLAY_EXIT.diverged;
     if (reports?.some((r) => r.t === "skipped")) return REPLAY_EXIT.skipped;
     return 0;

@@ -1,5 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { userInfo } from "node:os";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { listingOf, LOOP_CONTRACT, parseAgentDocument, resolveAgent, versionHash, type AgentDocument, type AgentId, type Catalog, type Deployed, type MemberId } from "../packages/core/src/agent.ts";
@@ -14,7 +15,7 @@ import { confirmPublish, draftHashOf, publishedAgentsFor } from "../packages/cor
 import { createQueue } from "../packages/core/src/queue.ts";
 import { createPayloadStore, oneKey } from "../packages/core/src/record.ts";
 import { renderSheet } from "../packages/core/src/sheet.ts";
-import { bindChannel, createStudy, deviations, freeze, pinFor, StudyRefused, unfreeze } from "../packages/core/src/study.ts";
+import { bindChannel, createStudy, deviations, freeze, freezeListing, pinFor, StudyRefused, unfreeze } from "../packages/core/src/study.ts";
 import { builtinTools, registryOf } from "../packages/core/src/tools.ts";
 import { WEB_SURFACE } from "../packages/core/src/surfaces/web.ts";
 import { freshDatabase } from "./db.ts";
@@ -71,8 +72,15 @@ const intakeDeps: IntakeDeps = {
   agentsFor: (channel) => publishedAgentsFor(db, channel),
 };
 let messages = 0;
-const ask = (channelId: string) =>
-  intake({ channel: { surface: WEB_SURFACE, channelId }, threadId: `t${messages}`, messageId: `m${messages++}`, platformUserId: "member-1", text: "Office hours?", attachments: [], addressed: true, at: new Date().toISOString() }, intakeDeps);
+const ask = (channelId: string, deps: IntakeDeps = intakeDeps) =>
+  intake({ channel: { surface: WEB_SURFACE, channelId }, threadId: `t${messages}`, messageId: `m${messages++}`, platformUserId: "member-1", text: "Office hours?", attachments: [], addressed: true, at: new Date().toISOString() }, deps);
+async function studyOn(id: string, d: AgentDocument, floor: "D1" | "D2", listing = listingOf(d)): Promise<AgentVersionHash> {
+  const h = await stored(d);
+  await createStudy(db, { id, title: id, owner: pi, dataFloor: floor });
+  await bindChannel(db, id, { surface: WEB_SURFACE, channelId: id }, pi);
+  await freeze(db, id, h, pi, "v", { listing, deployed });
+  return h;
+}
 
 test("a study channel runs its frozen hash: a later publish moves the open channel and not the study's, and unfreezing is a deviation", async () => {
   const v1 = doc({ agentId: "handbook", channels: ["web:open", "web:sleep-study"] });
@@ -112,13 +120,14 @@ test("a study channel runs its frozen hash: a later publish moves the open chann
 
   const audit = await loadAudit(db);
   assert.equal(verifyAudit(audit), null);
+  const asPi = `pia (os user ${userInfo().username})`;
   assert.deepEqual(
     audit.filter((r) => r.event.t.startsWith("study.") || r.event.t.startsWith("agent.frozen") || r.event.t === "agent.unfrozen").map((r) => [r.actor, r.event.t]),
     [
-      ["pia", "study.created"],
-      ["pia", "study.channel-bound"],
-      ["pia", "agent.frozen"],
-      ["pia", "agent.unfrozen"],
+      [asPi, "study.created"],
+      [asPi, "study.channel-bound"],
+      [asPi, "agent.frozen"],
+      [asPi, "agent.unfrozen"],
     ],
   );
 });
@@ -201,11 +210,51 @@ test("the sheet lists every surface, endpoint and host with its placement and ce
   const rows = (heading: string) => sheet.split(`## ${heading}`)[1]!.split("\n## ")[0]!.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| ---"));
   assert.deepEqual(rows("Surfaces"), [
     "| Surface | Kind | Placement | Answers shown | Identifies with |",
-    "| web | web | lab | up to D3 | nothing (no sign-in yet) |",
+    "| web | web | lab | up to D3 | the member id it is given (no [auth] sign-on) |",
     "| slack | slack | approved | up to D2 | bearer token from $SLACK_SURFACE_TOKEN |",
   ]);
   assert.deepEqual(rows("Model endpoints"), ["| Endpoint | Base URL | Placement | Receives |", "| agentlab | http://127.0.0.1:9001/v1 | lab | up to D3 |", "| hosted | https://api.example.org/v1 | zdr | up to D1 |"]);
   assert.equal(rows("Tool hosts")[1], "| api.openalex.org | public | up to D0 |");
   assert.match(sheet, /- 1 participant id pattern from lab.toml/);
   assert.match(sheet, /No study is registered\./);
+});
+
+test("study freeze takes the agent's current version, or one an earlier freeze stored a listing for; another older hash is refused", async () => {
+  const fixtures = { agents: [], catalog: async () => catalog };
+  const publish = async (d: AgentDocument, note: string) => {
+    await confirmPublish({ db, catalog: async () => catalog }, d, draftHashOf(d), { id: pi, role: "pi" }, note);
+    return stored(d);
+  };
+  const a1 = doc({ agentId: "roster", channels: ["web:roster-study"] });
+  const h1 = await publish(a1, "first");
+  assert.deepEqual(await freezeListing(db, h1, fixtures), listingOf(a1));
+  await createStudy(db, { id: "roster-study", title: "Roster", owner: pi, dataFloor: "D1" });
+  await freeze(db, "roster-study", h1, pi, "v1", { listing: await freezeListing(db, h1, fixtures), deployed });
+
+  const h2 = await publish(doc({ agentId: "roster", channels: ["web:roster-study"], instructions: "Answer in one word." }), "second");
+  const a3 = doc({ agentId: "roster", channels: ["web:roster-study"], ceiling: "D2", instructions: "Answer in two words." });
+  const h3 = await publish(a3, "third");
+  assert.equal((await freezeListing(db, h3, fixtures)).ceiling, "D2", "the head's listing");
+  assert.deepEqual(await freezeListing(db, h1, fixtures), listingOf(a1), "the listing the earlier freeze stored");
+  assert.equal(
+    await refusal(freezeListing(db, h2, fixtures)),
+    `${h2.slice(0, 12)} is not roster's current version (${h3.slice(0, 12)}), and no listing is stored for it, so its ceiling and IRB protocol cannot be checked. Freeze the current version, or publish this one again first.`,
+  );
+  assert.match(await refusal(freezeListing(db, "9".repeat(64) as AgentVersionHash, fixtures)), /^no stored version 999999999999:/);
+});
+
+test("a study channel checks each frozen listing against the message: the study's floor raises its class, and a ceiling or audience that does not admit it refuses", async () => {
+  await studyOn("floor-study", doc({ agentId: "floored", channels: ["web:floor-study"], ceiling: "D2" }), "D2");
+  const raised = await ask("floor-study");
+  assert.ok(raised.t === "enqueued", JSON.stringify(raised));
+  const job = await db.query<{ payload: { input: { cls: string } } }>("select payload from jobs where id = $1", [raised.runId]);
+  assert.equal(job.rows[0]?.payload.input.cls, "D2", "a D1 message is stored and sent at the study's floor, D2");
+
+  await studyOn("low-study", doc({ agentId: "low", channels: ["web:low-study"] }), "D1");
+  const hot: IntakeDeps = { ...intakeDeps, gate: { ...intakeDeps.gate, channelFloor: async () => "D2" } };
+  assert.deepEqual(await ask("low-study", hot), { t: "refused", userFacing: "Not sent. This message is D2 in study low-study, above what its frozen agent may receive (low up to D1). Ask the study owner, pia." });
+
+  const closed = doc({ agentId: "closed", channels: ["web:closed-study"] });
+  await studyOn("closed-study", closed, "D1", { ...listingOf(closed), audience: { t: "pi-only" } });
+  assert.deepEqual(await ask("closed-study"), { t: "refused", userFacing: "The frozen agent in study closed-study is not open to you. Ask the study owner, pia." });
 });

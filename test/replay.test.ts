@@ -17,6 +17,7 @@ import { drive, type LoopDeps } from "../packages/core/src/loop.ts";
 import { loadVersion } from "../packages/core/src/publish.ts";
 import { createQueue } from "../packages/core/src/queue.ts";
 import { createPayloadStore, oneKey, openJournal, type PayloadRef, type RunEvent, type RunId, type ThreadKey } from "../packages/core/src/record.ts";
+import { loadAudit } from "../packages/core/src/audit.ts";
 import { audit, exportBundle, ExportRefused, reexecute, type BundleIndex } from "../packages/core/src/replay.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 import { createStudy, freeze, unfreeze } from "../packages/core/src/study.ts";
@@ -121,19 +122,22 @@ test("a study export holds both runs, the deviation, and every body at or below 
 
   assert.deepEqual(
     index.payloads.find((p) => p.hash === restricted.input.hash),
-    { hash: restricted.input.hash, cls: "D3", bytes: restricted.input.bytes, disclosure: { t: "withheld", refusal: { code: "above-clearance", payload: "D3", clearance: "D1" }, why: "D3 exceeds the reviewer clearance D1" } },
+    { hash: restricted.input.hash, cls: "D3", bytes: restricted.input.bytes, disclosure: { t: "withheld", refusal: { code: "above-clearance", payload: "D3", clearance: "D1" }, why: "D3 exceeds the reviewer clearance D1" }, sha256: null },
   );
   assert.equal(existsSync(join(bundle, "payloads", `${restricted.input.hash}.json`)), false);
   const leaks = filesUnder(bundle).filter((f) => readFileSync(f, "utf8").includes("P-4417"));
   assert.deepEqual(leaks, [], "the D3 question is in no file of a D1 bundle");
   await assert.rejects(exportBundle(core, { runs: [open.runId] }, { clearance: "D1", out: bundle }), ExportRefused);
+  const exported = (await loadAudit(db)).filter((r) => r.event.t === "export.created").map((r) => [r.actor.replace(/os user .*/, "os user"), r.event]);
+  assert.deepEqual(exported, [["os user", { t: "export.created", bundleId: index.id, scope: { study: "sleep-2026" }, clearance: "D1", runs: 2 }]]);
 });
 
 test("from the bundle alone, every chain verifies and the audit view shows the tool call, the entries retrieved and the answer", async () => {
   const view = await audit(bundle);
   assert.deepEqual(view.runs.map((r) => r.chain.firstBad), [null, null]);
   const [first, second] = view.runs;
-  assert.deepEqual(first!.version, { hash, body: "verified", why: null, model: "scripted-1", endpoint: "local", placement: "lab" });
+  assert.deepEqual(first!.version, { hash, body: "verified", why: null, model: "scripted-1", endpoint: "local", placement: "lab", from: "agent" });
+  assert.deepEqual(view.runs.map((r) => r.brokenBodies), [[], []]);
   assert.deepEqual(first!.toolCalls.map((c) => [c.tool, c.input]), [["kb_search", { t: "body", body: { query: QUESTION, k: 3 } }]]);
   assert.deepEqual(first!.toolCalls[0]!.retrieved[0]!.entries.map((e) => e.path), ["office-hours.md", "equipment.md", "onboarding.md"]);
   const answer = eventAt(open.runId, lines(open.runId).length - 1);
@@ -156,6 +160,28 @@ test("tampering with one event line makes the audit report that seq as the break
   assert.equal(view.runs[0]!.rows.length, 3, "only the verified events are shown");
 });
 
+test("replay checks what bundle.json says against the files: an edited body, a run naming another agent, a card for another version", async () => {
+  const edited = join(scratch, "edited");
+  cpSync(bundle, edited, { recursive: true });
+  writeFileSync(join(edited, "payloads", `${open.input.hash}.json`), JSON.stringify({ cls: "D1", body: "What are the office hours on Sunday?" }));
+  const indexFile = join(edited, "bundle.json");
+  const raw = JSON.parse(readFileSync(indexFile, "utf8")) as { runs: { agent: string }[] };
+  raw.runs[1]!.agent = "0".repeat(64);
+  writeFileSync(indexFile, JSON.stringify(raw));
+  const cardFile = join(edited, "cards", `${hash}.json`);
+  writeFileSync(cardFile, JSON.stringify({ ...JSON.parse(readFileSync(cardFile, "utf8")), hash: "1".repeat(64), model: { endpointId: "elsewhere", modelId: "other-model", placement: "public", receivesUpTo: "D0", params: {} } }));
+
+  const view = await audit(edited);
+  assert.deepEqual(view.runs[0]!.brokenBodies, [open.input.hash]);
+  assert.deepEqual(view.runs[1]!.chain.firstBad, 0, "the record's run.started names another agent than the index");
+  assert.deepEqual(view.runs[0]!.version, { hash, body: "verified", why: null, model: "scripted-1", endpoint: "local", placement: null, from: "agent" });
+  const plain = await cli(["replay", edited]);
+  assert.equal(plain.code, 3);
+  assert.match(plain.stdout, new RegExp(`BROKEN   body ${open.input.hash.slice(0, 12)}: the payload file does not hash to its sha256 in bundle.json`));
+  const [first] = await reexecute(edited, { endpoint: model.url, endpointPlacement: "lab" });
+  assert.deepEqual(first, { t: "skipped", original: open.runId, why: `payload ${open.input.hash.slice(0, 12)}: the payload file does not hash to its sha256 in bundle.json` });
+});
+
 test("prov.json names the run as an activity, the version as a SoftwareAgent, and the input used and the answer generated", () => {
   const prov = JSON.parse(readFileSync(join(bundle, "prov.json"), "utf8")) as Record<string, Record<string, Record<string, unknown>>>;
   const activity = `labh:run-${open.runId}`;
@@ -167,22 +193,38 @@ test("prov.json names the run as an activity, the version as a SoftwareAgent, an
   const pairs = (kind: string) => Object.values(prov[kind]!).map((r) => [r["prov:activity"], r["prov:entity"]]);
   assert.ok(pairs("used").some(([a, e]) => a === activity && e === `labh:payload-${open.input.hash}`), "the run used its input");
   assert.ok(pairs("wasGeneratedBy").some(([a, e]) => a === activity && e === `labh:payload-${answer.answer!.hash}`), "the run generated its answer");
+  const requested = lines(open.runId).map((l) => (JSON.parse(l) as { event: RunEvent }).event).find((e) => e.t === "tool.requested");
+  assert.ok(requested?.t === "tool.requested");
+  assert.deepEqual((prov.entity![`labh:payload-${requested.input.hash}`] as Record<string, unknown>)["labh:role"], ["tool-input"]);
   assert.deepEqual(prov.entity![`labh:payload-${restricted.input.hash}`], { "prov:type": { $: "labh:Payload", type: "prov:QUALIFIED_NAME" }, "labh:class": "D3", "labh:bytes": restricted.input.bytes, "labh:included": false, "labh:role": ["input"] });
 });
 
 test("re-execution with recorded tools reproduces the recorded tool sequence exactly, and skips the run whose bodies are above the clearance", async () => {
   model.script = "search-then-answer";
-  const [first, second] = await reexecute(bundle, { endpoint: model.url });
+  const [first, second] = await reexecute(bundle, { endpoint: model.url, endpointPlacement: "lab" });
   assert.ok(first?.t === "replayed");
   assert.deepEqual(first.tools, { recorded: [["kb_search", { query: QUESTION, k: 3 }]], replay: [["kb_search", { query: QUESTION, k: 3 }]] });
-  assert.deepEqual([first.agreement, first.divergence, first.outcome, first.unfinished], [{ exact: true, sameTools: true, sameAnswer: true }, null, { recorded: "answered", replay: "answered" }, null]);
+  assert.deepEqual([first.agreement, first.divergence, first.outcome, first.unfinished], [{ exact: true, sameTools: true, sameAnswer: true, sameOutcome: true }, null, { recorded: "answered", replay: "answered" }, null]);
   assert.deepEqual(second, { t: "skipped", original: restricted.runId, why: "re-execution needs clearance D3, and this bundle is D1" });
+});
+
+test("re-execution takes the endpoint's placement from the operator: a D3 run is not sent to an endpoint placed public, whatever the card says", async () => {
+  const d3 = join(scratch, "study-d3");
+  await exportBundle(core, { runs: [restricted.runId] }, { clearance: "D3", out: d3 });
+  assert.equal(JSON.parse(readFileSync(join(d3, "cards", `${hash}.json`), "utf8")).model.placement, "lab", "the card says lab");
+  const before = model.bodies.length;
+  const [refused] = await reexecute(d3, { endpoint: model.url });
+  assert.deepEqual(refused, { t: "skipped", original: restricted.runId, why: `it would send D3 to the model, and an endpoint placed public receives up to D0; pass --endpoint-placement if ${model.url} runs somewhere that may receive D3` });
+  assert.equal(model.bodies.length, before, "the endpoint received no request");
+  const [lab] = await reexecute(d3, { endpoint: model.url, endpointPlacement: "lab" });
+  assert.equal(lab?.t, "replayed");
+  assert.ok(model.bodies.slice(before).some((b) => JSON.stringify(b).includes("P-4417")), "placed lab, the same run does send the D3 question");
 });
 
 test("a model that asks for a call the record does not have is reported at its first divergence", async () => {
   model.script = "search-read-answer";
   try {
-    const [first] = await reexecute(bundle, { endpoint: model.url });
+    const [first] = await reexecute(bundle, { endpoint: model.url, endpointPlacement: "lab" });
     assert.ok(first?.t === "replayed");
     const read: readonly [string, unknown] = ["kb_read", { paths: ["office-hours.md", "equipment.md", "onboarding.md"] }];
     assert.deepEqual(first.divergence, { step: 2, asked: read, expected: "no further tool call" });
@@ -206,17 +248,18 @@ test("aliquot replay verifies a bundle with no lab.toml or database, and --reexe
   await exportBundle(core, { runs: [open.runId] }, { clearance: "D1", out: single });
   const plain = await cli(["replay", single]);
   assert.equal(plain.code, 0);
+  assert.match(plain.stdout, /proves {3}the bundle is internally consistent, not that it is the lab's record/);
   assert.match(plain.stdout, new RegExp(`chain    verified: chain intact over ${lines(open.runId).length} events`));
   assert.match(plain.stdout, /tool 1 {3}kb_search \(spec [0-9a-f]{12}\) \{"k":3,"query":"What are the office hours\?"\}/);
 
   assert.equal((await cli(["replay", join(scratch, "tampered")])).code, 3);
-  assert.equal((await cli(["replay", bundle, "--reexecute", "--endpoint", model.url])).code, 5, "a skipped run is not agreement");
-  const agreed = await cli(["replay", single, "--reexecute", "--endpoint", model.url]);
+  assert.equal((await cli(["replay", bundle, "--reexecute", "--endpoint", model.url, "--endpoint-placement", "lab"])).code, 5, "a skipped run is not agreement");
+  const agreed = await cli(["replay", single, "--reexecute", "--endpoint", model.url, "--endpoint-placement", "lab"]);
   assert.equal(agreed.code, 0);
   assert.match(agreed.stdout, new RegExp(`replay   ${open.runId} as [0-9a-f-]{36}: agrees exactly`));
   model.script = "search-read-answer";
   try {
-    const diverged = await cli(["replay", single, "--reexecute", "--endpoint", model.url]);
+    const diverged = await cli(["replay", single, "--reexecute", "--endpoint", model.url, "--endpoint-placement", "lab"]);
     assert.equal(diverged.code, 4);
     assert.match(diverged.stdout, /DIVERGED at step 2: asked kb_read \{"paths":\["office-hours.md","equipment.md","onboarding.md"\]\}, the record has no further tool call/);
   } finally {
@@ -235,5 +278,5 @@ test("aliquot export writes a bundle only where the permission flags allow, and 
   const wrote = await cli(args, [`--allow-fs-write=${out}/*`], env);
   assert.equal(wrote.code, 0);
   assert.match(wrote.stdout, /wrote .*cli-bundle: 1 runs, \d+ bodies included, 0 withheld at clearance D1/);
-  assert.equal((await cli(["replay", out, "--reexecute", "--endpoint", model.url])).code, 0);
+  assert.equal((await cli(["replay", out, "--reexecute", "--endpoint", model.url, "--endpoint-placement", "lab"])).code, 0);
 });
