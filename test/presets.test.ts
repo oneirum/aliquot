@@ -152,3 +152,14 @@ test("the README's preset tables are what pnpm presets:table prints", async () =
   const { presetTables } = await import("../scripts/presets-table.ts");
   assert.ok(readFileSync(join(root, "README.md"), "utf8").includes(presetTables()), "run pnpm presets:table and paste its output into README \"Your campus's tiers\"");
 });
+
+test("the review pack's summary lists the classes with the campus tier beside each, and the preset's note", async () => {
+  const { renderPack } = await import("../packages/core/src/review/render.ts");
+  const summary = renderPack(withPreset("uw-madison"), { configPath: "lab.toml", configSha256: "0".repeat(64) })["summary.md"]!;
+  assert.match(summary, /\| `phi` \| UW-Madison Restricted \| D3 \| no model: refused at the door \| hash, 30 days \|/);
+  assert.match(summary, /\| `confidential` \| UW-Madison Sensitive \| D2 \| an approved hosted model \| text \|/);
+  assert.match(summary, /preset `uw-madison` \(UW-504, https:\/\/policy\.wisc\.edu\/library\/UW-504\)\. A starting point for your data steward/);
+  const plain = renderPack(parseConfig(lab(), "/lab.toml"), { configPath: "lab.toml", configSha256: "0".repeat(64) })["summary.md"]!;
+  assert.match(plain, /\| `public` \| D0 \| an approved hosted model \| text \|/);
+  assert.doesNotMatch(plain, /Campus tier/);
+});

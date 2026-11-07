@@ -143,7 +143,7 @@ With no `[classes]` table a lab has the five built-in classes, which behave exac
 
 ### Your campus's tiers
 
-A reviewer at UW-Madison reads "Restricted", at Michigan "High", at Harvard "Level 4". `preset = "uw-madison"` (or `"umich"`, `"harvard"`) at the top of `lab.toml` maps the campus's tiers onto the classes, adds the classes the campus needs (PHI, controlled-access, export-controlled, and at Michigan payment cards), and shows the campus tier beside the class wherever a member or a reviewer reads one: every refusal (chat, Slack, Teams, a run's notice, a knowledge base source refused at compile) and the studio's Data classes panel, which links each tier to the page it rests on. `pnpm walk:policy --preset uw-madison` walks it on the synthetic lab.
+A reviewer at UW-Madison reads "Restricted", at Michigan "High", at Harvard "Level 4". `preset = "uw-madison"` (or `"umich"`, `"harvard"`) at the top of `lab.toml` maps the campus's tiers onto the classes, adds the classes the campus needs (PHI, controlled-access, export-controlled, and at Michigan payment cards), and shows the campus tier beside the class wherever a member or a reviewer reads one: every refusal (chat, Slack, Teams, a run's notice, a knowledge base source refused at compile) and the studio's Data classes panel, which links each tier to the page it rests on, and the review pack's summary (`pnpm review-pack`), which lists every class with its tier and the preset's note. `pnpm walk:policy --preset uw-madison` walks it on the synthetic lab.
 
 ```text
 Not sent. Data class phi (UW-Madison Restricted), found by detector ssn; rule model_tier = "none". This message
@@ -486,6 +486,12 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 ## For research IT and the IRB
 
 [`docs/for-research-it-and-irb.md`](docs/for-research-it-and-irb.md) is for the people who decide whether a lab may run Aliquot: where each class of data may go, what runs where, what is stored and under which key, and what is not covered yet.
+
+## For a security review
+
+A campus security review asks control by control. `pnpm review-pack --config config/lab.toml` writes one answer per control for your lab: HIPAA Security Rule sections, every NIST SP 800-171 Rev. 3 family, and the HECVAT 4 question areas (in our words, not EDUCAUSE's). Each row says what Aliquot does toward the control, what your `lab.toml` makes true for it, and its status: met, partly, not met, or the lab's responsibility. A row reads met only when it names the tests that prove it, and a test in the suite fails when a cited test does not exist. Change `lab.toml` and the rows that depend on it change with it. The pack never says a deployment is compliant; that call is your institution's.
+
+The pack for the compose check's lab is committed: [summary](docs/review/check/summary.md) (not met first), [HIPAA](docs/review/check/hipaa.md), [NIST 800-171](docs/review/check/nist-800-171.md), [HECVAT answers](docs/review/check/hecvat-answers.md). Sign-on, key rotation and retention read not met until they land in 0.7.
 
 ## Working with a coding agent
 

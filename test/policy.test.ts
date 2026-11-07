@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parseConfig } from "../packages/core/src/config.ts";
 import { DEFAULT_POLICY, join as joinClasses, type DataClass } from "../packages/core/src/dataclass.ts";
 import { classifyText } from "../packages/core/src/gate.ts";
-import { buildPolicy, classify, defaultPolicy, DETECTOR_GROUPS, DETECTORS, runRefusalText } from "../packages/core/src/policy.ts";
+import { buildPolicy, classify, defaultPolicy, DETECTOR_GROUPS, DETECTORS, RUN_REFUSED, runRefusalText } from "../packages/core/src/policy.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const labPatterns = [/\bP-\d{5}\b/];
@@ -153,7 +153,16 @@ test("a detector a lab class names leaves the built-in class that held it", () =
 test("a run's refusal notice names the message's class, or every class at the refused level", () => {
   const p = buildPolicy({ controlled: { model_tier: "local", detectors: ["dua-marker"] } }, DEFAULT_POLICY, labPatterns);
   const refusal = { code: "class-above-ceiling", payload: "D3", ceiling: "D2" } as const;
-  assert.equal(runRefusalText(p, refusal, { id: "controlled", rule: "detector:dua-marker" }), 'This request cannot be answered here. Data class controlled, found by detector dua-marker; rule model_tier = "local": this agent\'s model may receive D2 at most and the content is D3. The run\'s record shows the refusal.');
-  assert.match(runRefusalText(p, refusal, { id: "internal", rule: "floor:D1" })!, /^This request cannot be answered here\. Data class restricted or controlled; rule model_tier = "local"/);
+  assert.equal(runRefusalText(p, refusal, { id: "controlled", rule: "detector:dua-marker" }), 'This request cannot be answered here: it contains restricted data that the configured model may not receive. Data class controlled, found by detector dua-marker; rule model_tier = "local": this agent\'s model may receive D2 at most and the content is D3. The run\'s record shows the refusal.');
+  assert.match(runRefusalText(p, refusal, { id: "internal", rule: "floor:D1" })!, /^This request cannot be answered here: it contains restricted data that the configured model may not receive\. Data class restricted or controlled; rule model_tier = "local"/);
   assert.equal(runRefusalText(p, { code: "host-not-declared", host: "x" }), null);
+});
+
+test("the default policy's refused-run notice still opens with the sentence slice1 check 4 reads, then names the class and rule", () => {
+  const p = defaultPolicy(DEFAULT_POLICY, labPatterns);
+  const msg = { id: "restricted", rule: "detector:participant-id" };
+  const text = runRefusalText(p, { code: "class-above-ceiling", payload: "D3", ceiling: "D1" }, msg)!;
+  assert.ok(text.startsWith(RUN_REFUSED), text);
+  assert.match(text, /restricted data/);
+  assert.match(text, /Data class restricted, found by detector participant-id; rule model_tier = "local"/);
 });
