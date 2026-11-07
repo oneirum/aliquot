@@ -31,11 +31,12 @@ export function chatPage(where = "", me: { readonly id: string; readonly name: s
 <title>Ask the lab · Aliquot</title>
 ${APP_HEAD}
 <style>${BASE_CSS}
-:root { --field: var(--surface); --field-line: var(--line); --field-focus: rgb(28 27 25 / 0.22); --edge: rgb(28 27 25 / 0.16); --accent: var(--ink); --accent-ink: var(--bg); }
-@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: rgb(236 235 230 / 0.16); --edge: rgb(236 235 230 / 0.2); } }
+:root { --field: var(--surface); --field-line: var(--line); --field-focus: var(--muted); --edge: rgb(28 27 25 / 0.16); --accent: var(--ink); --accent-ink: var(--bg); }
+@media (prefers-color-scheme: dark) { :root { --field: #252523; --field-line: transparent; --field-focus: var(--muted); --edge: rgb(236 235 230 / 0.2); } }
 html { scroll-padding: 64px 0 120px; }
 body { min-height: 100dvh; }
 svg { display: block; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .icon { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border: 0; border-radius: 8px; background: none; color: var(--ink-2); cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
 .icon svg { width: 16px; height: 16px; }
 .icon:active { transform: scale(0.96); }
@@ -179,7 +180,8 @@ button.verify[aria-disabled="true"] { cursor: default; color: var(--muted); tran
 
 .compose { order: 8; position: sticky; bottom: 0; z-index: 1; padding: 24px max(24px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(24px, var(--safe-l)); background: linear-gradient(transparent, var(--bg) 24px); }
 .box { display: flex; align-items: flex-end; gap: 8px; max-width: 720px; margin: 0 auto; padding: 9px 11px; border: 1px solid var(--field-line); border-radius: 24px; background: var(--field); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04); transition: border-color 160ms ease; }
-.box:focus-within { border-color: var(--field-focus); }
+/* The composer's focus ring is the box's: its border and a 1 px outline in --muted, at least 3:1 against the page. */
+.box:focus-within { border-color: var(--field-focus); outline: 1px solid var(--field-focus); }
 textarea { flex: 1; min-width: 0; max-height: 192px; resize: none; border: 0; outline: 0; padding: 6px 0; background: transparent; color: var(--ink); font: 16px/24px var(--sans); }
 textarea::placeholder { color: var(--muted); }
 textarea:focus-visible { outline: none; }
@@ -242,7 +244,8 @@ button.send:disabled { cursor: default; transform: none; }
     <h1>Ask the lab</h1>
     <ul class="tries" id="tries"></ul>
   </section>
-  <main id="thread" aria-live="polite"></main>
+  <main id="thread"></main>
+  <p class="sr-only" id="announce" role="status"></p>
   <form id="ask" class="compose">
     <div class="box">
       <textarea id="text" rows="1" placeholder="Ask a question about the lab" aria-label="Your question"></textarea>
@@ -367,7 +370,7 @@ const REFUSAL = {
 };
 const NOT_SENT = '<circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.6 12.4l8.8-8.8" stroke="currentColor" stroke-width="1.5"/>';
 function refusal(title, text) {
-  const b = el("div", "refusal"); b.setAttribute("role", "status");
+  const b = el("div", "refusal");
   const t = el("p", "title"); t.append(svg(NOT_SENT), title);
   b.append(t, el("p", "", text));
   return b;
@@ -398,7 +401,8 @@ const when = (iso) => (new Date(iso).toDateString() === new Date().toDateString(
 const EDITED = '<path d="M13.25 8A5.25 5.25 0 1 1 11.7 4.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12.25 1.75v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>';
 function changedNote(v) {
   if (!v || v.state === "current") return null;
-  const p = el("p", "changed"); p.setAttribute("role", "status");
+  // Not a live region: the note is drawn on every reload, and the one #announce region speaks only new answers.
+  const p = el("p", "changed");
   p.append(svg(EDITED), el("span", "", v.state === "removed"
     ? "Removed since this answer: " + v.location + " is no longer in the lab's documents."
     : "Changed since this answer: " + v.location + " was edited " + when(v.now.modifiedAt) + ". Ask again to get an answer from the current version."));
@@ -565,6 +569,9 @@ function pick(t, turn, box, c) {
   box.remove();
   send(t, turn, steps, c.agentId);
 }
+// One live region that exists from page load, so a screen reader hears each new answer or refusal once. Cleared first
+// so the same words twice are announced twice.
+const announce = (text) => { $("announce").textContent = ""; requestAnimationFrame(() => { $("announce").textContent = text; }); };
 
 async function ask(text) {
   const t = { q: text, at: new Date().toISOString(), message: state.thread + "-" + (state.n++) };
@@ -574,13 +581,13 @@ async function ask(text) {
   await send(t, turn, steps);
 }
 async function send(t, turn, steps, agent) {
-  const fail = (msg) => { t.error = msg; save(); done(steps, el("p", "err", msg)); };
+  const fail = (msg) => { t.error = msg; save(); done(steps, el("p", "err", msg)); announce(msg); };
   let body;
   try {
     const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: t.message || state.thread + "-" + (state.n++), text: t.q, user, agent }) });
     body = await res.json();
   } catch { return fail("The web door did not answer. Check that it is running, then ask again."); }
-  if (body.t === "refused") { delete t.choices; t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); return; }
+  if (body.t === "refused") { delete t.choices; t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); announce("Not sent. " + body.userFacing); return; }
   if (body.t === "asked-user") {
     t.choices = body.choices; save();
     const box = chooser(t, turn);
@@ -597,11 +604,12 @@ async function send(t, turn, steps, agent) {
   await follow(turn, steps, body.runId, true);
 }
 
-async function follow(turn, steps, runId, scroll) {
-  try { await watch(turn, steps, runId, scroll); }
-  catch { done(steps, el("p", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); }
+// live is false for turns restored on load: their answers were heard when they arrived.
+async function follow(turn, steps, runId, live) {
+  try { await watch(turn, steps, runId, live); }
+  catch { done(steps, el("p", "err", "Lost contact with the web door. Reload the page to pick up the answer.")); if (live) announce("Lost contact with the web door. Reload the page to pick up the answer."); }
 }
-async function watch(turn, steps, runId, scroll) {
+async function watch(turn, steps, runId, live) {
   for (let i = 0; i < 600; i++) {
     const events = await fetchJson("/runs/" + runId + "/events");
     const finished = events.find((e) => e.event.t === "run.finished");
@@ -616,12 +624,15 @@ async function watch(turn, steps, runId, scroll) {
         const r = refused.event.refusal;
         const why = (REFUSAL[r.code] || (() => "The egress check refused it."))(r);
         done(steps, refusal("Refused: restricted data", why + " Nothing was sent, and the refusal is in the record."));
+        if (live) announce("Refused: restricted data. " + why + " Nothing was sent.");
       } else {
         const reply = replies.find((x) => x.kind === "reply") || replies[0];
         const raw = reply ? reply.text : "(no reply)";
         const m = /\\n\\s*Source:\\s*(.+)\\s*$/.exec(raw);
         source = m ? m[1].trim() : null;
-        done(steps, answer(m ? raw.slice(0, m.index) : raw));
+        const text = m ? raw.slice(0, m.index) : raw;
+        done(steps, answer(text));
+        if (live) announce("Answer: " + text + (source ? " Source: " + source : ""));
         if (withheld) turn.body.append(el("p", "withheld", withheld + (withheld === 1 ? " tool result was" : " tool results were") + " withheld from the model"));
       }
       // Asked again on every reload, so an answer kept in the thread says when its document has changed since.
@@ -634,12 +645,13 @@ async function watch(turn, steps, runId, scroll) {
       if (note) turn.margin.append(note);
       turn.margin.append(witness(runId, events));
       turn.entry.dataset.entryDone = "";
-      if (scroll) turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
+      if (live) turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
       return;
     }
     await sleep(300);
   }
   done(steps, el("p", "err", "No answer after three minutes. Check that the worker is running, then reload the page."));
+  if (live) announce("No answer after three minutes. Check that the worker is running, then reload the page.");
 }
 
 $("ask").addEventListener("submit", (e) => {
