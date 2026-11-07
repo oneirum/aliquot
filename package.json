@@ -16,13 +16,16 @@
     "walk:keys": "node scripts/walk-keys.ts",
     "walk:signon": "node scripts/walk-signon.ts",
     "walk:study": "node scripts/walk-study.ts",
+    "trust": "node scripts/trust.ts",
     "unit2": "node scripts/unit2.ts",
     "demo": "node scripts/demo.ts",
     "doctor": "node scripts/doctor.ts",
+    "review-pack": "node scripts/review-pack.ts",
     "aliquot": "node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts",
     "aliquot:init": "mkdir -p config && node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net --allow-fs-write=config/lab.toml --allow-fs-write=.env packages/core/bin/aliquot.ts init",
     "aliquot:export": "mkdir -p bundles && node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net '--allow-fs-write=bundles/*' packages/core/bin/aliquot.ts export",
     "demo:agent": "node scripts/agent-demo.ts",
+    "walk:policy": "node scripts/walk-policy.ts",
     "up:tmux": "scripts/tmux.sh"
   },
   "devDependencies": {

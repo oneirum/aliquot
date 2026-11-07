@@ -132,7 +132,10 @@ test("a CLI version is unrunnable where the installed CLI differs, where none is
 test("gateway.admit routes what a hosted CLI backend may receive and refuses the rest", () => {
   const gateway = createGateway([], DEFAULT_POLICY, fetch, [{ id: "claude", placement: "public" }]);
   const ok = gateway.admit(Labelled.stamp("a public question", "D0", "test"), "claude");
-  assert.deepEqual(ok.allow && { ...ok.to }, { kind: "model", endpointId: "claude", placement: "public" });
+  assert.deepEqual(ok.allow && { ...ok.to }, { kind: "model", endpointId: "claude", placement: "public", baa: false, region: null });
+  // A CLI backend has no baa in lab.toml, so PHI never reaches a hosted one, at any class.
+  const approved = createGateway([], DEFAULT_POLICY, fetch, [{ id: "cc", placement: "approved" }]);
+  assert.deepEqual(approved.admit(Labelled.stamp("PHI: dose", "D1", "test", ["phi"]), "cc"), { allow: false, refusal: { code: "phi-needs-baa", endpointId: "cc" } });
   assert.deepEqual(gateway.admit(Labelled.stamp("a roster", "D1", "test"), "claude"), { allow: false, refusal: { code: "class-above-ceiling", payload: "D1", ceiling: "D0" } });
   assert.throws(() => gateway.admit(Labelled.stamp("x", "D0", "test"), "nope"), /agent backend nope is not configured/);
   assert.equal(gateway.placementOf("claude"), "public");

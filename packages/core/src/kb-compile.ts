@@ -31,9 +31,10 @@ import { extname, join as joinPath } from "node:path";
 import { z } from "zod";
 import { parseExactModelId } from "./agent.ts";
 import { appendAudit, auditRecorder, type AuditEvent, type CallContext } from "./audit.ts";
-import { DATA_CLASSES, join, Labelled, type DataClass, type EgressRefusal } from "./dataclass.ts";
+import { DATA_CLASSES, join, Labelled, MARKS, type DataClass, type EgressRefusal } from "./dataclass.ts";
 import type { Db } from "./db.ts";
-import { classifyText } from "./gate.ts";
+import { classifyText, marksIn as marksOfText } from "./gate.ts";
+import { classById, classify, residencyRuleText, ruleText, type Policy } from "./policy.ts";
 import { describeOutcome, Prompt, type ExactModelId, type ModelGateway, type ModelResult, type ModelTarget } from "./gateway.ts";
 import { contentHash, type Addresser, type PayloadHash, type Sha256, type SnapshotId } from "./hash.ts";
 import { buildBm25, hashEntry, LICENCES, loadManifest, saveSnapshot, searchBm25, snapshotId, SOURCE_KINDS, type CoverageResult, type HashedEntry, type KbEntry, type KbSnapshot, type LoadedSnapshot, type SourceRef } from "./kb.ts";
@@ -171,6 +172,10 @@ export interface SourceDeps {
   readonly actor: string;
   /** lab.toml's participant-id patterns. A source whose text matches one is D3 whatever its declared class. */
   readonly labPatterns: readonly RegExp[];
+  /** lab.toml's data classes. Absent means the default policy over labPatterns. A source in a class whose model_tier is none is refused. */
+  readonly classes?: Policy;
+  /** The region lab.toml gives the compiler's endpoint, for a source in a class with a residency rule. */
+  readonly endpointRegion?: (endpointId: string) => string | null;
   /** Reads a PDF in the sandbox container (Sandbox.readPdf). Absent when lab.toml has no [sandbox], and in the studio, which has no Docker socket. */
   readonly pdf?: (bytes: Uint8Array, name: string) => Promise<string>;
 }
@@ -186,10 +191,35 @@ export async function readSources(def: KbDefinition, files: SourceFiles, deps: S
     def.sources.map(async (s) => {
       const text = s.kind === "file" ? await readFileSource(s.location, files, deps.pdf) : await readUrlSource(def.kbId, s.sourceId, s.location, deps);
       // The declared class is a floor: the gate's detectors and the lab's id patterns can only raise it.
-      const cls = classifyText(text, s.cls, deps.labPatterns).cls;
+      const cls = deps.classes ? await sourceLevel(def, s.sourceId, text, s.cls, deps.classes, deps) : classifyText(text, s.cls, deps.labPatterns).cls;
       return { ref: { ...s, cls, contentHash: deps.address(cls, text) }, text };
     }),
   );
+}
+
+/** A KB source whose data class no model may read. Thrown before any compile job exists, after the audit stream records it. */
+export class SourceClassRefused extends Error {
+  readonly dataClass: string;
+  constructor(sourceId: string, text: string, dataClass: string) {
+    super(`source ${sourceId}: ${text}`);
+    this.name = "SourceClassRefused";
+    this.dataClass = dataClass;
+  }
+}
+
+/** The source's level under the lab's classes. A class whose model_tier is none refuses it: the compiler is a model too. */
+async function sourceLevel(def: KbDefinition, sourceId: string, text: string, declared: DataClass, policy: Policy, deps: SourceDeps): Promise<DataClass> {
+  const c = classify(policy, { t: "entry", text, declared });
+  const rule = classById(policy, c.class);
+  const endpointId = def.compiler.endpointId;
+  const region = deps.endpointRegion?.(endpointId) ?? null;
+  const outside = rule.residency !== null && region !== rule.residency;
+  if (rule.modelTier !== "none" && !outside) return c.level;
+  const detectors = [...new Set(c.spans.filter((x) => x.class === c.class).map((x) => x.detector))];
+  const classRule = rule.modelTier === "none" ? ruleText(rule) : residencyRuleText(rule);
+  await appendAudit(deps.db, deps.actor, { t: "kb.source-refused", kbId: def.kbId, sourceId, dataClass: c.class, level: c.level, rule: c.rule, classRule, detectors });
+  const why = rule.modelTier === "none" ? "No model may read it, so it cannot be compiled into a knowledge base." : `The compiler's endpoint ${endpointId} ${region ? `is in region ${region}` : "names no region"}.`;
+  throw new SourceClassRefused(sourceId, `data class ${c.class}${detectors.length ? ` (detector ${detectors.join(", ")})` : ""}; rule ${classRule}. ${why}`, c.class);
 }
 
 async function readFileSource(name: string, files: SourceFiles, pdf: SourceDeps["pdf"]): Promise<string> {
@@ -296,7 +326,17 @@ export async function requestCompile(deps: { readonly queue: Queue; readonly sto
   return { jobId: r.id, key, created: r.created };
 }
 
-const refSchema = z.object({ hash: z.string(), cls: z.enum(DATA_CLASSES), bytes: z.number() });
+/**
+ * The marks a compile or coverage prompt's own text carries (an MRN in a source, a CUI banner), as a D0 label to
+ * derive the prompt from, so the gateway's mark rules see them. Only the prompt takes it: what the compiler returns
+ * is cached unmarked and marked again from its text when the snapshot loads (kb.ts). A source in a lab class with
+ * model_tier none or a residency rule was already refused when the sources were gathered (sourceLevel).
+ */
+function marksIn(text: string): Labelled<string> {
+  return Labelled.stamp("", "D0", "kb-compile:marks", marksOfText(text));
+}
+
+const refSchema = z.object({ hash: z.string(), cls: z.enum(DATA_CLASSES), bytes: z.number(), marks: z.array(z.enum(MARKS)).optional() });
 const compileJobSchema = z.object({
   definition: z.object({
     kbId: z.string(),
@@ -368,7 +408,8 @@ export async function compileKb(job: CompileJob, deps: CompileDeps): Promise<Com
     }
     const text = await deps.store.get(source.text);
     if ("redacted" in text) return { t: "failed", reason: `source ${source.sourceId} was redacted from the store` };
-    const input = Labelled.derive(`Knowledge base purpose: ${purpose.value}\n\nSource id: ${source.sourceId}\n\n<source>\n${String(text.value)}\n</source>`, [purpose, text], `kb-compile:${def.kbId}:${source.sourceId}`, cls);
+    const body = `Knowledge base purpose: ${purpose.value}\n\nSource id: ${source.sourceId}\n\n<source>\n${String(text.value)}\n</source>`;
+    const input = Labelled.derive(body, [purpose, text, marksIn(body)], `kb-compile:${def.kbId}:${source.sourceId}`, cls);
     const prompt = Prompt.of([{ role: "system", content: Labelled.stamp(COMPILE_SYSTEM, "D0", "kb-compile:prompt") }, { role: "user", content: input }], []);
     const result = await callUntilParsed(deps, def, { t: "kb-compile", job: deps.jobId, kbId: def.kbId, step: { t: "source", sourceId: source.sourceId } }, prompt, (r) => parseEntries(r.text, source.sourceId));
     if (result.t !== "ok") return result.t === "refused" ? { t: "refused", cls, refusal: result.refusal } : { t: "failed", reason: `source ${source.sourceId}: ${result.reason}` };
@@ -393,7 +434,8 @@ export async function compileKb(job: CompileJob, deps: CompileDeps): Promise<Com
     if (!verdict) {
       const q = Labelled.stamp(question, defCls, `kb-def:${def.kbId}`);
       const shown = candidates.map((c) => Labelled.stamp(`<entry path="${c.entry.path}">\n# ${c.entry.title}\n${c.entry.body}\n</entry>`, c.cls, `kb-compile:${def.kbId}:entry`));
-      const input = Labelled.derive(`Question: ${question}\n\nEntries:\n${shown.map((s) => s.value).join("\n")}`, [q, ...shown], `kb-coverage:${def.kbId}`, cls);
+      const body = `Question: ${question}\n\nEntries:\n${shown.map((s) => s.value).join("\n")}`;
+      const input = Labelled.derive(body, [q, ...shown, marksIn(body)], `kb-coverage:${def.kbId}`, cls);
       const prompt = Prompt.of([{ role: "system", content: Labelled.stamp(COVERAGE_SYSTEM, "D0", "kb-compile:prompt") }, { role: "user", content: input }], []);
       const paths = candidates.map((c) => c.entry.path);
       const result = await callUntilParsed(deps, def, { t: "kb-compile", job: deps.jobId, kbId: def.kbId, step: { t: "coverage", question } }, prompt, (r) => parseVerdict(r.text, question, paths));

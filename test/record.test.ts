@@ -153,10 +153,10 @@ test("the thanks probe: a D0 run's own bytes stay D0 after a D3 channel stored t
   assert.ok(!("redacted" in got));
   assert.equal(got.cls, "D0", "a D0 user's thanks reads back as what the D0 run stored");
   assert.notEqual(fromD0Run.hash, fromD3Channel.hash, "one row never spans two classes");
-  assert.equal(decideEgress(got, { kind: "model", endpointId: "hosted", placement: "zdr" }, DEFAULT_POLICY).allow, true, "the D0 user's thanks reaches the hosted model");
+  assert.equal(decideEgress(got, { kind: "model", endpointId: "hosted", placement: "zdr", baa: false, region: null }, DEFAULT_POLICY).allow, true, "the D0 user's thanks reaches the hosted model");
   const high = await store.get(fromD3Channel);
   assert.equal(!("redacted" in high) && high.cls, "D3");
-  assert.equal(decideEgress(high as Labelled<unknown>, { kind: "model", endpointId: "hosted", placement: "zdr" }, DEFAULT_POLICY).allow, false);
+  assert.equal(decideEgress(high as Labelled<unknown>, { kind: "model", endpointId: "hosted", placement: "zdr", baa: false, region: null }, DEFAULT_POLICY).allow, false);
   await assert.rejects(store.get({ ...fromD0Run, cls: "D3" }), (err: unknown) => err instanceof PayloadUnavailable && err.why === "class-mismatch");
 });
 

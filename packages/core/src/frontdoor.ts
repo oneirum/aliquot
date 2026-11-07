@@ -4,7 +4,8 @@
  * call intake(), and implement Surface so the worker can reply.
  *
  * intake() order, all in one place:
- *   1. gate                         -> refuse with a user-facing message, or admit with class
+ *   1. gate                         -> refuse with a user-facing message, or admit with class;
+ *                                      a refusal by a data class is recorded in the audit stream
  *   2. thread has an active background run -> write a steer inbox item, done      (later unit)
  *   3. channel bound to a study     -> frozen hash (router off): choosePinned, study.ts pinFor
  *      else watched-channel post    -> shouldReply, maybe drop                    (later unit)
@@ -15,10 +16,12 @@
  */
 
 import { z } from "zod";
-import { listingOf, resolveAgent, versionHash, type AgentDocument, type AgentId, type AgentListing, type Catalog } from "./agent.ts";
-import { decideEgress, type DataClass, type EgressPolicy, type Labelled, type Placement, type SurfaceId } from "./dataclass.ts";
+import { listingOf, modelFor, resolveAgent, versionHash, type AgentDocument, type AgentId, type AgentListing, type Catalog, type ResolvedAgent } from "./agent.ts";
+import { decideEgress, join, MARKS, rank, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
-import { gate, type GateDeps, type GateResult, type InboundMessage } from "./gate.ts";
+import { appendAudit, type AuditEvent } from "./audit.ts";
+import { gateClassified, type GateDeps, type GateResult, type InboundMessage } from "./gate.ts";
+import { classById, residencyRefusal, residencyRuleText, retentionOf, ruleText, type Classification, type Policy } from "./policy.ts";
 import type { AgentVersionHash } from "./hash.ts";
 import { loadVersion } from "./publish.ts";
 import { ENGINES, type Engine, type Queue } from "./queue.ts";
@@ -42,9 +45,15 @@ export type IntakeResult =
   /** The router was unsure: the member picks one, and the same message goes again naming that agent. */
   | { readonly t: "asked-user"; readonly choices: readonly AgentChoice[]; readonly route: Extract<RouteDecision, { t: "ask-user" }> }
   | { readonly t: "ignored"; readonly reason: "watched-no" | "own-message" }
-  | { readonly t: "refused"; readonly userFacing: string };
+  | {
+      readonly t: "refused";
+      readonly userFacing: string;
+      /** The data class that refused it, the rule it applied and the audit event that records it, when a class refused. */
+      readonly dataClass?: { readonly id: string; readonly level: DataClass; readonly rule: string; readonly classRule: string; readonly audit: number };
+    };
 
-const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number() });
+const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number(), marks: z.array(z.enum(MARKS)).optional() });
+type RefJson = z.infer<typeof ref>;
 const routeSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("direct") }),
   z.object({ t: z.literal("pinned"), studyId: z.string() }),
@@ -69,6 +78,7 @@ export const runJobPayloadSchema = z.object({
   // A payload written before the router existed ran its channel's one agent.
   route: routeSchema.default({ t: "direct" }),
   studyId: z.string().nullable(),
+  dataClass: z.object({ id: z.string(), rule: z.string(), retentionDays: z.number().nullable() }).optional(),
 });
 
 export interface RunJobPayload {
@@ -84,6 +94,8 @@ export interface RunJobPayload {
   readonly history: readonly PayloadRef[];
   readonly route: RunRoute;
   readonly studyId: string | null;
+  /** The message's data class at the gate, so a refusal later in the run can name it, and the retention job can read it. */
+  readonly dataClass?: { readonly id: string; readonly rule: string; readonly retentionDays: number | null };
 }
 
 /** A jobs row whose payload is not a run job. Nothing can be journaled for it, so the worker fails the job without a run record. */
@@ -99,7 +111,7 @@ export function parseRunJobPayload(json: unknown): RunJobPayload {
   const parsed = runJobPayloadSchema.safeParse(json);
   if (!parsed.success) throw new MalformedJob(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const p = parsed.data;
-  const ref = (r: { hash: string; cls: string; bytes: number }): PayloadRef => ({ hash: r.hash as PayloadRef["hash"], cls: r.cls as DataClass, bytes: r.bytes });
+  const ref = (r: RefJson): PayloadRef => ({ hash: r.hash as PayloadRef["hash"], cls: r.cls as DataClass, bytes: r.bytes, ...(r.marks?.length ? { marks: r.marks } : {}) });
   const route: RunRoute = p.route.t === "agent" ? { ...p.route, agentId: p.route.agentId as AgentId } : p.route;
   return { ...p, agent: p.agent as AgentVersionHash, thread: p.thread as ThreadKey, input: ref(p.input), history: p.history.map(ref), route };
 }
@@ -113,6 +125,8 @@ export interface IntakeDeps {
   readonly catalog: () => Promise<Catalog>;
   /** The agents that answer in a channel: the published heads bound to it, else the deployment's fixtures. Two or more are routed. */
   readonly agentsFor: (channel: InboundMessage["channel"]) => Promise<readonly AgentDocument[]>;
+  /** The region lab.toml gives a model endpoint, for a class with a residency rule. Absent, or null for an endpoint, means no region: such a class is refused. */
+  readonly endpointRegion?: (endpointId: string) => string | null;
 }
 
 /** pick is the agent the member chose from an earlier asked-user result for this same message. */
@@ -182,28 +196,57 @@ async function threadHolder(db: Db, thread: ThreadKey): Promise<AgentId | null> 
 }
 
 async function admit(msg: InboundMessage, key: string, trigger: (member: string) => Trigger, deps: IntakeDeps, choose: (admitted: Admitted) => Promise<Chosen>): Promise<IntakeResult> {
-  const admitted = await gate(msg, deps.gate);
-  if (admitted.t === "refuse") return { t: "refused", userFacing: admitted.userFacing };
+  const { result: admitted, classification, policy } = await gateClassified(msg, deps.gate);
+  if (admitted.t === "refuse") return admitted.dataClass && admitted.text ? recordClassRefusal(msg, admitted.dataClass, admitted.text, admitted.userFacing, ruleText(classById(policy, admitted.dataClass.class)), policy, deps) : { t: "refused", userFacing: admitted.userFacing };
+  const dataClass = classification ? { id: classification.class, rule: classification.rule, retentionDays: retentionOf(policy, classification.class) } : undefined;
   const chosen = await choose(admitted);
   if (chosen.t === "pinned") {
     const { freeze } = chosen;
     const agent = await loadVersion(deps.db, freeze.hash);
-    const run = { hash: freeze.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: freeze.studyId, route: { t: "pinned", studyId: freeze.studyId }, answeredBy: choiceOf(freeze.listing) } as const;
+    const refused = await residencyRefused(msg, agent, admitted.text, classification, policy, deps);
+    if (refused) return refused;
+    const run = { hash: freeze.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: freeze.studyId, route: { t: "pinned", studyId: freeze.studyId }, answeredBy: choiceOf(freeze.listing), dataClass } as const;
     return enqueueRun(msg, admitted, run, key, trigger, deps);
   }
   if (chosen.t !== "agent") return chosen;
   const { doc } = chosen;
   const resolved = resolveAgent(doc, await deps.catalog());
   if (!resolved.ok) return { t: "refused", userFacing: `The agent cannot run: ${resolved.issues.map((i) => i.message).join("; ")}` };
+  const refused = await residencyRefused(msg, resolved.agent, admitted.text, classification, policy, deps);
+  if (refused) return refused;
   const hash = versionHash(resolved.agent);
   await deps.db.query("insert into agent_versions (hash, agent_id, body) values ($1, $2, $3) on conflict (hash) do nothing", [hash, resolved.agent.agentId, JSON.stringify(resolved.agent)]);
-  return enqueueRun(msg, admitted, { hash, engine: resolved.agent.agentCli ? "agent-cli" : "chat", kind: doc.kind, studyId: null, route: chosen.route, answeredBy: choiceOf(listingOf(doc)) }, key, trigger, deps);
+  return enqueueRun(msg, admitted, { hash, engine: resolved.agent.agentCli ? "agent-cli" : "chat", kind: doc.kind, studyId: null, route: chosen.route, answeredBy: choiceOf(listingOf(doc)), dataClass }, key, trigger, deps);
+}
+
+/**
+ * A class with a residency rule refuses the message when the model it would reach, or the model a knowledge base at
+ * or above its level moves the run to, has an endpoint outside the class's region. Null when the run may start.
+ */
+async function residencyRefused(msg: InboundMessage, agent: ResolvedAgent, text: Labelled<string>, classification: Classification | null, policy: Policy, deps: IntakeDeps): Promise<IntakeResult | null> {
+  if (!classification) return null;
+  const rule = classById(policy, classification.class);
+  const endpointId = modelFor(agent, classification.level).endpointId;
+  const refusal = residencyRefusal(rule, classification, endpointId, deps.endpointRegion?.(endpointId) ?? null);
+  if (refusal) return recordClassRefusal(msg, classification, text, refusal, residencyRuleText(rule), policy, deps);
+  // A knowledge base at or above a residency class's level may hold that class, and a run that reads it moves to the
+  // model for the raised level. The snapshot carries a level, not a class, so this fails closed: that model's
+  // endpoint must be in the class's region before the run starts.
+  for (const c of policy.classes.filter((k) => k.residency !== null)) {
+    for (const kb of agent.knowledgeBases.filter((k) => rank(k.cls) >= rank(c.level))) {
+      const id = modelFor(agent, join(kb.cls, classification.level)).endpointId;
+      const held: Classification = { class: c.id, level: kb.cls, rule: `knowledge-base:${kb.kbId}`, spans: [] };
+      const r = residencyRefusal(c, held, id, deps.endpointRegion?.(id) ?? null);
+      if (r) return recordClassRefusal(msg, held, text, `${r.replace(/^Not sent\. Data class ([^;]+);/, `Not sent. Knowledge base ${kb.kbId} is at ${kb.cls} and may hold data class $1;`)}`, residencyRuleText(c), policy, deps);
+    }
+  }
+  return null;
 }
 
 async function enqueueRun(
   msg: InboundMessage,
   admitted: Extract<GateResult, { t: "admit" }>,
-  run: Pick<RunJobPayload, "engine" | "kind" | "route" | "studyId"> & { readonly hash: AgentVersionHash; readonly answeredBy: AgentChoice },
+  run: Pick<RunJobPayload, "engine" | "kind" | "route" | "studyId" | "dataClass"> & { readonly hash: AgentVersionHash; readonly answeredBy: AgentChoice },
   key: string,
   trigger: (member: string) => Trigger,
   deps: IntakeDeps,
@@ -223,6 +266,7 @@ async function enqueueRun(
     history: [],
     route: run.route,
     studyId: run.studyId,
+    ...(run.dataClass ? { dataClass: run.dataClass } : {}),
   };
   const job = await deps.queue.enqueue({ kind: "run", key }, thread, payload);
   if (!job.created) {
@@ -237,6 +281,34 @@ async function enqueueRun(
     }
   }
   return { t: "enqueued", runId: job.id as RunId, agent: hash, duplicate: !job.created, answeredBy: run.answeredBy, route: run.route };
+}
+
+/**
+ * A class refused the message before any run: at the gate (model_tier none), or at intake because the agent's model
+ * endpoint is outside the class's residency. No run exists, so the audit stream is the record: the class, the rule, the detectors, and what the class's record mode keeps of the text.
+ */
+async function recordClassRefusal(msg: InboundMessage, c: Classification, text: Labelled<string>, userFacing: string, classRule: string, policy: Policy, deps: IntakeDeps): Promise<IntakeResult> {
+  const rule = classById(policy, c.class);
+  const kept: Extract<AuditEvent, { t: "gate.refused" }>["kept"] =
+    rule.record === "text" ? { t: "text", ref: await deps.store.put(text) }
+    : rule.record === "hash" ? { t: "hash", hash: deps.store.address(c.level, msg.text) }
+    : { t: "none" };
+  const row = await appendAudit(deps.db, `door:${msg.channel.surface}`, {
+    t: "gate.refused",
+    surface: msg.channel.surface,
+    channel: msg.channel.channelId,
+    thread: msg.threadId,
+    message: msg.messageId,
+    member: msg.platformUserId,
+    dataClass: c.class,
+    level: c.level,
+    rule: c.rule,
+    classRule,
+    detectors: [...new Set(c.spans.filter((s) => s.class === c.class).map((s) => s.detector))],
+    kept,
+    retentionDays: rule.retentionDays,
+  });
+  return { t: "refused", userFacing: `${userFacing} Recorded as audit event ${row.seq}.`, dataClass: { id: c.class, level: c.level, rule: c.rule, classRule, audit: row.seq } };
 }
 
 /** A run names a surface this deployment does not serve. Terminal, and no reply can be posted anywhere. */

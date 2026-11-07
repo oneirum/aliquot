@@ -22,7 +22,7 @@
 
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import type { Db } from "./db.ts";
-import { decideEgress, describeRefusal, join, Labelled, type DataClass, type EgressPolicy, type EgressRefusal, type Placement } from "./dataclass.ts";
+import { decideEgress, describeRefusal, join, Labelled, type DataClass, type EgressPolicy, type EgressRefusal, type Mark, type Placement } from "./dataclass.ts";
 import { addresserOf, addressSubkey, canonicalJson, sha256, type Addresser, type AgentVersionHash, type EntryHash, type PayloadHash, type Sha256, type SnapshotId, type ToolHash } from "./hash.ts";
 import type { RouteDecision } from "./router.ts";
 import type { ModelTarget } from "./gateway.ts";
@@ -36,6 +36,8 @@ export interface PayloadRef {
   readonly hash: PayloadHash;
   readonly cls: DataClass;
   readonly bytes: number;
+  /** Present only when the content carries marks, so a ref without them is the ref every older record has. */
+  readonly marks?: readonly Mark[];
 }
 
 export type Trigger =
@@ -430,6 +432,8 @@ function unseal(key: Buffer, nonce: Buffer, ciphertext: Buffer, aad: string): Bu
   return Buffer.concat([decipher.update(ciphertext.subarray(0, ciphertext.length - GCM_TAG_BYTES)), decipher.final()]);
 }
 
+const aadOf = (hash: string, marks: readonly Mark[]) => (marks.length ? `${hash}\n${marks.join(",")}` : hash);
+
 export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
   const ring = config.keyring;
   const ciphers = new Map([...ring.keys].map(([id, master]) => [id, subkey(master, CIPHER_INFO)]));
@@ -449,18 +453,22 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
       const plaintext = Buffer.from(canonicalJson(content.value), "utf8");
       // Keyed: the address is in events that leave the store (the run record, the web API), so an unkeyed
       // digest would let anyone confirm a guessed body (a participant id) against it.
-      const hash = address(content.cls, content.value) as string as PayloadHash;
-      const { nonce, ciphertext } = seal(cipherKey, plaintext, hash);
-      // The same bytes at the same class are one row already, under whichever key wrote it first; at another class the
-      // address differs. A row the retention sweep emptied takes the body again, under this key: the same text asked
-      // after a sweep is a new copy, and a run on it must be able to read it.
+      // Marks are part of the address and of the cipher's associated data, so a ref whose marks were removed names no
+      // row, or fails to decrypt: the content cannot come back out of the store under fewer rules than it went in.
+      const marks = content.marks.length ? content.marks : null;
+      const hash = address(marks ? `${content.cls}+${marks.join(",")}` : content.cls, content.value) as string as PayloadHash;
+      const { nonce, ciphertext } = seal(cipherKey, plaintext, aadOf(hash, marks ?? []));
+      // The same bytes at the same class and marks are one row already, under whichever key wrote it first; otherwise
+      // the address differs. A row the retention sweep emptied takes the body again, under this key: the same text asked
+      // after a sweep is a new copy, and a run on it must be able to read it. The row keeps its marks so a re-encrypt
+      // can rebuild the associated data; a read still takes them from the ref.
       await db.query(
-        `insert into payloads (hash, cls, ciphertext, nonce, key_id, bytes) values ($1, $2, $3, $4, $5, $6)
+        `insert into payloads (hash, cls, ciphertext, nonce, key_id, bytes, marks) values ($1, $2, $3, $4, $5, $6, $7)
          on conflict (hash) do update set ciphertext = excluded.ciphertext, nonce = excluded.nonce, key_id = excluded.key_id, redacted_at = null, redaction_reason = null
          where payloads.ciphertext is null`,
-        [hash, content.cls, ciphertext, nonce, keyId, plaintext.length],
+        [hash, content.cls, ciphertext, nonce, keyId, plaintext.length, marks],
       );
-      return { hash, cls: content.cls, bytes: plaintext.length };
+      return { hash, cls: content.cls, bytes: plaintext.length, ...(marks ? { marks } : {}) };
     },
     async get(ref) {
       const res = await db.query<{ cls: DataClass; ciphertext: Buffer | null; nonce: Buffer | null; key_id: string | null }>(
@@ -473,20 +481,21 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
       if (!row.ciphertext || !row.nonce) return { redacted: true, hash: ref.hash, cls: ref.cls };
       const cipherKey = row.key_id === null ? undefined : ciphers.get(row.key_id);
       if (!cipherKey) throw new PayloadUnavailable(ref.hash, "key-mismatch", row.key_id);
-      const plaintext = unseal(cipherKey, row.nonce, row.ciphertext, ref.hash);
-      return Labelled.stamp(JSON.parse(plaintext.toString("utf8")) as unknown, ref.cls, `store:${ref.hash}`);
+      const plaintext = unseal(cipherKey, row.nonce, row.ciphertext, aadOf(ref.hash, ref.marks ?? []));
+      return Labelled.stamp(JSON.parse(plaintext.toString("utf8")) as unknown, ref.cls, `store:${ref.hash}`, ref.marks ?? []);
     },
     async reencrypt(limit) {
       // A row moves only when this process holds both its key and its target, so a batch never returns a row it must skip.
-      const rows = await db.query<{ hash: string; cls: DataClass; ciphertext: Buffer; nonce: Buffer; key_id: string }>(
-        `select hash, cls, ciphertext, nonce, key_id from payloads
+      const rows = await db.query<{ hash: string; cls: DataClass; ciphertext: Buffer; nonce: Buffer; key_id: string; marks: Mark[] | null }>(
+        `select hash, cls, ciphertext, nonce, key_id, marks from payloads
          where ciphertext is not null and key_id = any($1) and coalesce($2::jsonb ->> cls, $3) = any($1) and key_id <> coalesce($2::jsonb ->> cls, $3)
          order by hash limit $4`,
         [[...held], JSON.stringify(ring.classKeys), ring.current, limit],
       );
       for (const r of rows.rows) {
         const target = keyFor(ring, r.cls);
-        const sealed = seal(ciphers.get(target)!, unseal(ciphers.get(r.key_id)!, r.nonce, r.ciphertext, r.hash), r.hash);
+        const aad = aadOf(r.hash, r.marks ?? []);
+        const sealed = seal(ciphers.get(target)!, unseal(ciphers.get(r.key_id)!, r.nonce, r.ciphertext, aad), aad);
         // Conditional on the row as read, so a concurrent redaction or another re-encrypt wins and this one changes nothing.
         await db.query("update payloads set ciphertext = $2, nonce = $3, key_id = $4 where hash = $1 and key_id = $5 and ciphertext = $6", [r.hash, sealed.ciphertext, sealed.nonce, target, r.key_id, r.ciphertext]);
       }
@@ -759,6 +768,11 @@ export type ToolResult = { readonly t: "output"; readonly content: PayloadRef } 
 /** Attempts per call before the error goes to the agent. loop.ts RETRY.maxAttempts is the same number; both read it from here. */
 export const MAX_ATTEMPTS = 3;
 
+/** Whether an egress.refused event ends its run: every destination but a tool's HTTP request (`http:<host>`). */
+export function refusalEndsRun(destination: string): boolean {
+  return !destination.startsWith("http:");
+}
+
 /** Pure. Total over any valid event list, including one cut off by a crash at any point. cls = join of every event's cls. */
 export function fold(events: readonly StoredEvent[]): RunState {
   const first = events[0];
@@ -851,7 +865,9 @@ export function fold(events: readonly StoredEvent[]): RunState {
         break;
       }
       case "egress.refused":
-        s.refused = e.refusal;
+        // A refused model prompt or reply ends the run. A tool's refused HTTP request does not: tools.ts records it as
+        // tool.failed (egress-refused), the model reads that error and answers without the tool, and nothing was sent.
+        if (refusalEndsRun(e.destination)) s.refused = e.refusal;
         break;
       // A session folds as one model call: its bridged tool events name callIds no model.completed lists, and a
       // withheld result is the run going on, not a refused run.

@@ -10,6 +10,11 @@ This sheet is for the people who decide whether a lab may run Aliquot. It covers
 Aliquot is self-hosted open source, so no vendor questionnaire exists. This sheet stands in for one. Every rule below
 is enforced in code. The file that enforces each rule is named, so a reviewer can check it.
 
+For a control-by-control answer (HIPAA Security Rule, NIST SP 800-171 Rev. 3, HECVAT 4 areas), run
+`pnpm review-pack --config config/lab.toml`. It writes the review pack for your lab under `docs/review/<lab>/`, with
+each row's status computed from your `lab.toml` and the tests that prove each met row. The pack for the compose check's
+lab is in [`review/check/summary.md`](review/check/summary.md).
+
 ## Data classes
 
 Every piece of content carries one of five classes. A class only goes up: the class of anything derived from content
@@ -26,6 +31,44 @@ is at least the class of that content, and there is no declassify step.
 A message gets its class at the gate (`packages/core/src/gate.ts`), which runs before any model sees the message. The
 gate checks built-in patterns and the lab's own participant id patterns from `lab.toml`. A knowledge base's class is
 declared by its steward. The compile step raises that class when its source text matches a pattern.
+
+### Classes a lab declares
+
+The five levels above are what every egress decision reads. On top of them a lab declares data classes in `lab.toml`
+(`[classes.<id>]`, `packages/core/src/policy.ts`). Each class sits at one level, and `lab.toml` fails to load when a
+class asks for less protection than its level enforces, so a class can only add rules. The five built-in classes are
+always there and, with no `[classes]` table, behave exactly as Aliquot did before classes existed.
+
+| Class | Level | Model tier | Record of a refused message | Detectors | Where it comes from |
+|---|---|---|---|---|---|
+| `public` | D0 | hosted | text | none (a channel's floor) | built in |
+| `internal` | D1 | hosted | text | none (the default floor) | built in |
+| `confidential` | D2 | hosted (approved placement) | text | phone, email | built in |
+| `restricted` | D3 | local (lab or institution) | text | SSN, MRN, date of birth, the lab's participant ids | built in |
+| `review-confidential` | R | none under `refuse`, local under `lab-only` | keyed hash | REVIEW-CONFIDENTIAL marker | built in |
+| `phi` | D3 | none | keyed hash, 30 days | HIPAA Safe Harbor identifiers (45 CFR 164.514(b)(2)) | example in `fixtures/policy/classes.toml` |
+| `controlled_access` | D3 | none | keyed hash, 365 days | DUA marker: `DUA:` lines, dbGaP `phs` accessions, EGA ids | example; NIH NOT-OD-25-081 |
+| `export_controlled` | D3 | local, residency `us` | text | ITAR, EAR99, ECCN, USML markings | example |
+
+What each tier means, and where it is enforced:
+
+- **hosted**: the level's ceiling decides which placements may read it (the table above).
+- **local**: the level is D3 or R, which the ceilings admit only at lab and institution placements. A run on a hosted
+  model is refused at the gateway before the request, and its notice names the class.
+- **none**: the door refuses the message before a run exists, so no model at any placement receives it. The refusal is
+  an audit event (`gate.refused`) holding the class, the rule, the detectors, the retention, and the text, its keyed
+  hash or nothing, as the class's `record` says. A knowledge base source in such a class is refused before its compile
+  job exists (`kb.source-refused`), because the compiler is a model too.
+- **residency**: a class with `residency = "us"` is read only by an endpoint whose `[endpoints.<id>]` says
+  `region = "us"`. An endpoint with no region is in none. Checked at the door against the agent's model and at
+  knowledge base compile against the compiler.
+
+Safe Harbor identifiers covered by a pattern: names after a label (patient, name), street addresses and ZIP codes,
+dates tied to an admission, discharge, death, service or birth, ages over 89, phone and fax numbers, email addresses,
+SSNs, MRNs, health plan, account, certificate and licence numbers, VINs and licence plates, device serials, URLs (not
+scholarly hosts such as doi.org or PubMed), IP addresses and labelled biometric ids. Full-face photographs are not
+text and are not checked. "Any other unique identifying number" is the lab's own participant id patterns. Patterns
+miss what they do not match: see "Not covered yet".
 
 ## Where each class may go
 
@@ -119,6 +162,50 @@ ceiling for a personal subscription. What a member types into their own tool bef
 tool's terms, not Aliquot's. The lab's data-handling rules have to cover it. Aliquot cannot prevent a member from
 copying text by hand from a page they are allowed to read.
 
+Each model endpoint in `lab.toml` also records the contract it runs under. Two fields decide where content under a
+legal regime may go, on top of its class:
+
+| Field | Values | Default | What it decides |
+|---|---|---|---|
+| `placement` | `lab`, `institution`, `approved`, `zdr`, `public` | none (required) | The highest class the endpoint may receive (the table above) |
+| `baa` | `true`, `false` | `false` | Whether PHI may go there. `true` records that a business associate agreement covers the endpoint, or that the covered entity runs it. Aliquot does not check the agreement exists. |
+| `region` | a two-letter code, such as `us` | unknown | Where the vendor keeps the data. Export-controlled and CUI content go only to `us`; unknown counts as outside the US. |
+
+The data classes above set the marks (`marksOf` in `packages/core/src/gate.ts`), over each message at the gate, each
+knowledge base's entries when it loads, and each compile prompt.
+
+| Mark | Set by | Rule at a model endpoint off lab hardware | Refusal code |
+|---|---|---|---|
+| PHI | a span in a `phi` class, any HIPAA identifier detector (an MRN, a date of birth, the `phi-*` set) whatever class lists it, or a `PHI` banner | refused unless `baa = true` | `phi-needs-baa` |
+| Export-controlled | a span in an `export_controlled` class, the `export-marker` detector, or an `ITAR` or `EXPORT CONTROLLED` banner | refused unless `region = "us"` | `export-needs-us` |
+| CUI | a span in a `cui` class, or a `CUI` banner, such as `CUI//SP-PRVCY` | refused unless `region = "us"` | `export-needs-us` |
+
+A banner is the marking at the start of a line, alone or followed by `:` or `//`, in capitals. A sentence that only
+names the regime ("does this contain PHI?") is not one. A banner sets the mark and leaves the class as it was.
+
+PHI found by an MRN or a date of birth is D3, so it reaches only `lab` and `institution` placements in any case, and
+`baa` decides which institution endpoints. PHI marked only by a banner, or found in a knowledge base whose steward
+declared a lower class, keeps that class, so `baa` is what stops it at an approved or zero-retention endpoint. Lab hardware needs neither field, because no third party holds the content there. A mark stays on
+everything derived from the content, like the class, and is stored with it: a stored payload's marks are part of its
+address and of its encryption's associated data, so a record entry stripped of its marks does not decrypt. A refusal
+happens before any request leaves, is recorded as `egress.refused` with its code, and the chat reply, the Slack reply
+and the record page each name the rule. The rules apply to model endpoints only: an answer derived from PHI that a
+model on lab hardware or under a BAA wrote still goes to the surface that asked, Slack included, under the surface's
+class ceiling alone. Keep PHI work on surfaces the institution's agreements cover. A knowledge base compile is a
+model call like any other, so a PHI source is refused at a compiler endpoint without `baa = true`. For Bedrock, a model id's inference-profile prefix that disagrees with the
+declared region makes the region unknown: a `global.` profile may run in any region, so it is never treated as `us`. Hosted agent
+CLIs (Claude Code, Codex) have no `baa` or `region` yet, so marked content reaches one only on lab hardware.
+
+Anthropic's BAA covers its first-party API and Claude in Microsoft Foundry, with 30-day retention for Covered
+Models ([Anthropic](https://privacy.anthropic.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers)).
+Microsoft becomes a business associate when a covered entity uses Azure
+([Microsoft](https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us)). Amazon Bedrock is on
+AWS's list of HIPAA-eligible services ([AWS](https://aws.amazon.com/compliance/hipaa-eligible-services-reference/)).
+Aliquot reaches Azure OpenAI through `openai-chat` (a deployment URL with `api_version`, or the v1 URL), Claude in
+Foundry through `anthropic-messages`, and Bedrock through `bedrock-converse`, which signs each request with AWS
+Signature Version 4 in Aliquot's own code (`packages/core/src/sigv4.ts`, checked against AWS's published test
+vectors), so no AWS SDK runs in the worker.
+
 ### Tools
 
 Aliquot runs eleven built-in tools, all part of its own code: knowledge base search and read, seven literature tools
@@ -211,7 +298,9 @@ after either.
 
 ## Not covered yet
 
-- **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A lab must add its
+- **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A name without a
+  label ("John Smith was admitted") is not found by `phi-name`; a lab with free-text PHI should set its PHI channels'
+  floor to D3 rather than rely on detectors. Detector accuracy at scale is measured by the trust harness, not here. A lab must add its
   own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,
   and refuses a pattern that matches ordinary text or no sample id.
 - **Sign-on covers the web door only.** The studio signs people in with its own accounts, and a phone pairing or an
@@ -226,5 +315,9 @@ after either.
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.
 - **IRB and consent checks against knowledge base sources are not built.**
 - **Studies have no studio page and no consent disclosure draft.** A study owner manages a study with `aliquot study` on the lab server, which names the member acting with `--as`, because sign-on covers the web door only. The draft of where participant data goes, for the IRB to edit, is not built.
+- **PHI, export-controlled and CUI marks are found by the same patterns as classes.** Messages and knowledge bases
+  are marked (a knowledge base carries every mark any of its entries has, found from the entry text when it loads).
+  A dataset read by `run_code` is not, so a dataset of PHI is guarded by its class alone. The data classification
+  policy layer replaces the patterns with the lab's own classes.
 
 Aliquot has been tested on a synthetic lab with synthetic data. It has not yet been used by a real lab.

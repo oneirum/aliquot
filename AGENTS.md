@@ -63,6 +63,7 @@ Sign-on for the web door is `packages/core/src/surfaces/signon.ts` (OpenID Conne
 
 ## Where things are
 
+- `packages/core/src/policy.ts` holds the data classes a lab declares (`[classes.<id>]`), the detectors and `classify()`. A class sits at one lattice level, and the level is what `decideEgress` reads; a class adds rules (tier none, residency) and never loosens the lattice. `test/policy.test.ts` holds the pre-classes detectors as the oracle the default policy must match.
 - `packages/core/src/loop.ts` holds `next()`, the whole run policy as one pure function.
 - `packages/core/src/record.ts` holds the run record: fenced append, encrypted payloads and `fold()`.
 - `packages/core/src/gateway.ts` is the only module that talks to models.

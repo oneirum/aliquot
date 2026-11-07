@@ -17,7 +17,7 @@ import type { AgentId } from "./agent.ts";
 import type { DataClass, EgressRefusal } from "./dataclass.ts";
 import type { Db, Tx } from "./db.ts";
 import { canonicalJson, sha256, type AgentVersionHash, type Sha256, type SnapshotId } from "./hash.ts";
-import type { CallRecorder, PayloadStore, RunEvent } from "./record.ts";
+import type { CallRecorder, PayloadRef, PayloadStore, RunEvent } from "./record.ts";
 
 /** What an out-of-run call was for: a compile job's model call, or reading a KB's URL source before the job exists. */
 export type CallContext =
@@ -30,6 +30,27 @@ export type AuditEvent =
   | { readonly t: "kb.compile-failed"; readonly job: string; readonly kbId: string; readonly reason: string; readonly refusal: EgressRefusal | null }
   | { readonly t: "kb.published"; readonly kbId: string; readonly snapshot: SnapshotId; readonly override?: { readonly note: string; readonly gaps: readonly string[] } }
   | { readonly t: "kb.publish-refused"; readonly kbId: string; readonly snapshot: SnapshotId; readonly gaps: readonly string[] }
+  /**
+   * The gate refused a message for its data class, before any run or model call. `kept` is what the class's record
+   * mode keeps: the text in the payload store, its keyed hash, or nothing.
+   */
+  | {
+      readonly t: "gate.refused";
+      readonly surface: string;
+      readonly channel: string;
+      readonly thread: string;
+      readonly message: string;
+      readonly member: string;
+      readonly dataClass: string;
+      readonly level: DataClass;
+      readonly rule: string;
+      readonly classRule: string;
+      readonly detectors: readonly string[];
+      readonly kept: { readonly t: "text"; readonly ref: PayloadRef } | { readonly t: "hash"; readonly hash: Sha256 } | { readonly t: "none" };
+      readonly retentionDays: number | null;
+    }
+  /** A knowledge base source in a class no model may read, refused before its compile job existed. */
+  | { readonly t: "kb.source-refused"; readonly kbId: string; readonly sourceId: string; readonly dataClass: string; readonly level: DataClass; readonly rule: string; readonly classRule: string; readonly detectors: readonly string[] }
   | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string }
   /** A data steward's `aliquot keys rotate`, `aliquot keys reencrypt` and `aliquot retention --apply` (steward.ts). */
   | { readonly t: "keys.rotated"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly held: readonly string[] }

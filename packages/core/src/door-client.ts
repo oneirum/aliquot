@@ -131,7 +131,7 @@ function call(door: Door, method: "GET" | "POST", path: string, body?: unknown, 
 
 interface StoredEventJson {
   readonly seq: number;
-  readonly event: { readonly t: string; readonly tool?: string; readonly outcome?: string; readonly mode?: string; readonly answer?: { readonly cls: string } | null; readonly refusal?: { readonly code: string } };
+  readonly event: { readonly t: string; readonly tool?: string; readonly outcome?: string; readonly mode?: string; readonly answer?: { readonly cls: string } | null; readonly refusal?: { readonly code: string }; readonly destination?: string };
 }
 
 export async function* ask(door: Door, input: AskInput, opts: AskOptions = {}): AsyncGenerator<DoorEvent> {
@@ -166,7 +166,8 @@ export async function* ask(door: Door, input: AskInput, opts: AskOptions = {}): 
     }
     const finished = events.find((e) => e.event.t === "run.finished")?.event;
     if (finished) {
-      const refused = events.find((e) => e.event.t === "egress.refused")?.event;
+      // refusalEndsRun in record.ts: a tool's refused HTTP request (http:<host>) is a failed tool call, not a refused run.
+      const refused = events.find((e) => e.event.t === "egress.refused" && !(e.event.destination ?? "").startsWith("http:"))?.event;
       const raw = finished.answer?.cls ?? null;
       const cls = raw !== null && isDataClass(raw) ? raw : null;
       const replies = (await call(door, "GET", `replies?runId=${runId}`)).json as { kind: string; text: string }[];
@@ -197,7 +198,7 @@ export async function stop(door: Door, runId: string, user: string): Promise<voi
 }
 
 /** The studio's reads and writes of core, each a POST /studio/<op> that studio-door.ts serves. */
-export const STUDIO_OPS = ["kb-compile", "kb-compile-result", "kb-publish", "kb-entry", "agent-check", "agent-publish", "agent-test", "test-run"] as const;
+export const STUDIO_OPS = ["kb-compile", "kb-compile-result", "kb-publish", "kb-entry", "agent-check", "agent-publish", "agent-test", "test-run", "data-classes"] as const;
 export type StudioOpName = (typeof STUDIO_OPS)[number];
 
 /** Where the studio finds the web door when it is not at [surfaces.web] base_url, as inside the compose network. */

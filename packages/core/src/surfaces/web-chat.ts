@@ -358,6 +358,8 @@ const REFUSAL = {
   "review-confidential-needs-lab": () => "Review-confidential content may only go to models on lab hardware.",
   "host-not-declared": (r) => "Host " + r.host + " is not in the tool's egress list.",
   "covered-model": (r) => r.modelId + " is kept by its vendor on every route, so it may not run on a " + r.placement + " endpoint.",
+  "phi-needs-baa": (r) => "This message carries PHI, which may go only to a model endpoint under a business associate agreement, and " + r.endpointId + " is not marked baa = true.",
+  "export-needs-us": (r) => "This message carries " + (r.mark === "cui" ? "CUI" : "export-controlled content") + ", which may go only to a model endpoint in the US, and " + r.endpointId + " is in " + (r.region === null ? "an undeclared region" : "region " + r.region) + ".",
 };
 const NOT_SENT = '<circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.6 12.4l8.8-8.8" stroke="currentColor" stroke-width="1.5"/>';
 function refusal(title, text) {

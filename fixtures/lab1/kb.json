@@ -1,0 +1,204 @@
+{
+  "kbId": "lab1-handbook",
+  "title": "Lab1 handbook",
+  "purpose": "How the synthetic lab1 runs its equipment, codes its cognitive aging study, onboards assistants and keeps people safe. For lab members with a practical question.",
+  "coverageQuestions": [
+    "How many hours ahead must I book the centrifuge?",
+    "What unit is psqi_total recorded in?",
+    "When is lab meeting?",
+    "How long does SLEEPWELL visit 1 last?",
+    "Where do we gather during a fire alarm?"
+  ],
+  "sources": [
+    {
+      "sourceId": "equipment",
+      "kind": "file",
+      "location": "equipment.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "codebook",
+      "kind": "file",
+      "location": "codebook.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "onboarding",
+      "kind": "file",
+      "location": "onboarding.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "protocols",
+      "kind": "file",
+      "location": "protocols.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "safety",
+      "kind": "file",
+      "location": "safety.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "sop-notes",
+      "kind": "file",
+      "location": "sop-notes.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-glassware-washer",
+      "kind": "file",
+      "location": "pdf-glassware-washer.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-pipette-calibration",
+      "kind": "file",
+      "location": "pdf-pipette-calibration.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-ice-machine",
+      "kind": "file",
+      "location": "pdf-ice-machine.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-label-printer",
+      "kind": "file",
+      "location": "pdf-label-printer.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-specimen-courier",
+      "kind": "file",
+      "location": "pdf-specimen-courier.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-balance-calibration",
+      "kind": "file",
+      "location": "pdf-balance-calibration.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-tip-boxes",
+      "kind": "file",
+      "location": "pdf-tip-boxes.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-bench-paper",
+      "kind": "file",
+      "location": "pdf-bench-paper.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-cold-room-inventory",
+      "kind": "file",
+      "location": "pdf-cold-room-inventory.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-distilled-water",
+      "kind": "file",
+      "location": "pdf-distilled-water.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-scanner-bookings",
+      "kind": "file",
+      "location": "pdf-scanner-bookings.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-mail-pickup",
+      "kind": "file",
+      "location": "pdf-mail-pickup.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-recycling",
+      "kind": "file",
+      "location": "pdf-recycling.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-headphones",
+      "kind": "file",
+      "location": "pdf-headphones.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-stopwatch-kits",
+      "kind": "file",
+      "location": "pdf-stopwatch-kits.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-room-signs",
+      "kind": "file",
+      "location": "pdf-room-signs.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-interpreter-booking",
+      "kind": "file",
+      "location": "pdf-interpreter-booking.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-wheelchair-access",
+      "kind": "file",
+      "location": "pdf-wheelchair-access.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-fire-extinguisher-checks",
+      "kind": "file",
+      "location": "pdf-fire-extinguisher-checks.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    },
+    {
+      "sourceId": "pdf-cable-management",
+      "kind": "file",
+      "location": "pdf-cable-management.pdf",
+      "cls": "D1",
+      "licence": "internal-only"
+    }
+  ],
+  "compiler": {
+    "endpointId": "local",
+    "modelId": "scripted-1",
+    "params": {
+      "temperature": 0,
+      "maxOutputTokens": 8192
+    }
+  }
+}

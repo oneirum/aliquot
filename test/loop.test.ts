@@ -124,6 +124,21 @@ test("an egress refusal gets a notice and finishes refused", () => {
   assert.deepEqual(decide([...refused, { t: "reply.posted", mode: "final-post", surfaceMessageId: "m" }]), { t: "finish", outcome: "refused", reason: null });
 });
 
+test("a tool's refused HTTP request is a failed tool call the model reads, not a refused run", () => {
+  // pnpm trust found it: a planted instruction made the model call pubmed_search from a D1 run, the egress decision
+  // refused the request, and the whole run ended with the restricted-data notice on an answerable question.
+  const toolRefused: RunEvent[] = [
+    started(),
+    requested(1),
+    completedWithTool(1, "pubmed_search"),
+    { t: "tool.requested", callId: "c1", attempt: 1, tool: "pubmed_search", hash: "h".repeat(64) as never, input: ref("a1") },
+    { t: "egress.refused", destination: "http:eutils.ncbi.nlm.nih.gov", payload: "D1", refusal: { code: "class-above-ceiling", payload: "D1", ceiling: "D0" } },
+    { t: "tool.failed", callId: "c1", attempt: 1, failure: { code: "egress-refused", detail: ref("e1") }, retryable: false },
+  ];
+  assert.equal(fold(chain(toolRefused, T0)).refused, null);
+  assert.deepEqual(decide(toolRefused), { t: "call-model", step: 2, attempt: 1, final: false });
+});
+
 test("an external-send tool is asked for confirmation, then waits, then runs or is declined", () => {
   const pending = [started(), requested(1), completedWithTool(1, "send_email")];
   assert.deepEqual(decide(pending), { t: "ask-confirm", callId: "c1" });

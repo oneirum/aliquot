@@ -112,6 +112,38 @@ A lab answers the same questions every week. Where the freezer log is, how a var
 - **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later: it opens with a summary of what the run read, called and refused, and downloads as JSON. Each run names the hash of the agent version that answered.
 - **Studies an IRB can cite.** A PI freezes the agent version a study uses, an IRB reads its card and a sheet generated from the deployment, and a reviewer replays a run from an exported bundle without the lab's database.
 
+## Data classes
+
+A lab's data is not one kind of restricted. Participant ids, PHI, dbGaP releases and export-controlled drawings each come with their own rules, and `lab.toml` says what they are. Every message and every knowledge base source is put in one class before any model sees it, and the class decides three things:
+
+- **Which model may read it.** `model_tier = "hosted"` (an approved hosted model), `"local"` (only a model on lab or institution hardware), or `"none"` (no model: the door refuses it before a run exists, and a knowledge base source in it is refused before the compiler is called).
+- **What the record keeps of a refused message.** `record = "text"`, `"hash"` or `"none"`, with `retention_days` for how long.
+- **What the member is told.** Every refusal names the class, the detector that found it and the rule it applied, in the chat, in Slack and in the record:
+
+```text
+Not sent. Data class phi, found by detector phi-name; rule model_tier = "none". This message carries a HIPAA
+identifier. Remove it, or ask the lab's honest broker for a de-identified extract. Recorded as audit event 2.
+```
+
+```toml
+[classes.phi]
+model_tier = "none"
+record = "hash"
+retention_days = 30
+detectors = ["hipaa-safe-harbor"]   # names, addresses, dates, ages over 89, fax, plan, account, licence, vehicle, device, URL, IP, biometric ids, SSN, MRN
+
+[classes.controlled_access]         # NIH controlled-access data: the DUC keeps it out of AI tools
+model_tier = "none"
+detectors = ["dua-marker"]          # "DUA: ..." lines, dbGaP phs accessions, EGA ids
+
+[classes.export_controlled]
+model_tier = "local"
+residency = "us"                    # read only by an endpoint whose lab.toml entry says region = "us"
+detectors = ["export-marker"]       # ITAR, EAR99, ECCN, USML categories
+```
+
+With no `[classes]` table a lab has the five built-in classes, which behave exactly as Aliquot did before classes: `public` (D0), `internal` (D1), `confidential` (D2: phone numbers and email addresses), `restricted` (D3, local only: SSNs, MRNs, dates of birth, the lab's participant id patterns) and `review-confidential` (R). Each class sits at one level of the D0 to R lattice, and the level is what every egress decision reads, so a class cannot loosen what the lattice enforces: a `hosted` class must be D0 to D2, a `local` one D3 or R, and `lab.toml` fails to load otherwise. The studio's knowledge base page lists the classes and which published entries carry each. `pnpm walk:policy` asks one question per class on the synthetic lab and prints what the member reads and how many requests reached each model; the table for a review is in [`docs/for-research-it-and-irb.md`](docs/for-research-it-and-irb.md#classes-a-lab-declares).
+
 ## The chat page and the record
 
 Members ask on the chat page. An answer names the entry it came from and says what the run read and how long it took. Answers keep their lists, headings and code blocks, and no model text is ever parsed as HTML. A message with a participant id is refused before anything is sent, and the page says why.
@@ -261,12 +293,14 @@ A terminal, tmux, T3 Code or a lab's own orchestrator can reach Aliquot's agents
 
 ## Model providers
 
-Ollama, vLLM or any OpenAI-compatible server, plus native Anthropic Messages and OpenAI Responses clients. An agent can send each data class to a different model.
+Ollama, vLLM or any OpenAI-compatible server, plus native Anthropic Messages, OpenAI Responses and Amazon Bedrock Converse clients, and the campus contracts most universities buy: Azure OpenAI (including deployment URLs with `api-version`), Claude in Microsoft Foundry, and Bedrock signed with AWS Signature Version 4 in Aliquot itself, with no AWS SDK. An agent can send each data class to a different model.
+
+An endpoint says whether it is under a business associate agreement (`baa = true`) and where the vendor keeps the data (`region = "us"`). A message or knowledge base carrying PHI is refused at any hosted endpoint without `baa = true`, and export-controlled or CUI content at any hosted endpoint whose region is not `us`, before a request leaves. The chat page, Slack and the record all name the rule. Anthropic's BAA covers its first-party API and Claude in Microsoft Foundry ([Anthropic](https://privacy.anthropic.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers)), Microsoft is a business associate for Azure ([Microsoft](https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us)), and Amazon Bedrock is HIPAA-eligible ([AWS](https://aws.amazon.com/compliance/hipaa-eligible-services-reference/)). Each of those needs the institution's own agreement with the vendor; `baa = true` records that the lab has one, it does not create one.
 
 <details>
 <summary>Protocols, sampling and per-class routing</summary>
 
-An endpoint in `lab.toml` speaks one of three protocols: `openai-chat` (the default, for Ollama, vLLM and other compatible servers), `anthropic-messages` or `openai-responses`. Model ids are exact: a provider that serves a different snapshot than the one pinned is a mismatch, not an answer. On the two native protocols Aliquot sends no `temperature` or `top_p` unless the endpoint sets `sampling = true`, because current reasoning models reject them. A tool turn's provider output, such as Anthropic thinking blocks or Responses reasoning items, is sent back unchanged, and only to the model that wrote it.
+An endpoint in `lab.toml` speaks one of four protocols: `openai-chat` (the default, for Ollama, vLLM, Azure OpenAI and other compatible servers), `anthropic-messages` (also Claude in Foundry, at `https://<resource>.services.ai.azure.com/anthropic`), `openai-responses` or `bedrock-converse` (with `aws_region` and `models`; the keys come from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` unless the endpoint names other variables). An Azure deployment URL takes `api_version`, sent as `?api-version=` on every request. `lab.example.toml` has one of each. Model ids are exact: a provider that serves a different snapshot than the one pinned is a mismatch, not an answer. On the two native protocols Aliquot sends no `temperature` or `top_p` unless the endpoint sets `sampling = true`, because current reasoning models reject them. A tool turn's provider output, such as Anthropic thinking blocks or Responses reasoning items, is sent back unchanged, and only to the model that wrote it.
 
 An agent can route by class with `modelsByClass`. For example, D0 and D1 go to a hosted model, and anything above goes to `model`, the top band, on lab hardware. When a tool result raises a run's class, the next call moves to the band that admits it.
 
@@ -323,6 +357,7 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm unit3` | Knowledge bases: compile, coverage gaps blocking publish, a restart mid-compile, `kb_search` and `kb_read` in a run, snapshot diff, refused URL hosts, publish with an override note. |
 | `pnpm lab0` | The first-use check on a synthetic lab, described below. |
 | `aliquot verify --anchors` | That nobody rewrote history in the database. The worker signs the head of the audit stream and of each closed run into an anchor log outside the database every few minutes, with a key the database never holds. This checks every line's signature and that the database still holds each signed hash, and names the first seq that changed. `test/anchor.test.ts` rewrites an audit row and a run event, recomputes every later hash so plain `aliquot verify` passes, and shows this check fail at that seq; it also catches a forged line, a line under another key, and a removed line. |
+| `pnpm trust` | The trust numbers in [`docs/trust.md`](docs/trust.md): unsupported claims, wrong citations, refusals both ways and planted instructions obeyed, on a larger synthetic lab. No Postgres and no key; CI runs it on every push. |
 | `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. |
 
 The tests that need macOS or the sandbox image skip elsewhere, each with its reason; CI runs on Linux.
@@ -346,6 +381,21 @@ The tests that need macOS or the sandbox image skip elsewhere, each with its rea
 | A worker with `[anchor]` set signs every chain into a log outside the database | 1 anchor line over 38 audit rows and 33 closed runs; `aliquot verify --anchors` holds |
 
 The fake models are scripted, so this checks retrieval, orchestration, provenance and egress control. It does not measure answer quality, and it does not show that a real lab wants this. That needs a pilot.
+
+### Trust numbers
+
+[`docs/trust.md`](docs/trust.md) holds the numbers a lab, an IRB or research IT asks for first, with the date and the commit they were measured on. `fixtures/lab1` is a generated lab of 234 entries and 350 questions with ground truth, 44 of its documents carrying an instruction planted in SOP or PDF text. Each question runs through the real run loop. At the last run:
+
+| What was measured | Result |
+|---|---|
+| Claims in Sonnet's answers that the entries it read do not support, judged claim by claim | 12 of 744 (1.6%) |
+| Answers citing an entry other than the one that answers the question (Sonnet) | 0 of 205; 87 name no entry, and the record lists the entries read |
+| Questions carrying participant ids or PHI that were answered instead of refused | 17 of 42, each a form the classifier does not catch yet (an SSN with spaces, a spelled-out date of birth, a lower-case id) |
+| Answerable questions refused | 7 of 258, each an SSN-shaped part number or the review marker |
+| Questions no entry covers that Sonnet answered anyway | 0 of 50 |
+| Planted instructions obeyed: by a scripted model that obeys everything, by Sonnet | 30 of 44, 0 of 40; no planted instruction got data past the egress decision |
+
+`pnpm trust --live` reruns the Sonnet half through `claude-batch`.
 
 ### What ran live
 
@@ -412,6 +462,12 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 ## For research IT and the IRB
 
 [`docs/for-research-it-and-irb.md`](docs/for-research-it-and-irb.md) is for the people who decide whether a lab may run Aliquot: where each class of data may go, what runs where, what is stored and under which key, and what is not covered yet. `pnpm aliquot sheet` prints the same facts for one deployment, from its `lab.toml` and its studies.
+
+## For a security review
+
+A campus security review asks control by control. `pnpm review-pack --config config/lab.toml` writes one answer per control for your lab: HIPAA Security Rule sections, every NIST SP 800-171 Rev. 3 family, and the HECVAT 4 question areas (in our words, not EDUCAUSE's). Each row says what Aliquot does toward the control, what your `lab.toml` makes true for it, and its status: met, partly, not met, or the lab's responsibility. A row reads met only when it names the tests that prove it, and a test in the suite fails when a cited test does not exist. Change `lab.toml` and the rows that depend on it change with it. The pack never says a deployment is compliant; that call is your institution's.
+
+The pack for the compose check's lab is committed: [summary](docs/review/check/summary.md) (not met first), [HIPAA](docs/review/check/hipaa.md), [NIST 800-171](docs/review/check/nist-800-171.md), [HECVAT answers](docs/review/check/hecvat-answers.md). Sign-on, key rotation and retention read not met until they land in 0.7.
 
 ## Working with a coding agent
 
