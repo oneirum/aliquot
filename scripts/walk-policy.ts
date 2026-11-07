@@ -154,6 +154,15 @@ try {
     view(`${cls} on the lab model`, 'model_tier = "local"', q, a);
   }
 
+  // The same agent with its endpoint's region removed: the rig notes are at D3 and may hold export_controlled, so even
+  // a public question is refused before the run, because a run that read them would send them to that endpoint.
+  const noRegion = join(work, "lab-noregion.toml");
+  writeFileSync(noRegion, readFileSync(cfgLab, "utf8").replace(`base_url = "${lab.url}"\nplacement = "lab"\nregion = "us"`, `base_url = "${lab.url}"\nplacement = "lab"`));
+  const nrWeb = await ps.startWeb(noRegion);
+  const kbHeld = await ask(nrWeb.base, "What are the office hours?");
+  asked["kb-residency"] = kbHeld;
+  view("export_controlled held by a knowledge base, endpoint with no region", 'residency = "us"', "What are the office hours?", kbHeld);
+
   print("Knowledge bases. The compiler is a model too, so a source in a class no model may read never reaches it:\n");
   const before = compiler.requests;
   const duaOut = await kb(["compile", "--definition", join(kbDir, "kb-dbgap.json"), "--wait", "--timeout-ms", "60000"]);
@@ -188,6 +197,9 @@ try {
     assert.equal(asked[c]!.hosted + asked[c]!.lab, 0, `${c}: no model request`);
     assert.match(asked[c]!.shown, new RegExp(`Data class ${c}`));
   }
+  assert.equal(asked["kb-residency"]!.status, 403);
+  assert.equal(asked["kb-residency"]!.lab + asked["kb-residency"]!.hosted, 0, "no model request when a KB may hold a residency class");
+  assert.match(asked["kb-residency"]!.shown, /Knowledge base lab0-export is at D3 and may hold data class export_controlled; rule residency = "us"/);
   assert.equal(asked["kb-dua"]!.lab, 0, "no compiler request for a DUA-bound source");
   assert.match(asked["kb-dua"]!.shown, /data class controlled_access \(detector dua-marker\); rule model_tier = "none"/);
   const rig = sv.knowledgeBases.find((k) => k.kbId === "lab0-export");

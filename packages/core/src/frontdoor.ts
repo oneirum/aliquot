@@ -16,7 +16,7 @@
 
 import { z } from "zod";
 import { modelFor, resolveAgent, versionHash, type AgentDocument, type Catalog } from "./agent.ts";
-import { decideEgress, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
+import { decideEgress, join, rank, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { appendAudit, type AuditEvent } from "./audit.ts";
 import { gateClassified, type GateDeps, type InboundMessage } from "./gate.ts";
@@ -127,6 +127,17 @@ async function admit(msg: InboundMessage, doc: AgentDocument, key: string, trigg
     const endpointId = modelFor(resolved.agent, classification.level).endpointId;
     const refusal = residencyRefusal(rule, classification, endpointId, deps.endpointRegion?.(endpointId) ?? null);
     if (refusal) return recordClassRefusal(msg, classification, admitted.text, refusal, residencyRuleText(rule), policy, deps);
+    // A knowledge base at or above a residency class's level may hold that class, and a run that reads it moves to the
+    // model for the raised level. The snapshot carries a level, not a class, so this fails closed: that model's
+    // endpoint must be in the class's region before the run starts.
+    for (const c of policy.classes.filter((k) => k.residency !== null)) {
+      for (const kb of resolved.agent.knowledgeBases.filter((k) => rank(k.cls) >= rank(c.level))) {
+        const id = modelFor(resolved.agent, join(kb.cls, classification.level)).endpointId;
+        const held: Classification = { class: c.id, level: kb.cls, rule: `knowledge-base:${kb.kbId}`, spans: [] };
+        const r = residencyRefusal(c, held, id, deps.endpointRegion?.(id) ?? null);
+        if (r) return recordClassRefusal(msg, held, admitted.text, `${r.replace(/^Not sent\. Data class ([^;]+);/, `Not sent. Knowledge base ${kb.kbId} is at ${kb.cls} and may hold data class $1;`)}`, residencyRuleText(c), policy, deps);
+      }
+    }
   }
   const hash = versionHash(resolved.agent);
   await deps.db.query("insert into agent_versions (hash, agent_id, body) values ($1, $2, $3) on conflict (hash) do nothing", [hash, resolved.agent.agentId, JSON.stringify(resolved.agent)]);
