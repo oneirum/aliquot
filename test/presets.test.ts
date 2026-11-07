@@ -144,6 +144,8 @@ test("the card-number detector takes Luhn-valid numbers only", () => {
   assert.equal(c("card 4111-1111-1111-1111"), "payment_card");
   assert.equal(c("card 4111 1111 1111 1112"), "internal");
   assert.equal(c("sample 20260304120000 run"), "internal");
+  // Epoch milliseconds pass Luhn about one time in ten; none carries a card network's prefix.
+  for (let t = 1_762_000_000_000; t < 1_762_000_002_000; t++) assert.equal(c(`logged at ${t}`), "internal", String(t));
 });
 
 test("the README's preset tables are what pnpm presets:table prints", async () => {

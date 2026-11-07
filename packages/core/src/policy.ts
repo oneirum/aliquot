@@ -87,10 +87,13 @@ interface Detector {
 
 const PHONE = String.raw`(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}`;
 const DATE = String.raw`(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})`;
-/** A payment card number passes the Luhn check; most other long digit runs do not. */
+/** A card network's number prefix (Visa, Mastercard, Amex, Discover, JCB, Diners), which an epoch timestamp (17..., 18...) never has. */
+const CARD_PREFIX = /^(?:4|5[1-5]|2[2-7]|3[47]|3[0689]|35|6011|64[4-9]|65)/;
+
+/** A payment card number has a network prefix and passes the Luhn check; most other long digit runs do neither. */
 function luhn(match: string): boolean {
   const digits = match.replace(/\D/g, "");
-  if (digits.length < 13 || digits.length > 19) return false;
+  if (digits.length < 13 || digits.length > 19 || !CARD_PREFIX.test(digits)) return false;
   let sum = 0;
   for (let i = 0; i < digits.length; i++) {
     let d = Number(digits[digits.length - 1 - i]);
