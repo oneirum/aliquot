@@ -13,6 +13,7 @@ import { AUTH_HEADERS, regionOf, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
+import { buildPolicy, ceilingOfStore, MODEL_TIERS, RECORD_MODES, type Policy } from "./policy.ts";
 
 const placement = z.enum(PLACEMENTS);
 
@@ -136,6 +137,7 @@ const schema = z.object({
     z.object({
       base_url: z.string().url(),
       placement,
+      region: z.string().regex(/^[a-z]{2}$/, "a region is a two-letter country code, such as us").optional(),
       api_key_env: z.string().optional(),
       api_key_file: z.string().min(1).optional(),
       auth_header: z.enum(AUTH_HEADERS).optional(),
@@ -145,7 +147,6 @@ const schema = z.object({
       protocol: z.enum(PROTOCOLS).default("openai-chat"),
       sampling: z.boolean().optional(),
       baa: z.boolean().default(false),
-      region: z.string().regex(/^[a-z]{2,8}$/, "region is a lowercase code such as us or eu").optional(),
       api_version: z.string().min(1).optional(),
       aws_region: z.string().regex(/^[a-z]{2}(-[a-z]+)+-\d+$/, "aws_region is an AWS region such as us-east-1").optional(),
       aws_access_key_id_env: z.string().min(1).default("AWS_ACCESS_KEY_ID"),
@@ -157,6 +158,23 @@ const schema = z.object({
   hosts: z.record(z.string(), placement).default({}),
   policy: z.object({ review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"), participant_id_patterns: z.array(z.string()).default([]) }).default({ review_confidential: "refuse", participant_id_patterns: [] }),
   agents: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
+  /** [classes.<id>]: the lab's data classes over the five built-ins (policy.ts). */
+  classes: z
+    .record(
+      z.string(),
+      z
+        .object({
+          level: z.enum(DATA_CLASSES).optional(),
+          model_tier: z.enum(MODEL_TIERS).optional(),
+          record: z.enum(RECORD_MODES).optional(),
+          retention_days: z.number().int().min(0).optional(),
+          residency: z.string().regex(/^[a-z]{2}$/, "residency is a two-letter country code, such as us").optional(),
+          detectors: z.array(z.string()).optional(),
+          message: z.string().trim().min(1).optional(),
+        })
+        .strict(),
+    )
+    .default({}),
   /**
    * "surface:channel" -> the class every message there starts at. Unlisted channels start at D1. Detectors only raise it.
    * A floor below D1 is allowed only for the channel [surfaces.web] channel binds, because anywhere else the sender names the channel.
@@ -198,6 +216,8 @@ export interface LabConfig {
   readonly hosts: Readonly<Record<string, Placement>>;
   readonly policy: EgressPolicy;
   readonly participantIdPatterns: readonly RegExp[];
+  /** The data classes: the built-ins merged with [classes]. With no [classes] table, the behaviour before classes existed. */
+  readonly classes: Policy;
   /** Absolute paths. This build reads agents and knowledge bases from fixture files; the studio replaces the agent list. */
   readonly agentFixtures: readonly string[];
   readonly kbFixtures: readonly string[];
@@ -258,6 +278,14 @@ export function parseConfig(text: string, path: string): LabConfig {
   const lowered = Object.entries(c.channel_floors).filter(([key, cls]) => rank(cls) < rank("D1") && key !== `web:${bound}`);
   if (lowered.length)
     throw new Error(`lab.toml: channel_floors ${lowered.map(([k]) => k).join(", ")} is below D1, which only the channel [surfaces.web] channel binds may be; the sender names any other channel`);
+  const egress: EgressPolicy = { reviewConfidential: c.policy.review_confidential };
+  const participantIdPatterns = c.policy.participant_id_patterns.map((p) => new RegExp(p));
+  const classes = buildPolicy(c.classes, egress, participantIdPatterns);
+  for (const k of classes.classes) {
+    if (k.modelTier !== "none" || k.record !== "text") continue;
+    const refusal = ceilingOfStore(k.level, c.store.placement, egress);
+    if (refusal) throw new Error(`lab.toml: [classes.${k.id}] has record = "text", but ${refusal}; use record = "hash" or "none"`);
+  }
   return {
     path,
     databaseUrlEnv: c.database.url_env,
@@ -266,6 +294,7 @@ export function parseConfig(text: string, path: string): LabConfig {
       id,
       baseUrl: e.base_url,
       placement: e.placement,
+      ...(e.region ? { region: e.region } : {}),
       ...(e.api_key_env ? { apiKeyEnv: e.api_key_env } : {}),
       ...(e.api_key_file ? { apiKeyFile: resolve(dir, e.api_key_file) } : {}),
       ...(e.auth_header ? { authHeader: e.auth_header } : {}),
@@ -275,7 +304,6 @@ export function parseConfig(text: string, path: string): LabConfig {
       protocol: e.protocol,
       ...(e.sampling !== undefined ? { sampling: e.sampling } : {}),
       ...(e.baa ? { baa: true } : {}),
-      ...(e.region ? { region: e.region } : {}),
       ...(e.api_version ? { apiVersion: e.api_version } : {}),
       ...(e.protocol === "bedrock-converse" && e.aws_region
         ? { aws: { region: e.aws_region, accessKeyIdEnv: e.aws_access_key_id_env, secretAccessKeyEnv: e.aws_secret_access_key_env, sessionTokenEnv: e.aws_session_token_env } }
@@ -295,8 +323,9 @@ export function parseConfig(text: string, path: string): LabConfig {
     web: surfaces[0],
     surfaces,
     hosts: Object.fromEntries(Object.entries(c.hosts).map(([h, p]) => [h.toLowerCase(), p])),
-    policy: { reviewConfidential: c.policy.review_confidential },
-    participantIdPatterns: c.policy.participant_id_patterns.map((p) => new RegExp(p)),
+    policy: egress,
+    participantIdPatterns,
+    classes,
     agentFixtures: c.agents.fixtures.map((f) => resolve(dir, f)),
     kbFixtures: c.knowledge_bases.fixtures.map((f) => resolve(dir, f)),
     channelFloors: c.channel_floors,

@@ -96,7 +96,7 @@ export class Labelled<T> {
  * export-controlled: ITAR or EAR technical data. "This kind of data cannot be stored on systems outside the United
  *                    States" (safecomputing.umich.edu/protect-the-u/compliance/compliance-table).
  * cui:               Controlled Unclassified Information. Held to the same US-only rule.
- * Today the gate's stand-in predicate (gate.ts marksOf) sets them; aliquot-policy's classify() classes replace it.
+ * The gate sets them from policy classify(): classes phi, export_controlled and cui, HIPAA identifier detectors, and handling banners (gate.ts marksOf).
  */
 export const MARKS = ["phi", "export-controlled", "cui"] as const;
 export type Mark = (typeof MARKS)[number];

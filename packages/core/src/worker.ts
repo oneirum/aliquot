@@ -182,6 +182,7 @@ export async function workOn(core: Core, opts: WorkerOptions): Promise<void> {
         kb: core.kb,
         surfaces: core.surfaces,
         policy: core.config.policy,
+        classes: core.config.classes,
         loadAgent,
         deployed,
         clock: { now: () => Date.now() },

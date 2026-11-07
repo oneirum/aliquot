@@ -19,8 +19,8 @@
  */
 
 import { z } from "zod";
-import { DATA_CLASSES, Labelled, type DataClass, type Mark } from "./dataclass.ts";
-import { classifyText, marksOf } from "./gate.ts";
+import { DATA_CLASSES, Labelled, unionMarks, type DataClass, type Mark } from "./dataclass.ts";
+import { marksIn } from "./gate.ts";
 import type { Db } from "./db.ts";
 import type { Addresser, EntryHash, PayloadHash, SnapshotId, Sha256 } from "./hash.ts";
 import type { ModelTarget } from "./gateway.ts";
@@ -286,7 +286,7 @@ export function createKbReader(source: SnapshotSource): KbReader {
   const marks = new WeakMap<LoadedSnapshot, readonly Mark[]>();
   const marksOfSnapshot = (l: LoadedSnapshot): readonly Mark[] => {
     let m = marks.get(l);
-    if (!m) marks.set(l, (m = marksOf(l.entries.flatMap((e) => classifyText(`${e.title}\n${e.body}`, "D0", []).detections))));
+    if (!m) marks.set(l, (m = unionMarks(l.entries.flatMap((e) => marksIn(`${e.title}\n${e.body}`)))));
     return m;
   };
   const stamp = <T>(l: LoadedSnapshot, value: T) => Labelled.stamp(value, l.snapshot.cls, `kb:${l.snapshot.id}`, marksOfSnapshot(l));

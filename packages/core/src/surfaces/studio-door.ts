@@ -15,6 +15,8 @@
  *   agent-publish      {draft, draftHash, changelog}  confirmPublish
  *   agent-test         {draft, thread, text}          a test message through intake on the studio surface; mayPreview at the ceiling
  *   test-run           {runId}                        the actor's own test run: agent, outcome, replies
+ *   data-classes       {}                             the lab's data classes, and which published KB sources and entries carry each; any role.
+ *                                                     Class names, paths and detector ids only: no source or entry text leaves the door
  */
 
 import { randomUUID } from "node:crypto";
@@ -25,8 +27,9 @@ import { rank, type SurfaceId } from "../dataclass.ts";
 import type { StudioOpName } from "../door-client.ts";
 import type { Db } from "../db.ts";
 import { intakeTest, type IntakeDeps, type IntakeResult } from "../frontdoor.ts";
-import type { Sha256, SnapshotId } from "../hash.ts";
-import { loadManifest, storedSnapshots } from "../kb.ts";
+import type { PayloadHash, Sha256, SnapshotId } from "../hash.ts";
+import { loadManifest, publishedSnapshots, storedSnapshots } from "../kb.ts";
+import { classify, classOfLevel, strictestClass } from "../policy.ts";
 import { attachedFiles, compileClass, compileResult, kbPublishClass, loadOverrides, parseKbDefinition, publishSnapshot, readSources, renderCoverage, requestCompile, type KbDefinition } from "../kb-compile.ts";
 import { confirmPublish, describePublishRefusal, PublishRefused, requestPublish } from "../publish.ts";
 import { loadEvents, type RunId } from "../record.ts";
@@ -79,7 +82,7 @@ const OPS: Record<StudioOpName, Op> = {
       return refuse(400, reason(err));
     }
     try {
-      const loaded = await readSources(def, sources, { http, address: intake.store.address, db: intake.db, actor: actor.id, labPatterns: config.participantIdPatterns });
+      const loaded = await readSources(def, sources, { http, address: intake.store.address, db: intake.db, actor: actor.id, labPatterns: config.participantIdPatterns, classes: config.classes, endpointRegion: (id) => config.endpoints.find((e) => e.id === id)?.region ?? null });
       return ok(await requestCompile(intake, def, loaded, new Date()));
     } catch (err) {
       return refuse(409, reason(err));
@@ -153,6 +156,25 @@ const OPS: Record<StudioOpName, Op> = {
     if (!draft.ok) return refuse(409, describePublishRefusal({ t: "invalid", issues: draft.issues }));
     if (!mayPreview(actor.role, draft.doc.ceiling)) return refuse(403, `Testing an agent at ${draft.doc.ceiling} needs the data steward or the PI.`);
     return ok(await testDraft(draft.doc, { member: actor.id, thread: b.thread, message: randomUUID(), text }, intake, surface));
+  }),
+
+  "data-classes": op(z.object({}), async ({ config, intake: { db, store } }) => {
+    const policy = config.classes;
+    const knowledgeBases = [];
+    for (const snapshot of await publishedSnapshots(db, store.address)) {
+      const sources = await Promise.all(
+        snapshot.sources.map(async (s) => {
+          const body = await store.get({ hash: s.contentHash as string as PayloadHash, cls: s.cls, bytes: 0 });
+          const c = "redacted" in body ? null : classify(policy, { t: "entry", text: String(body.value), declared: s.cls });
+          return { sourceId: s.sourceId, level: s.cls, class: c?.class ?? classOfLevel(policy, s.cls).id, rule: c?.rule ?? "redacted", detectors: [...new Set(c?.spans.map((x) => x.detector) ?? [])] };
+        }),
+      );
+      const bySource = new Map(sources.map((s) => [s.sourceId, s.class]));
+      const loaded = await storedSnapshots(db, store).load(snapshot.id);
+      const entries = (loaded?.entries ?? []).map((e) => ({ path: e.path, class: strictestClass(policy, [...new Set(e.facts.flatMap((f) => f.sources.flatMap((x) => (bySource.has(x.sourceId) ? [bySource.get(x.sourceId)!] : []))))]).id }));
+      knowledgeBases.push({ kbId: snapshot.kbId, title: snapshot.title, snapshot: snapshot.id, level: snapshot.cls, sources, entries });
+    }
+    return ok({ classes: policy.classes, knowledgeBases });
   }),
 
   "test-run": op(z.object({ runId: z.string() }), async ({ intake: { db } }, actor, b) => {

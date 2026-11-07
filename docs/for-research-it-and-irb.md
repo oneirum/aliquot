@@ -27,6 +27,44 @@ A message gets its class at the gate (`packages/core/src/gate.ts`), which runs b
 gate checks built-in patterns and the lab's own participant id patterns from `lab.toml`. A knowledge base's class is
 declared by its steward. The compile step raises that class when its source text matches a pattern.
 
+### Classes a lab declares
+
+The five levels above are what every egress decision reads. On top of them a lab declares data classes in `lab.toml`
+(`[classes.<id>]`, `packages/core/src/policy.ts`). Each class sits at one level, and `lab.toml` fails to load when a
+class asks for less protection than its level enforces, so a class can only add rules. The five built-in classes are
+always there and, with no `[classes]` table, behave exactly as Aliquot did before classes existed.
+
+| Class | Level | Model tier | Record of a refused message | Detectors | Where it comes from |
+|---|---|---|---|---|---|
+| `public` | D0 | hosted | text | none (a channel's floor) | built in |
+| `internal` | D1 | hosted | text | none (the default floor) | built in |
+| `confidential` | D2 | hosted (approved placement) | text | phone, email | built in |
+| `restricted` | D3 | local (lab or institution) | text | SSN, MRN, date of birth, the lab's participant ids | built in |
+| `review-confidential` | R | none under `refuse`, local under `lab-only` | keyed hash | REVIEW-CONFIDENTIAL marker | built in |
+| `phi` | D3 | none | keyed hash, 30 days | HIPAA Safe Harbor identifiers (45 CFR 164.514(b)(2)) | example in `fixtures/policy/classes.toml` |
+| `controlled_access` | D3 | none | keyed hash, 365 days | DUA marker: `DUA:` lines, dbGaP `phs` accessions, EGA ids | example; NIH NOT-OD-25-081 |
+| `export_controlled` | D3 | local, residency `us` | text | ITAR, EAR99, ECCN, USML markings | example |
+
+What each tier means, and where it is enforced:
+
+- **hosted**: the level's ceiling decides which placements may read it (the table above).
+- **local**: the level is D3 or R, which the ceilings admit only at lab and institution placements. A run on a hosted
+  model is refused at the gateway before the request, and its notice names the class.
+- **none**: the door refuses the message before a run exists, so no model at any placement receives it. The refusal is
+  an audit event (`gate.refused`) holding the class, the rule, the detectors, the retention, and the text, its keyed
+  hash or nothing, as the class's `record` says. A knowledge base source in such a class is refused before its compile
+  job exists (`kb.source-refused`), because the compiler is a model too.
+- **residency**: a class with `residency = "us"` is read only by an endpoint whose `[endpoints.<id>]` says
+  `region = "us"`. An endpoint with no region is in none. Checked at the door against the agent's model and at
+  knowledge base compile against the compiler.
+
+Safe Harbor identifiers covered by a pattern: names after a label (patient, name), street addresses and ZIP codes,
+dates tied to an admission, discharge, death, service or birth, ages over 89, phone and fax numbers, email addresses,
+SSNs, MRNs, health plan, account, certificate and licence numbers, VINs and licence plates, device serials, URLs (not
+scholarly hosts such as doi.org or PubMed), IP addresses and labelled biometric ids. Full-face photographs are not
+text and are not checked. "Any other unique identifying number" is the lab's own participant id patterns. Patterns
+miss what they do not match: see "Not covered yet".
+
 ## Where each class may go
 
 Each destination has a placement, which the lab declares in `lab.toml`. The table of ceilings is code, not
@@ -125,17 +163,16 @@ legal regime may go, on top of its class:
 |---|---|---|---|
 | `placement` | `lab`, `institution`, `approved`, `zdr`, `public` | none (required) | The highest class the endpoint may receive (the table above) |
 | `baa` | `true`, `false` | `false` | Whether PHI may go there. `true` records that a business associate agreement covers the endpoint, or that the covered entity runs it. Aliquot does not check the agreement exists. |
-| `region` | a lowercase code, such as `us` or `eu` | unknown | Where the vendor keeps the data. Export-controlled and CUI content go only to `us`; unknown counts as outside the US. |
+| `region` | a two-letter code, such as `us` | unknown | Where the vendor keeps the data. Export-controlled and CUI content go only to `us`; unknown counts as outside the US. |
 
-What marks content today is a stand-in until the data classification policy layer lands: the same patterns
-(`marksOf` in `packages/core/src/gate.ts`) run over each message at the gate and over each knowledge base's entries
-when it loads.
+The data classes above set the marks (`marksOf` in `packages/core/src/gate.ts`), over each message at the gate, each
+knowledge base's entries when it loads, and each compile prompt.
 
 | Mark | Set by | Rule at a model endpoint off lab hardware | Refusal code |
 |---|---|---|---|
-| PHI | an MRN or a date of birth (both D3), or a `PHI` banner | refused unless `baa = true` | `phi-needs-baa` |
-| Export-controlled | an `ITAR` or `EXPORT CONTROLLED` banner | refused unless `region = "us"` | `export-needs-us` |
-| CUI | a `CUI` banner, such as `CUI//SP-PRVCY` | refused unless `region = "us"` | `export-needs-us` |
+| PHI | a span in a `phi` class, any HIPAA identifier detector (an MRN, a date of birth, the `phi-*` set) whatever class lists it, or a `PHI` banner | refused unless `baa = true` | `phi-needs-baa` |
+| Export-controlled | a span in an `export_controlled` class, the `export-marker` detector, or an `ITAR` or `EXPORT CONTROLLED` banner | refused unless `region = "us"` | `export-needs-us` |
+| CUI | a span in a `cui` class, or a `CUI` banner, such as `CUI//SP-PRVCY` | refused unless `region = "us"` | `export-needs-us` |
 
 A banner is the marking at the start of a line, alone or followed by `:` or `//`, in capitals. A sentence that only
 names the regime ("does this contain PHI?") is not one. A banner sets the mark and leaves the class as it was.
@@ -238,7 +275,9 @@ after either.
 
 ## Not covered yet
 
-- **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A lab must add its
+- **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A name without a
+  label ("John Smith was admitted") is not found by `phi-name`; a lab with free-text PHI should set its PHI channels'
+  floor to D3 rather than rely on detectors. Detector accuracy at scale is measured by the trust harness, not here. A lab must add its
   own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,
   and refuses a pattern that matches ordinary text or no sample id.
 - **No sign-on.** Keep the web door on the machine until sign-on lands.

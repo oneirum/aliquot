@@ -1,0 +1,25 @@
+{
+  "kbId": "lab0-export",
+  "title": "Field rig engineering notes",
+  "purpose": "Engineering notes for the field rig.",
+  "sources": [
+    {
+      "sourceId": "export-notes",
+      "kind": "file",
+      "location": "export-notes.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    }
+  ],
+  "coverageQuestions": [
+    "Where are the drawings kept?",
+    "Who may see the drawings?",
+    "What category are the drawings?",
+    "Which rig uses the housing?",
+    "Can the drawings be emailed?"
+  ],
+  "compiler": {
+    "endpointId": "local",
+    "modelId": "scripted-1"
+  }
+}

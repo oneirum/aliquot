@@ -48,6 +48,12 @@ export interface ModelEndpoint {
   readonly id: string;
   readonly baseUrl: string;
   readonly placement: Placement;
+  /**
+   * Where the endpoint's servers run, as an ISO country code ("us"), when lab.toml says. A data class with a residency
+   * rule is read only by an endpoint in that region; an endpoint with no region is in none (fail closed). Marked
+   * export-controlled or CUI content goes only to region "us" (regionOf).
+   */
+  readonly region?: string;
   readonly apiKeyEnv?: string;
   /** Read on every request, so a timer outside Aliquot can refresh a short-lived token. An absolute path. */
   readonly apiKeyFile?: string;
@@ -64,8 +70,6 @@ export interface ModelEndpoint {
   readonly sampling?: boolean;
   /** PHI may come here: a business associate agreement covers it, or the covered entity runs it. Absent: false. */
   readonly baa?: boolean;
-  /** Where the vendor keeps the data ("us", "eu"). Absent: unknown, which export-controlled and CUI content treat as not us. */
-  readonly region?: string;
   /** Azure OpenAI deployment URLs: sent as ?api-version= on every request. */
   readonly apiVersion?: string;
   /** bedrock-converse: the AWS region it signs for and the env vars holding the keys. */

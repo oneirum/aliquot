@@ -6,7 +6,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_POLICY, decideEgress, describeRefusal, Labelled, type Mark } from "../packages/core/src/dataclass.ts";
 import { createGateway, Prompt, regionOf, type ExactModelId, type ModelEndpoint, type ModelTarget } from "../packages/core/src/gateway.ts";
-import { classifyText, marksOf } from "../packages/core/src/gate.ts";
+import { classifyText, marksIn } from "../packages/core/src/gate.ts";
 import { parseConfig } from "../packages/core/src/config.ts";
 import { startFakeAzureOpenAI, startFakeBedrock, TEST_AWS } from "./fake-cloud.ts";
 import { startFakeProvider } from "./fake-provider.ts";
@@ -58,8 +58,7 @@ const KB_TOOL = { name: "kb_search", description: "search", inputSchema: { type:
 
 /** A prompt whose user part went through the gate's classifier, as a member's message does. */
 function asked(text: string): Prompt {
-  const { cls, detections } = classifyText(text, "D1", []);
-  return Prompt.of([{ role: "system", content: Labelled.stamp("Answer from the handbook.", "D1", "t") }, { role: "user", content: Labelled.stamp(text, cls, "gate", marksOf(detections)) }], [KB_TOOL]);
+  return Prompt.of([{ role: "system", content: Labelled.stamp("Answer from the handbook.", "D1", "t") }, { role: "user", content: Labelled.stamp(text, classifyText(text, "D1", []).cls, "gate", marksIn(text)) }], [KB_TOOL]);
 }
 
 // The decision itself ----------------------------------------------------------------------------------------------
@@ -96,8 +95,8 @@ test("marks survive derive as a union, and only another mark can be added", () =
   assert.ok(Object.isFrozen(a.marks));
 });
 
-test("the gate's stand-in predicate marks PHI, export-controlled and CUI", () => {
-  const marks = (t: string) => marksOf(classifyText(t, "D1", []).detections);
+test("the gate marks PHI, export-controlled and CUI", () => {
+  const marks = (t: string) => marksIn(t);
   assert.deepEqual(marks("MRN 0012345 came back"), ["phi"]);
   assert.deepEqual(marks("PHI: the visit notes"), ["phi"]);
   assert.deepEqual(marks("ITAR: rig drawing 7"), ["export-controlled"]);
