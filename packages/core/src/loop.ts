@@ -20,7 +20,8 @@
 
 import { AgentUnavailable, instructionsOf, modelFor, UnrunnableAgent, verifyRunnable, type Deployed, type ResolvedAgent } from "./agent.ts";
 import { Labelled, type EgressPolicy } from "./dataclass.ts";
-import { MalformedJob, parseRunJobPayload, postReply, SurfaceUnknown, type Surface } from "./frontdoor.ts";
+import { MalformedJob, parseRunJobPayload, postReply, runJobPayloadSchema, SurfaceUnknown, type Surface } from "./frontdoor.ts";
+import { runRefusalText, type Policy } from "./policy.ts";
 import { Prompt, type ChatPart, type ModelGateway } from "./gateway.ts";
 import type { AgentVersionHash } from "./hash.ts";
 import type { KbReader } from "./kb.ts";
@@ -158,6 +159,8 @@ export interface LoopDeps {
   readonly kb: KbReader;
   readonly surfaces: (surfaceId: string) => Surface;
   readonly policy: EgressPolicy;
+  /** lab.toml's data classes. A refused run's notice names the class and the rule; without them it says what it always said. */
+  readonly classes?: Policy;
   readonly loadAgent: (hash: AgentVersionHash) => Promise<ResolvedAgent>;
   /** What this deployment serves for this agent. Every run start checks the version's pins against it. */
   readonly deployed: (agent: ResolvedAgent) => Promise<Deployed>;
@@ -199,6 +202,13 @@ const NOTICES: Record<Notice, string> = {
   failed: "The run failed after repeated errors. Please try again.",
   unrunnable: "This agent version cannot run on this deployment. Ask the lab manager to check it.",
 };
+
+/** A refused run names the data class that refused it and the class's rule, when the deployment's classes are known. */
+function noticeText(notice: Notice, state: RunState, job: LeasedJob, deps: LoopDeps): string {
+  if (notice !== "refused" || !deps.classes || !state.refused) return NOTICES[notice];
+  const parsed = runJobPayloadSchema.shape.dataClass.safeParse((job.payload as { dataClass?: unknown } | null)?.dataClass);
+  return runRefusalText(deps.classes, state.refused, parsed.success ? parsed.data : undefined) ?? NOTICES[notice];
+}
 
 /**
  * The shell. Writes run.started from the job on first claim, loads the agent
@@ -288,7 +298,7 @@ export async function drive(job: LeasedJob, journal: RunJournal, deps: LoopDeps)
           if (action.body.t === "answer") {
             const body = await journal.get(action.body.ref);
             answer = Labelled.derive(String(body.value), [body], "loop:answer");
-          } else answer = Labelled.stamp(NOTICES[action.body.notice], "D0", "loop:notice");
+          } else answer = Labelled.stamp(noticeText(action.body.notice, state, job, deps), "D0", "loop:notice");
           await postNotice(known, state, answer, journal, deps);
           return null;
         }

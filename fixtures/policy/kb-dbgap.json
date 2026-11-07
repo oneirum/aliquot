@@ -1,0 +1,26 @@
+{
+  "kbId": "lab0-dbgap",
+  "title": "Sleep cohort dbGaP release",
+  "purpose": "Rules for the sleep cohort's controlled-access release, for analysts on the data use certification.",
+  "sources": [
+    {
+      "sourceId": "dbgap-consent",
+      "kind": "file",
+      "location": "dbgap-consent.md",
+      "cls": "D1",
+      "licence": "internal-only"
+    }
+  ],
+  "irbProtocol": "SYNTH-LAB0",
+  "coverageQuestions": [
+    "Which consent groups does the release have?",
+    "Who may open the release?",
+    "Where must the release be stored?",
+    "How is a new analyst approved?",
+    "What does HMB allow?"
+  ],
+  "compiler": {
+    "endpointId": "local",
+    "modelId": "scripted-1"
+  }
+}

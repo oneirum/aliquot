@@ -61,8 +61,17 @@ export const KnowledgeBases: CollectionConfig = {
     defaultColumns: ["title", "kbId", "updatedAt"],
     description: "A knowledge base is compiled from documents. Save the definition, attach the files and compile, read the coverage report, then publish.",
   },
-  fields: [...fields, { name: "kbPanel", type: "ui", admin: { position: "sidebar", components: { Field: "/components/KbPanel.tsx#KbPanel" } } }],
+  fields: [...fields, { name: "kbPanel", type: "ui", admin: { position: "sidebar", components: { Field: "/components/KbPanel.tsx#KbPanel" } } }, { name: "classesPanel", type: "ui", admin: { position: "sidebar", components: { Field: "/components/ClassesPanel.tsx#ClassesPanel" } } }],
   endpoints: [
+    {
+      path: "/catalog/classes",
+      method: "get",
+      handler: async (req) => {
+        const actor = actorOf(req.user);
+        if (!actor) return json({ error: "Sign in first." }, 401);
+        return relay(await (await core()).call("data-classes", actor, {}));
+      },
+    },
     {
       path: "/:id/compile",
       method: "post",
