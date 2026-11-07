@@ -336,15 +336,15 @@ export function ceilingOfStore(level: DataClass, placement: Placement, egress: E
   return ceiling === "none" || rank(level) > rank(ceiling) ? `the store at placement ${placement} may not hold ${level}` : null;
 }
 
+/** The sentence every refused run has always opened with; the class and the rule follow it, so earlier readers of the notice still match. */
+export const RUN_REFUSED = "This request cannot be answered here: it contains restricted data that the configured model may not receive.";
+
 /**
  * The notice for a run the egress decision refused: the class whose level the refused payload reached, and its rule.
  * The message's own class when it is at that level (the gate recorded it on the job); otherwise every class at the
  * level, because content from a knowledge base or a tool carries a level, not a detector. Null for a refusal that is
  * not about a class (a host or model rule), which keeps the generic notice.
  */
-/** The sentence every refused run has always opened with; the class and the rule follow it, so earlier readers of the notice still match. */
-export const RUN_REFUSED = "This request cannot be answered here: it contains restricted data that the configured model may not receive.";
-
 export function runRefusalText(policy: Policy, refusal: EgressRefusal, messageClass?: { readonly id: string; readonly rule: string }): string | null {
   const level: DataClass | null =
     refusal.code === "class-above-ceiling" || refusal.code === "destination-receives-nothing" ? refusal.payload
