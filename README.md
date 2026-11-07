@@ -197,6 +197,28 @@ Each file in [`presets/`](presets) is a starting point for your data steward, no
 | Level 4 High Risk, Sensitive | `export_controlled` | D3 | a lab or institution model only, region us | [source](https://research.harvard.edu/files/2023/12/HRDSP-Approved-2020.07.15_2023-1.pdf) |
 | Level 5 Extreme Risk, Sensitive | `extreme_risk` | D3 | no model: refused at the door | [source](https://docs.rc.fas.harvard.edu/kb/data-security-levels) |
 
+### Data bound to named people: DUAs
+
+A class says how sensitive data is. A data use agreement says who may have it, and until when. NIH controlled-access data may go to no one the Data Access Request does not name, and into no hosted generative AI tool ([NOT-OD-25-081](https://grants.nih.gov/grants/guide/notice-files/NOT-OD-25-081.html)); a campus's restricted data needs each recipient's authorization checked. A `[duas.<id>]` table in `lab.toml` records the agreement and what it covers:
+
+```toml
+[duas.sleep-release]
+members = ["ana@lab0.example", "raj@lab0.example"]   # member ids as runs record them: the [auth] id_claim under sign-on
+expires = 2027-06-30                                  # the last day it holds; from the next day it refuses everyone
+class = "restricted"                                  # never a class a hosted model reads: lab.toml refuses that
+entries = ["lab0-release/release/consent-groups.md"]  # one entry of a knowledge base, as <kbId>/<path>
+knowledge_bases = []                                  # or whole knowledge bases
+datasets = []                                         # and datasets run_code mounts
+```
+
+Every knowledge base read and every dataset a run's tools see goes through the asking member's DUAs:
+
+- **A member the DUA does not name gets nothing of it.** Its entries are not in the outline, not in `kb_search` hits, not in `kb_read`, and its datasets are not in `dataset_list` or mountable in `run_code`. The tool tells the model which DUA and which rule kept something back, so the member reads, for example, `DUA sleep-release does not name the member who asked; rule: only the members [duas.sleep-release] members names read its data`. The record does not list a withheld entry as retrieved.
+- **An expired DUA refuses everyone,** the members it names included: `DUA sleep-linkage-2025 expired on 2026-01-31; rule: no one reads its data after [duas.sleep-linkage-2025] expires, until the lab records a renewal`. A run no member started (a schedule, an eval) is refused too.
+- **A member it names reads the data at its class's level,** so it reaches only the models that class allows. Asking an agent on a hosted model whose knowledge base holds DUA data is refused at the door, before any model request: `Not sent. Knowledge base lab0-release holds entries bound by DUA sleep-release, data class restricted at D3, and this agent would read it on endpoint hosted at placement approved; ...`. A DUA in a class whose `model_tier` is `none` keeps its data from every model, for every member.
+
+`pnpm walk:dua` walks two members through it on the synthetic lab and prints what each reads and every request each model received: the member the DUAs do not name gets an answer with no DUA entry text in any request, the named member reads the live DUA's entry on the lab model and not the expired one's, and the hosted model receives no request that carries DUA data.
+
 ## The chat page and the record
 
 Members ask on the chat page. An answer names the entry it came from and says what the run read and how long it took. Answers keep their lists, headings and code blocks, and no model text is ever parsed as HTML. A message with a participant id is refused before anything is sent, and the page says why.
