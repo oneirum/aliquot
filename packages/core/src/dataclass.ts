@@ -53,11 +53,14 @@ export class Labelled<T> {
   readonly cls: DataClass;
   /** Where the class came from, for the record: "gate:pattern:ssn", "kb:<snapshot>", "tool:kb_search". */
   readonly origin: string;
+  /** Legal regimes the content falls under, beside its class. Like the class, marks only accumulate through derive. */
+  readonly marks: readonly Mark[];
 
-  private constructor(value: T, cls: DataClass, origin: string) {
+  private constructor(value: T, cls: DataClass, origin: string, marks: readonly Mark[]) {
     this.value = value;
     this.cls = cls;
     this.origin = origin;
+    this.marks = marks;
   }
 
   /** Genuine: built by stamp or derive in this process. */
@@ -65,8 +68,8 @@ export class Labelled<T> {
     return typeof x === "object" && x !== null && #brand in x;
   }
 
-  static stamp<T>(value: T, cls: DataClass, origin: string): Labelled<T> {
-    return new Labelled(value, cls, origin);
+  static stamp<T>(value: T, cls: DataClass, origin: string, marks: readonly Mark[] = []): Labelled<T> {
+    return new Labelled(value, cls, origin, unionMarks(marks));
   }
 
   /**
@@ -79,8 +82,29 @@ export class Labelled<T> {
   static derive<T>(value: T, from: readonly Labelled<unknown>[], origin: string, floor: DataClass): Labelled<T>;
   static derive<T>(value: T, from: readonly Labelled<unknown>[], origin: string, floor: DataClass = "D0"): Labelled<T> {
     for (const f of from) if (!Labelled.is(f)) throw new Unlabelled(origin);
-    return new Labelled(value, join(floor, ...from.map((f) => f.cls)), origin);
+    return new Labelled(value, join(floor, ...from.map((f) => f.cls)), origin, unionMarks(...from.map((f) => f.marks)));
   }
+}
+
+/**
+ * A regime that rules where content may go regardless of its class, because the rule is about who holds it and where,
+ * not how sensitive it is:
+ * phi:               HIPAA protected health information. A hosted model's vendor is a business associate ("When a
+ *                    covered entity engages the services of a cloud service provider ... the CSP becomes a business
+ *                    associate", learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us), so the
+ *                    endpoint needs a BAA.
+ * export-controlled: ITAR or EAR technical data. "This kind of data cannot be stored on systems outside the United
+ *                    States" (safecomputing.umich.edu/protect-the-u/compliance/compliance-table).
+ * cui:               Controlled Unclassified Information. Held to the same US-only rule.
+ * The gate sets them from policy classify(): classes phi, export_controlled and cui, HIPAA identifier detectors, and handling banners (gate.ts marksOf).
+ */
+export const MARKS = ["phi", "export-controlled", "cui"] as const;
+export type Mark = (typeof MARKS)[number];
+
+/** The union of mark lists, in MARKS order, frozen. */
+export function unionMarks(...lists: readonly (readonly Mark[])[]): readonly Mark[] {
+  const all = new Set(lists.flat());
+  return Object.freeze(MARKS.filter((m) => all.has(m)));
 }
 
 /** A value posed as a Labelled or a Prompt without being one. A bug or an attack, never transient. */
@@ -105,7 +129,8 @@ export type Placement = (typeof PLACEMENTS)[number];
 export type SurfaceId = string & { readonly __surface: true };
 
 export type Destination =
-  | { readonly kind: "model"; readonly endpointId: string; readonly placement: Placement }
+  /** baa: the endpoint is covered for PHI (a business associate agreement, or run inside the covered entity). region: where the vendor keeps the data, null when unknown. */
+  | { readonly kind: "model"; readonly endpointId: string; readonly placement: Placement; readonly baa: boolean; readonly region: string | null }
   | { readonly kind: "http"; readonly host: string; readonly placement: Placement }
   | { readonly kind: "chat"; readonly surface: SurfaceId; readonly placement: Placement }
   | { readonly kind: "store"; readonly placement: Placement }
@@ -167,7 +192,11 @@ export type EgressRefusal =
   /** A tool's request, or a redirect hop of one, to a host its manifest does not list. */
   | { readonly code: "host-not-declared"; readonly host: string }
   /** A Covered Model at a placement its vendor's retention makes false. */
-  | { readonly code: "covered-model"; readonly modelId: string; readonly placement: Placement };
+  | { readonly code: "covered-model"; readonly modelId: string; readonly placement: Placement }
+  /** PHI to a hosted model endpoint that lab.toml does not mark baa = true. */
+  | { readonly code: "phi-needs-baa"; readonly endpointId: string }
+  /** Export-controlled or CUI content to a hosted model endpoint whose region is not us. */
+  | { readonly code: "export-needs-us"; readonly mark: "export-controlled" | "cui"; readonly endpointId: string; readonly region: string | null };
 
 declare const authorized: unique symbol;
 /** A destination the egress decision allowed for one payload. Only decideEgress produces it. */
@@ -187,7 +216,7 @@ export type EgressDecision<D extends Destination = Destination> =
  */
 export function decideEgress<D extends Destination>(payload: Labelled<unknown>, dest: D, policy: EgressPolicy): EgressDecision<D> {
   if (!Labelled.is(payload)) return { allow: false, refusal: { code: "unlabelled" } };
-  const refusal = refusalFor(payload.cls, dest, policy);
+  const refusal = refusalFor(payload.cls, dest, policy) ?? markRefusal(payload.marks, dest);
   // The one place the brand is applied: the decision itself is the authorization.
   return refusal === null ? { allow: true, to: dest as Authorized<D> } : { allow: false, refusal };
 }
@@ -204,6 +233,18 @@ function refusalFor(payload: DataClass, dest: Destination, policy: EgressPolicy)
   const ceiling = CEILINGS[dest.kind][dest.placement];
   if (ceiling === "none") return { code: "destination-receives-nothing", payload };
   return atMost(payload, ceiling) ? null : { code: "class-above-ceiling", payload, ceiling };
+}
+
+/**
+ * The rules that follow a mark rather than a class. Only model endpoints off lab hardware: on lab hardware no third
+ * party holds the content, so there is no business associate and no foreign storage to ask about.
+ */
+function markRefusal(marks: readonly Mark[], dest: Destination): EgressRefusal | null {
+  if (dest.kind !== "model" || dest.placement === "lab") return null;
+  if (marks.includes("phi") && !dest.baa) return { code: "phi-needs-baa", endpointId: dest.endpointId };
+  const controlled = marks.find((m): m is "export-controlled" | "cui" => m === "export-controlled" || m === "cui");
+  if (controlled && dest.region !== "us") return { code: "export-needs-us", mark: controlled, endpointId: dest.endpointId, region: dest.region };
+  return null;
 }
 
 /** One line for logs and user-facing refusals. */
@@ -227,6 +268,10 @@ export function describeRefusal(r: EgressRefusal): string {
       const why = COVERED_MODELS.find((m) => m.id.test(r.modelId))?.why ?? "its vendor keeps on every route";
       return `${r.modelId} is a Covered Model, which ${why}, so no endpoint serving it is ${r.placement}`;
     }
+    case "phi-needs-baa":
+      return `PHI may go only to a model endpoint under a business associate agreement, and ${r.endpointId} is not marked baa = true`;
+    case "export-needs-us":
+      return `${r.mark === "cui" ? "CUI" : "export-controlled content"} may go only to a model endpoint in the US, and ${r.endpointId} is in ${r.region === null ? "an undeclared region" : `region ${r.region}`}`;
     default: {
       const never: never = r;
       return never;

@@ -6,12 +6,15 @@
  *   openai-chat         POST {base}/chat/completions   GET {base}/models
  *   anthropic-messages  POST {base}/v1/messages        GET {base}/v1/models (paged)
  *   openai-responses    POST {base}/responses          GET {base}/models
+ *   bedrock-converse    POST {base}/model/{id}/converse  (no list: the endpoint names its models in lab.toml)
+ *
+ * An endpoint with api_version (an Azure OpenAI deployment URL) gets ?api-version= on every path; gateway.ts adds it.
  */
 
 import { z } from "zod";
 import type { ChatPart, ModelEndpoint, ModelResult, ModelTarget, Prompt } from "./gateway.ts";
 
-export const PROTOCOLS = ["openai-chat", "anthropic-messages", "openai-responses"] as const;
+export const PROTOCOLS = ["openai-chat", "anthropic-messages", "openai-responses", "bedrock-converse"] as const;
 export type Protocol = (typeof PROTOCOLS)[number];
 
 /**
@@ -38,7 +41,8 @@ export interface WireCompletion {
 export type Parsed<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
 
 export interface WireAdapter {
-  readonly completionPath: string;
+  /** Bedrock names the model in the path; the others in the body. */
+  completionPath(target: ModelTarget): string;
   request(target: ModelTarget, prompt: Prompt, endpoint: ModelEndpoint): Record<string, unknown>;
   parse(json: unknown, target: ModelTarget): Parsed<WireCompletion>;
   /** The models list path for one page; after is the previous page's cursor. */
@@ -131,7 +135,7 @@ function chatMessages(p: ChatPart): unknown[] {
 }
 
 const openaiChat: WireAdapter = {
-  completionPath: "/chat/completions",
+  completionPath: () => "/chat/completions",
   request(target, prompt, endpoint) {
     const body: Record<string, unknown> = { model: target.modelId, messages: prompt.parts.flatMap(chatMessages), ...sampling(target, endpoint, true), max_tokens: target.params.maxOutputTokens, stream: false };
     if (target.params.seed !== undefined) body.seed = target.params.seed;
@@ -198,7 +202,7 @@ function anthropicMessages(parts: readonly ChatPart[], target: ModelTarget): Ant
 }
 
 const anthropic: WireAdapter = {
-  completionPath: "/v1/messages",
+  completionPath: () => "/v1/messages",
   request(target, prompt, endpoint) {
     const messages = anthropicMessages(prompt.parts, target);
     // A Claude model that takes sampling refuses temperature and top_p together; an explicit top_p is the deliberate choice.
@@ -277,7 +281,7 @@ function responsesInput(parts: readonly ChatPart[], target: ModelTarget): readon
 }
 
 const responses: WireAdapter = {
-  completionPath: "/responses",
+  completionPath: () => "/responses",
   request(target, prompt, endpoint) {
     const body: Record<string, unknown> = {
       model: target.modelId,
@@ -332,4 +336,100 @@ const responses: WireAdapter = {
   parseModels: openaiChat.parseModels,
 };
 
-export const ADAPTERS: Readonly<Record<Protocol, WireAdapter>> = { "openai-chat": openaiChat, "anthropic-messages": anthropic, "openai-responses": responses };
+// bedrock-converse
+// docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html. Each content block is an object with one
+// key (text, toolUse, toolResult, reasoningContent). The response names no model: the path did, so the model is the
+// one asked for. Converse has no toolChoice "none", so a final call keeps the tools described (a history with toolUse
+// blocks is refused without them) and sends no choice.
+
+const converseBody = z.object({
+  output: z.object({ message: z.object({ role: z.literal("assistant"), content: z.array(z.looseObject({})) }) }),
+  stopReason: z.string(),
+  usage: z.object({ inputTokens: z.number(), outputTokens: z.number() }),
+});
+const converseText = z.object({ text: z.string() });
+const converseToolUse = z.object({ toolUse: z.object({ toolUseId: z.string(), name: z.string(), input: z.unknown() }) });
+
+type ConverseMessage = { role: "user" | "assistant"; content: Record<string, unknown>[] };
+
+function converseMessages(parts: readonly ChatPart[], target: ModelTarget): ConverseMessage[] {
+  const out: ConverseMessage[] = [];
+  for (const p of parts) {
+    if (p.role === "system") continue;
+    const role = p.role === "assistant" ? "assistant" : "user";
+    const blocks: Record<string, unknown>[] =
+      "toolCalls" in p
+        ? ((stateFor(p, "bedrock-converse", target) as Record<string, unknown>[] | null) ?? [...(p.text?.value ? [{ text: p.text.value }] : []), ...p.toolCalls.value.map((c) => ({ toolUse: { toolUseId: c.id, name: c.name, input: c.args } }))])
+        : p.role === "tool"
+          ? [{ toolResult: { toolUseId: p.callId, content: [{ text: p.content.value }], status: p.failed ? "error" : "success" } }]
+          : p.content.value
+            ? [{ text: p.content.value }]
+            : [];
+    // Converse refuses a message with no content blocks, so an empty part opens no message.
+    if (!blocks.length) continue;
+    const last = out.at(-1);
+    if (last?.role === role) last.content.push(...blocks);
+    else out.push({ role, content: blocks });
+  }
+  return out;
+}
+
+const converse: WireAdapter = {
+  // An inference profile id carries a colon (us.anthropic.claude-...-v1:0), so the id is one encoded segment.
+  completionPath: (target) => `/model/${encodeURIComponent(target.modelId)}/converse`,
+  request(target, prompt, endpoint) {
+    const s = sampling(target, endpoint, false);
+    const inferenceConfig: Record<string, number> = { maxTokens: target.params.maxOutputTokens };
+    if (s.temperature !== undefined) inferenceConfig.temperature = s.temperature;
+    if (s.top_p !== undefined) inferenceConfig.topP = s.top_p;
+    const body: Record<string, unknown> = { messages: converseMessages(prompt.parts, target), inferenceConfig };
+    const system = systemText(prompt.parts);
+    if (system) body.system = [{ text: system }];
+    if (prompt.tools.length) {
+      body.toolConfig = {
+        tools: prompt.tools.map((t) => ({ toolSpec: { name: t.name, description: t.description, inputSchema: { json: t.inputSchema } } })),
+        ...(prompt.toolChoice === "auto" ? { toolChoice: { auto: {} } } : {}),
+      };
+    }
+    return body;
+  },
+  parse(json, target) {
+    const parsed = converseBody.safeParse(json);
+    if (!parsed.success) return fail(parsed.error);
+    const r = parsed.data;
+    const blocks = r.output.message.content;
+    const text = blocks.flatMap((b) => {
+      const t = converseText.safeParse(b);
+      return t.success ? [t.data.text] : [];
+    });
+    const toolCalls = blocks.flatMap((b) => {
+      const t = converseToolUse.safeParse(b);
+      return t.success ? [{ id: t.data.toolUse.toolUseId, name: t.data.toolUse.name, args: t.data.toolUse.input }] : [];
+    });
+    const ending: Ending =
+      r.stopReason === "guardrail_intervened" || r.stopReason === "content_filtered"
+        ? { t: "filtered", why: `stopReason ${r.stopReason}` }
+        : r.stopReason === "malformed_model_output" || r.stopReason === "malformed_tool_use"
+          ? { t: "refused", why: `stopReason ${r.stopReason}` }
+          : { t: r.stopReason === "max_tokens" || r.stopReason === "model_context_window_exceeded" ? "length" : "stop" };
+    const finish = finishOf(ending, toolCalls.length);
+    if (!finish.ok) return finish;
+    return {
+      ok: true,
+      value: {
+        model: target.modelId,
+        text: text.join(""),
+        toolCalls,
+        usage: { input: r.usage.inputTokens, output: r.usage.outputTokens },
+        finish: finish.value,
+        providerState: toolCalls.length ? { protocol: "bedrock-converse", endpointId: target.endpointId, modelId: target.modelId, items: blocks } : null,
+      },
+    };
+  },
+  modelsPath: () => {
+    throw new Error("bedrock-converse endpoints list their models in lab.toml");
+  },
+  parseModels: () => fail("bedrock-converse endpoints list their models in lab.toml"),
+};
+
+export const ADAPTERS: Readonly<Record<Protocol, WireAdapter>> = { "openai-chat": openaiChat, "anthropic-messages": anthropic, "openai-responses": responses, "bedrock-converse": converse };

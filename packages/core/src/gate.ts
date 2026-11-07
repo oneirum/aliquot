@@ -11,7 +11,7 @@
  *   refusal as the class's record mode says.
  */
 
-import { DEFAULT_POLICY, Labelled, type DataClass, type EgressPolicy } from "./dataclass.ts";
+import { DEFAULT_POLICY, Labelled, unionMarks, type DataClass, type EgressPolicy, type Mark } from "./dataclass.ts";
 import { classById, classify, defaultPolicy, refusalText, type Classification, type Policy } from "./policy.ts";
 import type { MemberId, Audience } from "./agent.ts";
 
@@ -40,6 +40,40 @@ export interface Detection {
   readonly kind: DetectionKind;
   readonly cls: DataClass;
   readonly span: readonly [number, number];
+}
+
+/**
+ * Handling banners: the marking at the start of a line, alone or followed by ":" or "//" ("CUI//SP-PRVCY"), in
+ * capitals. A sentence that only names the regime ("does this contain PHI?") is not a banner. A banner sets a mark,
+ * not a class, so a lab's classes decide levels as before.
+ */
+const BANNERS: readonly (readonly [Mark, RegExp])[] = [
+  ["phi", /^[ \t]*PHI(?=[ \t]*(?::|\/\/|$))/m],
+  ["export-controlled", /^[ \t]*(?:ITAR|EXPORT[- ]CONTROLLED)(?=[ \t]*(?::|\/\/|$))/m],
+  ["cui", /^[ \t]*CUI(?=[ \t]*(?::|\/\/|$))/m],
+];
+
+/** The policy classes whose content an endpoint contract governs: phi needs a BAA, export_controlled and cui need region us. */
+const MARK_OF_CLASS: Readonly<Record<string, Mark>> = { phi: "phi", export_controlled: "export-controlled", cui: "cui" };
+
+/**
+ * Which handling marks a classification carries: every span whose class is phi, export_controlled or cui (a lab's
+ * classes from lab.toml), every span of a HIPAA identifier detector (mrn, dob, the phi-* set) whatever class lists it,
+ * so a lab without a phi class still keeps an MRN off an endpoint without a BAA, and any banner in the text.
+ */
+export function marksOf(c: Classification, text: string): readonly Mark[] {
+  const fromSpans = c.spans.flatMap((s): Mark[] => {
+    const byClass = MARK_OF_CLASS[s.class];
+    if (byClass) return [byClass];
+    if (s.detector === "mrn" || s.detector === "dob" || s.detector.startsWith("phi-")) return ["phi"];
+    return s.detector === "export-marker" ? ["export-controlled"] : [];
+  });
+  return unionMarks([...fromSpans, ...BANNERS.flatMap(([m, re]) => (re.test(text) ? [m] : []))]);
+}
+
+/** The marks of a text under a policy (the default one when absent), at D0 so only detectors and banners count. */
+export function marksIn(text: string, policy: Policy = defaultPolicy(DEFAULT_POLICY)): readonly Mark[] {
+  return marksOf(classify(policy, { t: "message", text, floor: "D0" }), text);
 }
 
 export type GateResult =
@@ -103,5 +137,5 @@ export async function gateClassified(msg: InboundMessage, deps: GateDeps): Promi
   }
   const { cls, detections } = asDetections(policy, classification);
   const origin = detections.length ? `gate:${detections.map((d) => d.kind).join(",")}` : `gate:floor`;
-  return { result: { t: "admit", member: member.id, audiences: member.audiences, cls, detections, text: Labelled.stamp(msg.text, cls, origin) }, classification, policy };
+  return { result: { t: "admit", member: member.id, audiences: member.audiences, cls, detections, text: Labelled.stamp(msg.text, cls, origin, marksOf(classification, msg.text)) }, classification, policy };
 }

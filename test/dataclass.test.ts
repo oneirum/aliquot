@@ -40,7 +40,7 @@ const at = (cls: DataClass) => Labelled.stamp("content", cls, "test");
 const dest = (kind: "model" | "http" | "chat" | "store", placement: Placement): Destination => {
   switch (kind) {
     case "model":
-      return { kind, endpointId: "e", placement };
+      return { kind, endpointId: "e", placement, baa: false, region: null };
     case "http":
       return { kind, host: "h", placement };
     case "chat":
@@ -78,9 +78,9 @@ test("decideEgress follows the placement table for every class, kind and placeme
 });
 
 test("an allowed decision hands back the same destination as the authorized route", () => {
-  const d = decideEgress(at("D1"), { kind: "model", endpointId: "local", placement: "lab" }, DEFAULT_POLICY);
+  const d = decideEgress(at("D1"), { kind: "model", endpointId: "local", placement: "lab", baa: false, region: null }, DEFAULT_POLICY);
   assert.equal(d.allow, true);
-  if (d.allow) assert.deepEqual({ ...d.to }, { kind: "model", endpointId: "local", placement: "lab" });
+  if (d.allow) assert.deepEqual({ ...d.to }, { kind: "model", endpointId: "local", placement: "lab", baa: false, region: null });
 });
 
 test("R is refused everywhere by default and only reaches lab model, store and chat under lab-only", () => {
