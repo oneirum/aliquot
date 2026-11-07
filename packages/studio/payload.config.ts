@@ -19,6 +19,7 @@ export default buildConfig({
   admin: {
     user: Users.slug,
     importMap: { baseDir: dirname },
+    components: { providers: ["/components/A11yRepairs.tsx#A11yRepairs"] },
     meta: { titleSuffix: " | Lab studio" },
   },
   collections: [Users, Agents, KnowledgeBases],

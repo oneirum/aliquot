@@ -29,6 +29,14 @@
  *      message. A D1 hosted agent's test runs reach the worker: a roster id
  *      is refused there and the hosted model receives nothing, while a
  *      control message does reach it.
+ *   7. With the keyboard alone, in light and dark, a member asks on the chat
+ *      page, the live region announces the answer, Check verifies it, Open
+ *      record opens it and Download JSON saves it; every focus stop shows a
+ *      ring at least 2 px wide and 3:1 against the page.
+ *   8. axe-core (WCAG 2.0 and 2.1 A and AA) finds no serious or critical
+ *      violation on the chat page, a record, the runs list and the studio's
+ *      agent and knowledge base forms, in light and dark. The report is
+ *      .unit2/axe.json; docs/accessibility.md is the statement.
  *
  *   node scripts/unit2.ts [--headed] [--shots <dir>] [--proof <dir>]
  *
@@ -61,6 +69,7 @@ import { loadManifest } from "../packages/core/src/kb.ts";
 import { createPayloadStore, oneKey, loadEvents, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { freshDatabase } from "../test/db.ts";
 import { startFakeModel } from "../test/fake-model.ts";
+import { AXE_VERSION, describe, focusRing, scan, WCAG_TAGS, type Scan } from "./a11y.ts";
 import { ensurePostgres, processes, waitFor, type Proc } from "./procs.ts";
 
 const { values: flags } = parseArgs({ options: { headed: { type: "boolean", default: false }, shots: { type: "string" }, proof: { type: "string" } } });
@@ -615,12 +624,13 @@ try {
 
   const outside = prereg.outsideDocuments[0]!;
   const asked = prereg.inDocument[0]!;
+  let kbUrl = "";
 
   await check("check 5: the lab0 KB is authored, compiled, published over its one gap and cited, all in the studio", async () => {
     const def = JSON.parse(readFileSync(join(lab0, "kb.json"), "utf8")) as { kbId: string; title: string; purpose: string; coverageQuestions: string[]; sources: { sourceId: string; location: string; cls: string }[] };
     const author = await signIn("author");
     await fillKb(author, { kbId: def.kbId, title: def.title, purpose: def.purpose, questions: [...def.coverageQuestions, outside.question], sources: def.sources });
-    const kbUrl = await saveNew(author, "knowledge-bases");
+    kbUrl = await saveNew(author, "knowledge-bases");
     const authorCookie = await cookieOf(author);
     for (const location of ["/etc/hosts.md", "../roster.md", "sop/receiving.md"]) {
       const moved = await api(`/knowledge-bases/${kbUrl.split("/").pop()}`, { method: "PATCH", cookie: authorCookie, body: { sources: def.sources.map((s, i) => ({ ...s, kind: "file", licence: "internal-only", location: i === 0 ? location : s.location })) } });
@@ -762,6 +772,116 @@ try {
     assert.ok(hosted.requests > start, "a D1 test message to the same endpoint does reach it, so the counter can move");
     return `steward compiled and published the roster (D3${out.gaps.length ? `, over ${out.gaps.length} gaps with a note` : ""}); author read of that compile 403, missing compile 404, publisher publish of the D3 snapshot 403; hosted agent saved, checks and test thread refused: "${refusal.slice(0, 90)}"; D1 hosted agent: roster-id test run refused in the worker with no model.requested, hosted requests ${start} -> ${start}; control answered, hosted requests -> ${hosted.requests}`;
   });
+  // Accessibility ------------------------------------------------------------
+
+  const chatUrl = `${webBase}/?channel=lab0&user=lab-member-7`;
+  /** A fresh browser on the chat page, asking the lab0 question with the keyboard and waiting for its answer and record. */
+  async function askedChat(): Promise<Page> {
+    const page = await (await b.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2 })).newPage();
+    page.setDefaultTimeout(60000);
+    await page.goto(chatUrl);
+    await page.keyboard.type(asked.question);
+    await page.keyboard.press("Enter");
+    await page.locator("[data-entry-done]").waitFor();
+    return page;
+  }
+
+  await check("check 7: with the keyboard alone a member asks, hears the answer, checks and opens its record, and downloads the JSON, with focus visible at every stop, light and dark", async () => {
+    const said: string[] = [];
+    let stops = 0;
+    for (const theme of ["light", "dark"] as const) {
+      const page = await (await b.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, acceptDownloads: true, colorScheme: theme })).newPage();
+      page.setDefaultTimeout(60000);
+      const ringed: string[] = [];
+      const at = async (expect: RegExp, still: string): Promise<void> => {
+        const ring = await focusRing(page);
+        assert.ok(ring, `${theme}: focus is on an element at stop ${ringed.length + 1}`);
+        assert.match(ring.element, expect);
+        assert.ok(ring.ring, `${theme}: ${ring.element} shows a focus ring at least 2 px wide and 3:1 against the page`);
+        ringed.push(`${ring.element} (${ring.ring})`);
+        await page.screenshot({ path: join(work, `focus-${theme}-${ringed.length}-${still}.png`) });
+      };
+      await page.goto(chatUrl);
+      await at(/^textarea#text "Your question"/, "question");
+      await page.keyboard.type(asked.question);
+      await page.keyboard.press("Enter");
+      await page.locator("[data-entry-done]").waitFor();
+      const heard = (await page.locator("#announce").textContent()) ?? "";
+      assert.match(heard, /^Answer: /, `the live region announces the answer: ${heard}`);
+      assert.ok(heard.includes(asked.expected), `the announcement carries the answer text: ${heard}`);
+      await page.keyboard.press("Shift+Tab");
+      await at(/^a "Open record"/, "open-record");
+      await page.keyboard.press("Shift+Tab");
+      await at(/^button "Check"/, "check");
+      await page.keyboard.press("Enter");
+      await page.locator('.witness[data-chain="verified"]').waitFor();
+      const verdict = await page.locator(".witness .status").innerText();
+      assert.match(verdict, /Verified: chain intact/);
+      await at(/^button "Check"/, "check-verified");
+      await page.keyboard.press("Tab");
+      await at(/^a "Open record"/, "open-record-again");
+      await Promise.all([page.waitForURL(/\/runs\/[0-9a-f-]{36}$/), page.keyboard.press("Enter")]);
+      const runId = page.url().split("/").pop()!;
+      await page.locator("#download:not([hidden])").waitFor();
+      for (let i = 0; i < 8 && (await page.evaluate("document.activeElement?.id")) !== "download"; i++) {
+        await page.keyboard.press("Tab");
+        await at(/./, `record-${i + 1}`);
+      }
+      assert.match(ringed.at(-1)!, /^a#download "Download JSON"/, "Tab reaches Download JSON");
+      const download = page.waitForEvent("download");
+      await page.keyboard.press("Enter");
+      const json = JSON.parse(readFileSync(await (await download).path(), "utf8")) as { runId: string };
+      assert.equal(json.runId, runId, "the downloaded JSON is this run's record");
+      stops += ringed.length;
+      said.push(`${theme}: ${ringed.length} stops, ${ringed.join("; ")}; live region "${heard.slice(0, 60)}"; Check "${verdict}"; saved aliquot-run-${runId.slice(0, 8)}.json`);
+    }
+    return `${stops} focus stops, each with a ring at least 2 px and 3:1. ${said.join(" | ")}`;
+  });
+
+  await check("check 8: axe-core finds no serious or critical WCAG 2.1 A or AA violation on the chat page, a record, the runs list and the studio's agent and knowledge base forms, in light and dark", async () => {
+    const report: Record<string, Scan> = {};
+    const lines: string[] = [];
+    const scanBoth = async (name: string, page: Page, theme: (t: "light" | "dark") => Promise<void>, exclude: readonly string[] = []): Promise<void> => {
+      for (const t of ["light", "dark"] as const) {
+        await theme(t);
+        await sleep(300);
+        const result = await scan(page, exclude);
+        report[`${name} ${t}`] = result;
+        lines.push(`${name} ${t}: ${result.blocking.length} serious or critical, ${result.other} minor or moderate, ${result.passes} rules passed`);
+      }
+    };
+    const media = (page: Page) => async (t: "light" | "dark") => page.emulateMedia({ colorScheme: t });
+    // Payload reads its theme from <html data-theme>, which it sets on the server; the media query covers the rest.
+    const payload = (page: Page) => async (t: "light" | "dark") => {
+      await page.emulateMedia({ colorScheme: t });
+      await page.evaluate(`document.documentElement.setAttribute("data-theme", ${JSON.stringify(t)})`);
+    };
+
+    const chat = await askedChat();
+    await scanBoth("chat page", chat, media(chat));
+    const record = chat.locator(".witness a", { hasText: "Open record" });
+    const recordUrl = `${webBase}${await record.getAttribute("href")}`;
+    await chat.goto(recordUrl);
+    await chat.locator("#download:not([hidden])").waitFor();
+    await scanBoth("record page", chat, media(chat));
+    await chat.goto(`${webBase}/runs`);
+    await scanBoth("runs list", chat, media(chat));
+
+    const studio = await signIn("publisher");
+    await studio.goto(docUrl);
+    await studio.getByTestId("publish-panel").waitFor();
+    await studio.waitForLoadState("networkidle");
+    await scanBoth("studio agent form", studio, payload(studio));
+    await studio.goto(kbUrl);
+    await studio.getByTestId("kb-panel").waitFor();
+    await studio.waitForLoadState("networkidle");
+    await scanBoth("studio knowledge base form", studio, payload(studio));
+
+    writeFileSync(join(work, "axe.json"), JSON.stringify({ axe: AXE_VERSION, tags: WCAG_TAGS, report }, null, 2));
+    const blocking = Object.entries(report).filter(([, r]) => r.blocking.length);
+    assert.equal(blocking.length, 0, blocking.map(([k, r]) => `${k}:\n${describe(r.blocking)}`).join("\n\n"));
+    return `axe ${AXE_VERSION}, ${WCAG_TAGS.join(" ")}: ${lines.join("; ")}`;
+  });
 } finally {
   await browser?.close();
   await studioPs?.stopAll();
@@ -773,4 +893,4 @@ try {
 const failed = results.filter((r) => !r.ok);
 const left = leftovers();
 console.log(`\n${results.length - failed.length}/${results.length} checks passed; processes left after stop: ${left}`);
-process.exit(failed.length || left || results.length !== 6 ? 1 : 0);
+process.exit(failed.length || left || results.length !== 8 ? 1 : 0);
