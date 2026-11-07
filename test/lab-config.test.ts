@@ -104,14 +104,17 @@ test("a channel floor may name any surface id, digits and dashes included", () =
   assert.deepEqual(parseConfig(`${base}[channel_floors]\n"acp-2:lab" = "D2"\n`, "/l/lab.toml").channelFloors, { "acp-2:lab": "D2" });
 });
 
-test("lab.example.toml serves acp at zdr, and its commented slack surface parses once uncommented", () => {
+test("lab.example.toml serves acp at zdr, and its commented slack and teams surfaces parse once uncommented", () => {
   const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
   const text = readFileSync(path, "utf8");
   assert.deepEqual(parseConfig(text, path).surfaces.find((s) => s.id === "acp"), { id: "acp", kind: "acp", placement: "zdr", tokenEnv: "ALIQUOT_ACP_TOKEN" });
-  const at = text.indexOf("# [surfaces.slack]");
-  const end = text.indexOf("\n\n", at);
-  const slack = `${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(end)}`;
-  assert.deepEqual(parseConfig(slack, path).surfaces.find((s) => s.id === "slack"), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "ALIQUOT_SLACK_TOKEN" });
+  const uncomment = (id: string) => {
+    const at = text.indexOf(`# [surfaces.${id}]`);
+    const end = text.indexOf("\n\n", at);
+    return parseConfig(`${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(end)}`, path).surfaces.find((s) => s.id === id);
+  };
+  assert.deepEqual(uncomment("slack"), { id: "slack", kind: "slack", placement: "approved", tokenEnv: "ALIQUOT_SLACK_TOKEN" });
+  assert.deepEqual(uncomment("teams"), { id: "teams", kind: "teams", placement: "institution", tokenEnv: "ALIQUOT_TEAMS_TOKEN" });
 });
 
 test("lab.example.toml's OpenRouter block parses once uncommented and routes Claude only to the providers with zero-retention Claude endpoints", () => {
