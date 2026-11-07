@@ -216,6 +216,9 @@ contact_email_env = "LABH_CONTACT_EMAIL"
 # description = "Visit log, one row per participant"
 # csv = "/srv/lab/data/visits.csv"        # or redcap_url = "https://redcap.example.edu/api/" with
 #                                         # redcap_token_env = "REDCAP_TOKEN", and the host placed lab or institution in [hosts]
+#                                         # A REDCap table also needs [tables.<id>.redcap_users]: member id = REDCap username.
+#                                         # Each query runs under that user's export rights and Data Access Group; an
+#                                         # unmapped member is refused.
 # aggregate_class = "D1"
 # min_cell = 5
 # [tables.visits.columns]
