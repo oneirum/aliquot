@@ -10,7 +10,7 @@
 # Ollama is the optional local model (--profile ollama); drop it when lab.toml points at the lab's own vLLM box.
 x-app: &app
   build: .
-  image: aliquot-app:0.5.1
+  image: aliquot-app:0.8.0
   restart: unless-stopped
   depends_on:
     postgres: { condition: service_healthy }
@@ -82,7 +82,7 @@ services:
   # docker compose run --rm init: aliquot init on a machine with only Docker. It writes config/lab.toml and .env
   # here, owned by whoever owns this folder, and never rewrites an existing .env.
   init:
-    image: aliquot-app:0.5.1
+    image: aliquot-app:0.8.0
     build: .
     profiles: [init]
     user: root
@@ -93,7 +93,7 @@ services:
   # docker compose --profile slack up -d: the Slack door (docs/slack.md). It holds the two Slack tokens and the slack
   # surface's token, and no database or payload key; it reaches the web door over HTTP like aliquot ask.
   slack:
-    image: aliquot-app:0.5.1
+    image: aliquot-app:0.8.0
     build: .
     profiles: [slack]
     restart: unless-stopped
@@ -109,7 +109,7 @@ services:
   # tenant and the teams surface's token, and no database or payload key. The Bot Framework posts to it, so the lab's
   # TLS proxy forwards https://<public name>/api/messages to LABH_TEAMS_BIND:LABH_TEAMS_PORT.
   teams:
-    image: aliquot-app:0.5.1
+    image: aliquot-app:0.8.0
     build: .
     profiles: [teams]
     restart: unless-stopped

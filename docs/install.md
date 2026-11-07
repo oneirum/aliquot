@@ -236,10 +236,10 @@ A class with no purge is kept. Aliquot refuses to start with a purge shorter tha
 
 	git fetch --tags
 	scripts/backup.sh
-	git checkout v0.5.1
+	git checkout v0.8.0
 	docker compose up -d --build
 
-Each release is a tag; this builds `aliquot-app:0.5.1`. New core and studio migrations apply on start, each once, under a lock.
+Each release is a tag; this builds `aliquot-app:0.8.0`. New core and studio migrations apply on start, each once, under a lock.
 
 An install from before the studio had its own database role adds its password to `.env` before `docker compose up`; until then the studio cannot sign in to Postgres and the web door says so:
 

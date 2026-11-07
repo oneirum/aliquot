@@ -34,19 +34,20 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 - **Done when:** a test drives the real binary against a fake door, `pnpm lab0` gets a cited answer and a verified record through `aliquot ask --json`, a test lays out the tmux session on a private tmux server, and the official ACP SDK parses every message `aliquot acp` sends.
 - **Not planned:** a fork of T3 Code. Its license allows one, but it would carry about a million lines of developer tooling into the trust base. Its thread store would sit outside the record, and its device pairing grants a shell on the host. Aliquot runs inside T3 as an ACP agent instead.
 
-## 0.6: ask where the lab already talks
+## 0.6: ask where the lab already talks (released in 0.8.0)
 
 - **For:** the members who will ask questions every day.
 - **After it:** a Slack door and a Teams door with the same intake, data-class gate and record link in the thread (both built), and a router across several agents, so one channel reaches both the handbook agent and the methods agent.
 - **Done when:** a check through a fake Slack API gets a cited answer, refuses a participant id with zero hosted requests, and resolves the record link.
 
-## 0.7: keys, retention and sign-on
+## 0.7: keys, retention and sign-on (released in 0.8.0)
 
 - **For:** research IT and the data steward.
 - **After it:** key rotation, per-class keys, a retention sweep that redacts payloads past a lab's window while the chain still verifies, and university sign-on (SAML or OIDC) for the studio and the chat page.
 - **Done when:** a rotation test reads old and new payloads, a sweep test verifies the chain after redaction, and a sign-on test passes against a local OIDC provider.
+- **Shipped:** all three, with OpenID Connect sign-on on the web door and the chat page. The studio keeps its own accounts, and SAML goes through a campus OIDC bridge; studio sign-on moved to Later.
 
-## 0.8: studies an IRB can cite
+## 0.8: studies an IRB can cite (released)
 
 - **For:** the PI and the IRB.
 - **After it:** freeze an agent version for a study, export an agent card (model, tools, knowledge base snapshots, data ceilings), replay a run against its frozen inputs, and export PROV. The system prompt text the core builds joins the version hash. The research IT and IRB sheet is generated from `lab.toml`, so it matches the deployment.
@@ -54,6 +55,7 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 
 ## Later
 
+- Sign-on for the studio, and `ask` and `acp` tokens minted from a signed-in session.
 - Harness doors off the machine, after sign-on: an `acp` surface in the door with its own placement, so the server enforces the ceiling, and `ask` and `acp` against a signed-in remote door.
 - Agent CLI confinement on Linux, so Claude Code and Codex agents run on a campus VM.
 - Tools a lab adds itself, each behind an OS-level boundary (a separate user, a container or a VM).

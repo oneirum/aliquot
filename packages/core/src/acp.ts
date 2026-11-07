@@ -17,7 +17,7 @@ import type { AskInput, AskOptions, DoorEvent } from "./door-client.ts";
 
 export const ACP_PROTOCOL_VERSION = 1;
 /** What acp and mcp report as their own version. */
-export const ALIQUOT_VERSION = "0.5.1";
+export const ALIQUOT_VERSION = "0.8.0";
 
 /** T3 Code wraps a thread's first prompt in its own instructions; only the person's words go to the door. */
 function personText(text: string): string {
