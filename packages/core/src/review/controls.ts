@@ -351,7 +351,7 @@ const NIST: readonly Control[] = [
     [T.eventsAppendOnly, T.versionsAppendOnly, T.verifyChain, T.auditChain, T.anchorCatches],
   ),
   nist("03.04.01", "Baseline configuration", "lab.toml is the whole deployment description, parsed once at startup and refused whole on any error.", fixed("met", "This pack is computed from the lab.toml it names."), [T.toolsRefused]),
-  nist("03.04.06", "Least functionality", "Eleven built-in tools, each with the hosts it may reach; no contributed tools.", fixed("met", "Tools are fixed per release."), [T.builtinTools, T.toolsRefused]),
+  nist("03.04.06", "Least functionality", "Twelve built-in tools, each with the hosts it may reach; no contributed tools.", fixed("met", "Tools are fixed per release."), [T.builtinTools, T.toolsRefused]),
   nist("03.04.11", "Information location", "Every destination's placement is declared in lab.toml and every data class's reach follows from it.", (c) => ({
     status: "met",
     why: `Payloads are stored at ${c.store.placement} placement; ${hostedDestinations(c).length} destination(s) sit outside the lab and institution.`,
