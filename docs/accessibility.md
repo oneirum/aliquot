@@ -39,7 +39,7 @@ To see the check fail, remove `aria-label="Ask"` from the send button in `packag
 
 The web door's own pages (chat, record, runs) had no serious or critical violation in axe. Two things were fixed there anyway, because axe cannot see them:
 
-- The whole message thread was an `aria-live` region, so a screen reader read out every node the page added, including "Reading the lab's documents" and the seconds counter. It is now one quiet live region that says each new answer, refusal or error once. Answers restored from the tab's history on reload are not announced again.
+- The whole message thread was an `aria-live` region, so a screen reader read out every node the page added, including "Reading the lab's documents" and the seconds counter. It is now one quiet live region that says each new answer, refusal or error once. Answers restored from the tab's history on reload are not announced again. The "Changed since this answer" note under a cited document is plain text for the same reason: it is drawn again on every reload.
 - The question field's focus ring was a 1 px border at 22 percent opacity, about 1.6:1. It is now the border and a 1 px outline in the muted ink, 5.5:1.
 
 The studio is built on Payload 3.92, and Payload's own admin components failed seven axe rules on both forms. `packages/studio/components/A11yRepairs.tsx`, mounted as an admin provider, repairs each on Payload's markup by setting attributes only, never moving or adding an element:
