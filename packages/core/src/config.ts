@@ -53,7 +53,7 @@ const agentBackend = z.union([
   devLogin,
 ]);
 
-export const SURFACE_KINDS = ["web", "slack", "phone", "acp", "mcp", "studio"] as const;
+export const SURFACE_KINDS = ["web", "slack", "teams", "phone", "acp", "mcp", "studio"] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 export interface WebSurfaceConfig {
@@ -81,10 +81,11 @@ const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
 const webSurface = z
   .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
   .strict();
-const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
+const tokenSurface = z.object({ kind: z.enum(["slack", "teams", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
 
 const REFUSED_PLACEMENTS: Partial<Record<SurfaceKind, { readonly placements: readonly Placement[]; readonly why: string }>> = {
   slack: { placements: ["lab", "institution"], why: "Slack's servers keep a copy of every answer, so a Slack surface is placement approved at most" },
+  teams: { placements: ["lab"], why: "Microsoft keeps a copy of every Teams message in the institution's tenant, so a Teams surface is placement institution at most" },
 };
 
 function parseSurface(id: string, raw: unknown): SurfaceConfig {

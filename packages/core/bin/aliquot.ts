@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n]>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
-// aliquot ask, acp, mcp and slack need no lab.toml or database: they reach the web door named by --door, and only it.
+// aliquot ask, acp, mcp, slack and teams need no lab.toml or database: they reach the web door named by --door, and only it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,8 @@ import { acpAgent } from "../src/acp.ts";
 import { mcpServer } from "../src/mcp.ts";
 import { slackDoor } from "../src/surfaces/slack.ts";
 import { checkApiBase, runSocketMode, slackApi, SLACK_API } from "../src/surfaces/slack-wire.ts";
+import { teamsDoor } from "../src/surfaces/teams.ts";
+import { BOT_OPENID, botConnector, botVerifier, checkBase, LOGIN, serveMessages } from "../src/surfaces/teams-wire.ts";
 import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
 import { rank } from "../src/dataclass.ts";
 
@@ -26,8 +28,8 @@ if (denied) {
   process.exit(2);
 }
 const here = dirname(fileURLToPath(import.meta.url));
-// The door client reaches the web door over HTTP, and the Slack door's wire reaches Slack; this binary adds those two files to the seal.
-sealNetwork({ ...DEFAULT_ALLOWANCE, files: [...DEFAULT_ALLOWANCE.files, join(here, "..", "src", "door-client.ts"), join(here, "..", "src", "surfaces", "slack-wire.ts")] });
+// The door client reaches the web door over HTTP, and the Slack and Teams doors' wires reach Slack and Microsoft; this binary adds those three files to the seal.
+sealNetwork({ ...DEFAULT_ALLOWANCE, files: [...DEFAULT_ALLOWANCE.files, ...["door-client.ts", "surfaces/slack-wire.ts", "surfaces/teams-wire.ts"].map((f) => join(here, "..", "src", f))] });
 
 const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
 
@@ -50,6 +52,13 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       $SLACK_BOT_TOKEN (xoxb-) and $ALIQUOT_SURFACE_TOKEN set to the slack surface's token; it will not
                       speak as the web surface. --links is the door's address members open record links at, when
                       --door is internal (default: the --door address). docs/slack.md has the app manifest.
+  teams [--door url] [--links url] [--listen host:port]
+                      the Teams door: answer mentions and personal chats in Microsoft Teams, through the web door as
+                      the [surfaces.teams] surface. It listens for the Bot Framework on --listen (default
+                      127.0.0.1:3978) at /api/messages, behind the lab's TLS proxy, and accepts only activities the
+                      Bot Framework signed for this app. Needs $MICROSOFT_APP_ID, $MICROSOFT_APP_PASSWORD,
+                      $MICROSOFT_APP_TENANT_ID and $ALIQUOT_SURFACE_TOKEN set to the teams surface's token.
+                      docs/teams.md has the app manifest and the tenant admin's steps.
   init [--config config/lab.toml] [--env .env] [--force] [--yes --sample <id>... [--pattern <regex>...]]
                       write lab.toml from a few questions, testing the participant id patterns against
                       sample ids, and write .env with new secrets when it does not exist yet. --force
@@ -79,6 +88,7 @@ try {
       sample: { type: "string", multiple: true, default: [] },
       door: { type: "string" },
       links: { type: "string" },
+      listen: { type: "string", default: "127.0.0.1:3978" },
       user: { type: "string" },
       thread: { type: "string" },
       ceiling: { type: "string" },
@@ -102,6 +112,7 @@ if (command === "init") {
 }
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 if (command === "slack") process.exit(await slack(positionals.slice(1)));
+if (command === "teams") process.exit(await teams(positionals.slice(1)));
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0;
 const valid =
@@ -143,6 +154,63 @@ async function slack(words: readonly string[]): Promise<number> {
   for (const sig of ["SIGINT", "SIGTERM"] as const) process.once(sig, () => abort.abort());
   log(`[slack] answering through the door at ${door.url}`);
   await runSocketMode(slackApi(base, appToken), (msg, reply) => void handle(msg, reply), log, abort.signal);
+  return 0;
+}
+
+async function teams(words: readonly string[]): Promise<number> {
+  if (words.length || values.json || values.user || values.ceiling || values.thread) usage();
+  const fail = (line: string) => (process.stderr.write(`[teams] ${line}\n`), 2);
+  const token = process.env[SURFACE_TOKEN_ENV];
+  // Without a token the door would take Teams for the web surface, whose placement is the lab's own.
+  if (!token) return fail(`${SURFACE_TOKEN_ENV} is not set. Set it to the value of [surfaces.teams] token_env, so the door holds Teams to that surface's placement.`);
+  const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const appId = process.env.MICROSOFT_APP_ID ?? "";
+  const secret = process.env.MICROSOFT_APP_PASSWORD ?? "";
+  const tenant = process.env.MICROSOFT_APP_TENANT_ID ?? "";
+  if (!guid.test(appId)) return fail("MICROSOFT_APP_ID must be the app registration's Application (client) ID, a GUID.");
+  if (!secret) return fail("MICROSOFT_APP_PASSWORD must be a client secret of that app registration.");
+  if (!guid.test(tenant)) return fail("MICROSOFT_APP_TENANT_ID must be the lab's Directory (tenant) ID, a GUID; the bot is single tenant.");
+  const listen = /^(.+):(\d+)$/.exec(values.listen);
+  if (!listen) usage();
+  let openid: URL;
+  let login: URL;
+  try {
+    openid = checkBase(process.env.ALIQUOT_TEAMS_OPENID ?? BOT_OPENID, "the Bot Framework OpenID configuration");
+    login = checkBase(process.env.ALIQUOT_TEAMS_LOGIN ?? LOGIN, "the Microsoft login endpoint");
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+  if (!login.pathname.endsWith("/")) login = new URL(`${login.href}/`);
+  const door: Door = { url: values.door ?? process.env.ALIQUOT_DOOR ?? "http://127.0.0.1:3000", token };
+  const timeout = Number(values.timeout);
+  if (!Number.isFinite(timeout) || timeout <= 0) usage();
+  const doorBase = door.url.endsWith("/") ? door.url : `${door.url}/`;
+  const links = values.links ? (values.links.endsWith("/") ? values.links : `${values.links}/`) : doorBase;
+  const log = (line: string) => void process.stderr.write(`${line}\n`);
+  const handle = teamsDoor({
+    ask: (input, opts) => ask(door, input, { ...opts, timeoutMs: timeout * 1000 }),
+    stop: (runId, user) => stop(door, runId, user),
+    connector: botConnector(login, tenant, appId, secret),
+    tenant,
+    log,
+    recordLink: (url) => (url.startsWith(doorBase) ? links + url.slice(doorBase.length) : url),
+  });
+  const server = serveMessages({ verify: botVerifier(openid, appId), onActivity: (a) => void handle(a), log });
+  const listening = new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(Number(listen[2]), listen[1]!.replace(/^\[|\]$/g, ""), () => resolve());
+  });
+  try {
+    await listening;
+  } catch (err) {
+    return fail(`cannot listen on ${values.listen}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const port = (server.address() as { port: number }).port;
+  log(`[teams] answering through the door at ${door.url}`);
+  log(`[teams] listening on http://${listen[1]}:${port}/api/messages`);
+  await new Promise<void>((resolve) => {
+    for (const sig of ["SIGINT", "SIGTERM"] as const) process.once(sig, () => server.close(() => resolve()));
+  });
   return 0;
 }
 
