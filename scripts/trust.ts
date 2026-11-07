@@ -62,7 +62,8 @@ if (args.has("--check")) {
   if (worse.length) process.exit(1);
   console.log("trust check: no count is worse than docs/trust.json");
 } else {
-  const date = new Date().toISOString().slice(0, 10);
+  // The lab's date in US Central time, as the CHANGELOG dates are.
+  const date = new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
   const fixFile = `${root}docs/trust-fix.md`;
   const fix = existsSync(fixFile) ? readFileSync(fixFile, "utf8").trim() : null;
   const commit = measuredCommit(root);

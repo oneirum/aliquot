@@ -245,7 +245,7 @@ export function summarize(lab: Lab1Fixture, run: DeterministicRun, records: read
   }
   void run;
   return {
-    date: new Date().toISOString().slice(0, 10),
+    date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" }),
     model: "claude-sonnet-5-5",
     judge: "claude-sonnet-5-5",
     calls,
