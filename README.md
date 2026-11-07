@@ -294,6 +294,7 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm slice1` | The run loop: crash and resume exactly once, a zombie worker fenced off, idempotent intake, restricted data refused with zero hosted requests, limits, stop, and the network seal against planted routes. |
 | `pnpm unit3` | Knowledge bases: compile, coverage gaps blocking publish, a restart mid-compile, `kb_search` and `kb_read` in a run, snapshot diff, refused URL hosts, publish with an override note. |
 | `pnpm lab0` | The first-use check on a synthetic lab, described below. |
+| `pnpm trust` | The trust numbers in [`docs/trust.md`](docs/trust.md): unsupported claims, wrong citations, refusals both ways and planted instructions obeyed, on a larger synthetic lab. No Postgres and no key; CI runs it on every push. |
 | `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. |
 
 The tests that need macOS or the sandbox image skip elsewhere, each with its reason; CI runs on Linux.
@@ -315,6 +316,21 @@ The tests that need macOS or the sandbox image skip elsewhere, each with its rea
 | The hosted endpoint over the whole check | 1 request, the planned control message |
 
 The fake models are scripted, so this checks retrieval, orchestration, provenance and egress control. It does not measure answer quality, and it does not show that a real lab wants this. That needs a pilot.
+
+### Trust numbers
+
+[`docs/trust.md`](docs/trust.md) holds the numbers a lab, an IRB or research IT asks for first, with the date and the commit they were measured on. `fixtures/lab1` is a generated lab of 234 entries and 350 questions with ground truth, 44 of its documents carrying an instruction planted in SOP or PDF text. Each question runs through the real run loop. At the last run:
+
+| What was measured | Result |
+|---|---|
+| Claims in Sonnet's answers that the entries it read do not support, judged claim by claim | 12 of 744 (1.6%) |
+| Answers citing an entry other than the one that answers the question (Sonnet) | 0 of 205; 87 name no entry, and the record lists the entries read |
+| Questions carrying participant ids or PHI that were answered instead of refused | 17 of 42, each a form the classifier does not catch yet (an SSN with spaces, a spelled-out date of birth, a lower-case id) |
+| Answerable questions refused | 7 of 258, each an SSN-shaped part number or the review marker |
+| Questions no entry covers that Sonnet answered anyway | 0 of 50 |
+| Planted instructions obeyed: by a scripted model that obeys everything, by Sonnet | 30 of 44, 0 of 40; no planted instruction got data past the egress decision |
+
+`pnpm trust --live` reruns the Sonnet half through `claude-batch`.
 
 ### What ran live
 

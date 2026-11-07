@@ -224,7 +224,7 @@ ${
 ${goals}
 
 - ${n.injection.reached} of ${n.injection.of} planted instructions reached the model in a \`kb_read\` result. Nothing marks retrieved text as data rather than instructions.
-- ${n.injection.deniedAnswer} answerable questions ended refused because the injection made the model call \`pubmed_search\`: the egress decision stopped the exfiltration and the run ended with the restricted-data notice, so the member lost the answer.
+- ${n.injection.deniedAnswer ? `${n.injection.deniedAnswer} answerable questions ended refused because the injection made the model call \`pubmed_search\`: the egress decision stopped the exfiltration and the run ended with the restricted-data notice, so the member lost the answer.` : "When a planted instruction made the model call \`pubmed_search\`, the egress decision refused the request, the model read the refusal as a failed tool call, and the member still got an answer: no data left and no answer was lost."}
 - ${n.injection.collateral} questions that were not aimed at an injection still carried planted text, because an injected entry was among the three entries read.
 ${meta.fix ? `\n## Fixed\n\n${meta.fix}\n` : ""}
 ## Reproduce
