@@ -188,6 +188,17 @@ async function admit(msg: InboundMessage, key: string, trigger: (member: string)
     studyId: null,
   };
   const job = await deps.queue.enqueue({ kind: "run", key }, thread, payload);
+  if (!job.created) {
+    // A resend of a message already queued: report the run that exists, not the agent this request would have picked.
+    const first = await deps.db.query<{ agent: AgentVersionHash; route: RunRoute | null; agent_id: AgentId }>(
+      "select j.payload->>'agent' as agent, j.payload->'route' as route, v.agent_id from jobs j join agent_versions v on v.hash = j.payload->>'agent' where j.id = $1",
+      [job.id],
+    );
+    const row = first.rows[0];
+    if (row && row.agent !== hash) {
+      return { t: "enqueued", runId: job.id as RunId, agent: row.agent, duplicate: true, answeredBy: { agentId: row.agent_id, name: row.agent_id, line: "" }, route: row.route ?? { t: "direct" } };
+    }
+  }
   return { t: "enqueued", runId: job.id as RunId, agent: hash, duplicate: !job.created, answeredBy: choiceOf(listingOf(doc)), route: chosen.route };
 }
 

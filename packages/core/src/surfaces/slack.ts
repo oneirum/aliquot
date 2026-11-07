@@ -104,8 +104,10 @@ export function slackDoor(deps: SlackDoorDeps): (msg: unknown, ack: (obj: object
       return;
     }
     // A reply naming one of the choices sends the question it was about again, to that agent. Anything else is a new question.
-    const asked = choosing.get(threadKey);
-    choosing.delete(threadKey);
+    // Pending choices are per member: only the member who asked may pick, since the run replays their message as them.
+    const choiceKey = `${threadKey}:${e.user}`;
+    const asked = choosing.get(choiceKey);
+    choosing.delete(choiceKey);
     const pick = asked && pickOf(text, asked.choices);
     const looking = await deps.api("chat.postMessage", { channel: e.channel, thread_ts: thread, text: LOOKING, unfurl_links: false });
     const update = (text: string) => deps.api("chat.update", { channel: e.channel, ts: looking.ts, text });
@@ -118,7 +120,7 @@ export function slackDoor(deps: SlackDoorDeps): (msg: unknown, ack: (obj: object
           routedTo = ev.routedTo ?? null;
         } else if (ev.t === "refused") return void (await update(replyFor(ev, "")));
         else if (ev.t === "choose") {
-          choosing.set(threadKey, { input, choices: ev.choices });
+          choosing.set(choiceKey, { input, choices: ev.choices });
           return void (await update(`${escape(ev.message)}\nMention me in this thread with the number or the name.`));
         } else if (ev.t === "finished") return void (await update(replyFor(ev, deps.recordLink(ev.recordUrl), routedTo)));
       }

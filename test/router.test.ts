@@ -125,12 +125,26 @@ test("an unsure router asks the member, nothing runs until they pick, the pick r
 
 test("a pick the channel does not serve is refused; a channel with one agent runs it directly, as before", async () => {
   const refused = await ask("How long are samples kept?", "x", "shared", "someone-else");
-  assert.deepEqual(refused, { t: "refused", userFacing: "That agent does not answer in this channel." });
+  assert.deepEqual(refused, { t: "refused", userFacing: "That agent was not one of the choices for this message." });
   const solo = doc({ agentId: "solo", channels: ["web:solo"] });
   await confirmPublish({ db, catalog: async () => catalog }, solo, draftHashOf(solo), publisher, "alone");
   const direct = await ask("Anything at all?", "y", "solo");
   assert.ok(direct.t === "enqueued" && direct.answeredBy.agentId === "solo", JSON.stringify(direct));
   assert.deepEqual(direct.route, { t: "direct" });
+});
+
+test("a pick must be one of the choices offered for that message, and a resend with another pick reports the run that exists", async () => {
+  const confident = await ask("Who do I call when the freezer alarm sounds?", "offer", "shared", "lab0-methods");
+  assert.deepEqual(confident, { t: "refused", userFacing: "That agent was not one of the choices for this message." }, "the router would not offer methods for a freezer question");
+
+  const first = await ask(TWO_TOPICS[1]!, "resend", "shared", "lab0-desk", "r1");
+  assert.ok(first.t === "enqueued" && !first.duplicate && first.answeredBy.agentId === "lab0-desk", JSON.stringify(first));
+  const again = await ask(TWO_TOPICS[1]!, "resend", "shared", "lab0-methods", "r1");
+  // The thread now holds the desk, so methods is no longer offered; either way the existing run is what is reported.
+  if (again.t === "enqueued") {
+    assert.equal(again.runId, first.runId);
+    assert.equal(again.agent, first.agent, "a duplicate names the agent of the run that exists");
+  } else assert.equal(again.t, "refused");
 });
 
 test("a run job written before the router existed parses as a direct route", () => {

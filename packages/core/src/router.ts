@@ -100,7 +100,10 @@ export function route(input: RouteInput): RouteDecision {
 
 /** The member chose from the choices route() offered. The scores are kept, so the record shows what the router thought. */
 export function picked(input: RouteInput, agentId: AgentId): RouteDecision {
-  if (!input.candidates.some((c) => c.agentId === agentId)) return { t: "unavailable", reason: "That agent does not answer in this channel." };
+  // The pick must be one route() offers for this message now, so a client cannot name an agent it was never shown.
+  const offered = route(input);
+  const allowed = offered.t === "ask-user" ? offered.top3 : offered.t === "agent" ? [offered.agentId] : [];
+  if (!allowed.includes(agentId)) return { t: "unavailable", reason: "That agent was not one of the choices for this message." };
   return decided(agentId, "picked", scoreOptions(input.message, input.candidates));
 }
 
