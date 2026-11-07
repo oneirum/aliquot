@@ -78,7 +78,15 @@ export async function startFakeGraph(token = "fake-graph-token", driveId = "b!la
   const rounds = new Map<string, { readonly ids: readonly string[]; readonly upTo: number }>();
   const requests: string[] = [];
   const downloadAuth: (string | undefined)[] = [];
-  const touch = (id: string) => changed.set(id, ++seq);
+  /** Item id -> the seq of its last sharing change, so the delta can carry @microsoft.graph.sharedChanged. */
+  const sharedAt = new Map<string, number>();
+  // A change moves the item and, as on SharePoint, every folder above it (their size and modified time change).
+  const touch = (id: string) => {
+    const at = ++seq;
+    changed.set(id, at);
+    for (let p = items.get(id)?.parent; p; p = items.get(p)?.parent) changed.set(p, at);
+    return at;
+  };
   items.set(ROOT, { id: ROOT, name: "root", parent: "", folder: true, mimeType: "", content: new Uint8Array(), modified: new Date().toISOString(), cTag: 1, grants: [], inherits: false });
   touch(ROOT);
 
@@ -113,6 +121,7 @@ export async function startFakeGraph(token = "fake-graph-token", driveId = "b!la
     cTag: `"c:{${it.id}},${it.cTag}"`,
     lastModifiedDateTime: it.modified,
     parentReference: it.id === ROOT ? { driveId, driveType: "documentLibrary" } : { driveId, driveType: "documentLibrary", id: it.parent },
+    ...(sharedAt.get(it.id) === changed.get(it.id) ? { "@microsoft.graph.sharedChanged": "True" } : {}),
     ...(it.id === ROOT ? { root: {}, folder: { childCount: 0 } } : it.folder ? { folder: { childCount: [...items.values()].filter((c) => c.parent === it.id).length } } : { file: { mimeType: it.mimeType } }),
   });
 
@@ -224,19 +233,20 @@ export async function startFakeGraph(token = "fake-graph-token", driveId = "b!la
     },
     share(id, grants) {
       must(id).grants = [...grants];
-      touch(id);
+      sharedAt.set(id, touch(id));
     },
     restrict(id, grants) {
       const it = must(id);
       it.grants = [...grants];
       it.inherits = false;
-      touch(id);
+      sharedAt.set(id, touch(id));
     },
     rename(id, name) {
       must(id).name = name;
       touch(id);
     },
     remove(id) {
+      touch(id);
       const gone = [id];
       for (let i = 0; i < gone.length; i++) for (const c of items.values()) if (c.parent === gone[i]) gone.push(c.id);
       for (const g of gone) {

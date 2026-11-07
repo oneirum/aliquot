@@ -13,8 +13,8 @@
  *   tree itself (delta items carry no parentReference.path). Locations are computed from that tree at the end of
  *   each scan, so a folder rename moves every file under it without the files appearing in the delta.
  * - Permissions are read before content, so a file no lab member may see is never downloaded. A file that appears
- *   in a delta has its permissions read again; a folder that appears in an incremental delta (a sharing change, a
- *   rename, a move) has every file under it read again, because inherited permissions change with it.
+ *   in a delta has its permissions read again; a folder whose sharing changed (Graph's sharedChanged annotation) or
+ *   that moved has every file under it read again, because what they inherit changes with it.
  * - A scan collects every delta page before it changes any state, and a file whose permissions or text could not
  *   be fetched keeps no cache entry, so a failed sync (which leaves the published head alone) retries it next time.
  * - Every request goes through the HTTP choke point at DEFINITION_CLASS, and the bearer token only ever goes to
@@ -61,6 +61,8 @@ const deltaItem = z
     deleted: z.object({}).passthrough().optional(),
     lastModifiedDateTime: z.string().optional(),
     cTag: z.string().optional(),
+    /** With Prefer: deltashowsharingchanges, on an item whose sharing changed in this round. */
+    "@microsoft.graph.sharedChanged": z.string().optional(),
   })
   .passthrough();
 const deltaPage = z.object({ value: z.array(deltaItem), "@odata.nextLink": z.string().optional(), "@odata.deltaLink": z.string().optional() });
@@ -168,21 +170,34 @@ export function graphSource(cfg: GraphSourceConfig, deps: GraphDeps): DocumentSo
     }
   };
 
-  const children = (folderId: string): string[] => [...nodes.values()].filter((n) => n.parentId === folderId).flatMap((n) => (n.kind === "file" ? [n.id] : [n.id, ...children(n.id)]));
+  /** Every item under a folder, in one pass over the tree. */
+  const descendants = (folderId: string): string[] => {
+    const byParent = new Map<string, string[]>();
+    for (const n of nodes.values()) if (n.parentId) byParent.set(n.parentId, [...(byParent.get(n.parentId) ?? []), n.id]);
+    const out: string[] = [];
+    for (let queue = [folderId]; queue.length; ) for (const c of byParent.get(queue.shift()!) ?? []) (out.push(c), queue.push(c));
+    return out;
+  };
 
   const apply = (items: readonly DeltaItem[], incremental: boolean): void => {
     for (const it of items) {
-      scopes.delete(it.id);
       if (it.deleted) {
-        if (nodes.get(it.id)?.kind === "folder") for (const c of children(it.id)) (scopes.delete(c), texts.delete(c), nodes.delete(c));
+        if (nodes.get(it.id)?.kind !== "file") for (const c of descendants(it.id)) (scopes.delete(c), texts.delete(c), nodes.delete(c));
         nodes.delete(it.id);
+        scopes.delete(it.id);
         texts.delete(it.id);
         continue;
       }
       const kind = it.root ? "root" : it.folder ? "folder" : it.file ? "file" : null;
       if (!kind) continue; // a package (a OneNote notebook) or a remote item: not a document Aliquot reads
-      nodes.set(it.id, { id: it.id, name: it.name ?? "", parentId: it.parentReference?.id ?? null, kind, mimeType: it.file?.mimeType ?? "", modifiedAt: it.lastModifiedDateTime ?? "1970-01-01T00:00:00.000Z", cTag: it.cTag ?? it.lastModifiedDateTime ?? "" });
-      if (incremental && kind !== "file") for (const c of children(it.id)) scopes.delete(c);
+      const before = nodes.get(it.id);
+      const parentId = it.parentReference?.id ?? null;
+      nodes.set(it.id, { id: it.id, name: it.name ?? "", parentId, kind, mimeType: it.file?.mimeType ?? "", modifiedAt: it.lastModifiedDateTime ?? "1970-01-01T00:00:00.000Z", cTag: it.cTag ?? it.lastModifiedDateTime ?? "" });
+      // A file in the delta changed somehow: one permissions read. A folder is in every delta whose round changed a file
+      // under it, so its files' permissions are read again only when its sharing changed or it moved, which is when
+      // what they inherit can change.
+      if (kind === "file") scopes.delete(it.id);
+      else if (incremental && (it["@microsoft.graph.sharedChanged"] === "True" || (before !== undefined && before.parentId !== parentId))) for (const c of descendants(it.id)) scopes.delete(c);
     }
   };
 
@@ -261,7 +276,11 @@ export function graphSource(cfg: GraphSourceConfig, deps: GraphDeps): DocumentSo
       const skipped: { location: string; why: string }[] = [];
       const files = [...nodes.values()].filter((n) => n.kind === "file").flatMap((n) => {
         const path = pathOf(n);
-        return path !== null && path.startsWith(prefix) ? [{ n, location: path.slice(prefix.length) }] : [];
+        if (path === null) {
+          skipped.push({ location: n.name, why: "Graph reported no folder chain from it to the library root" });
+          return [];
+        }
+        return path.startsWith(prefix) ? [{ n, location: path.slice(prefix.length) }] : [];
       });
       for (const { n, location } of files.sort((a, b) => (a.location < b.location ? -1 : a.location > b.location ? 1 : 0))) {
         const ext = extname(n.name).toLowerCase();
