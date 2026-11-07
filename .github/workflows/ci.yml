@@ -60,5 +60,5 @@ jobs:
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: PDF fixtures through the sandbox image the compose check built
-        run: node --test test/pdf.test.ts test/run-code.test.ts
+      - name: PDF fixtures, run_code and data_query through the sandbox image the compose check built
+        run: node --test test/pdf.test.ts test/run-code.test.ts test/data-query.test.ts

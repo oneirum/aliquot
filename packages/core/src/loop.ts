@@ -276,7 +276,7 @@ export async function drive(job: LeasedJob, journal: RunJournal, deps: LoopDeps)
         case "call-tool": {
           if (agent.agentCli) throw new Error("an agent CLI run left its session with a tool call open");
           const call = state.toolCalls.find((c) => c.callId === action.callId)!;
-          await deps.tools.invoke(journal, { callId: call.callId, tool: call.tool, attempt: action.attempt, input: call.input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox, viewer: runViewer(journal.events(), deps.directory ?? EMPTY_DIRECTORY) }, signal);
+          await deps.tools.invoke(journal, { callId: call.callId, tool: call.tool, attempt: action.attempt, input: call.input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox, viewer: runViewer(journal.events(), deps.directory ?? EMPTY_DIRECTORY), tables: agent.tables ?? [] }, signal);
           return null;
         }
         case "mark-unknown":

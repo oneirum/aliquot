@@ -201,7 +201,7 @@ async function runAttempt(
     if (!agent.tools.some((t) => t.name === name)) return notice(`No tool named ${name} is available.`);
     const callId = `s${attempt}-${calls}`;
     const input = await journal.put(Labelled.derive(args, [], "agent:tool-args", sessionClass));
-    await sd.tools.invoke(journal, { callId, tool: name, attempt: 1, input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox, viewer: runViewer(journal.events(), deps.directory ?? EMPTY_DIRECTORY) }, signal.signal);
+    await sd.tools.invoke(journal, { callId, tool: name, attempt: 1, input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox, viewer: runViewer(journal.events(), deps.directory ?? EMPTY_DIRECTORY), tables: agent.tables ?? [] }, signal.signal);
     const done = terminal(journal.events(), callId);
     let content: Labelled<string>;
     if (done?.t === "tool.completed") {

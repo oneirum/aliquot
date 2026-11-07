@@ -26,6 +26,7 @@ const catalog: Catalog = {
   endpoint: (id) => (id === "local" ? { placement: "lab" } : undefined),
   sandboxImage: () => undefined,
   dataset: () => undefined,
+  table: () => undefined,
 };
 const deps = { db, catalog: async () => catalog };
 const member: Actor = { id: "mia" as MemberId, role: "member" };

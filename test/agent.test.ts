@@ -14,6 +14,7 @@ const catalog: Catalog = {
   endpoint: (id) => (id === "local" ? { placement: "lab" } : id === "hosted" ? { placement: "zdr" } : undefined),
   sandboxImage: () => undefined,
   dataset: () => undefined,
+  table: () => undefined,
 };
 
 function doc(overrides: Record<string, unknown> = {}) {

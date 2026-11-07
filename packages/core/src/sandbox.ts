@@ -53,7 +53,23 @@ export interface Sandbox {
   run(spec: RunSpec, signal: AbortSignal): Promise<RunOutput>;
   /** A PDF source's text, read by poppler inside a container with no network. Throws naming `name` when it cannot. */
   readPdf(bytes: Uint8Array, name: string): Promise<string>;
+  /** data_query's engine: python3 -I over files uploaded read-only to /in, in a container with no network and nothing writable. */
+  aggregate(files: readonly InputFile[], engine: string, signal: AbortSignal): Promise<AggregateOutput>;
 }
+
+export interface InputFile {
+  readonly name: string;
+  readonly data: Uint8Array;
+}
+
+export interface AggregateOutput {
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  /** Capped at AGGREGATE_CAP_BYTES. stderr is not returned: a traceback can quote a row. */
+  readonly stdout: string;
+}
+
+export const AGGREGATE_CAP_BYTES = 256 * 1024;
 
 export function containerConfig(s: SandboxConfig, mounts: RunSpec["mounts"]): object {
   return lockedContainer(s, "aliquot.run_code", {
@@ -67,7 +83,11 @@ export function containerConfig(s: SandboxConfig, mounts: RunSpec["mounts"]): ob
  * the archive endpoint before start; the daemon may write into a volume although the root is read-only.
  */
 export function pdfContainerConfig(s: SandboxConfig): object {
-  return { ...lockedContainer(s, "aliquot.read_pdf", {}), Volumes: { "/in": {} } };
+  return inputContainerConfig(s, "aliquot.read_pdf");
+}
+
+export function inputContainerConfig(s: SandboxConfig, label: string): object {
+  return { ...lockedContainer(s, label, {}), Volumes: { "/in": {} } };
 }
 
 function lockedContainer(s: SandboxConfig, label: string, mounts: object): object {
@@ -157,6 +177,34 @@ export function createSandbox(s: SandboxConfig): Sandbox {
         await docker.call("DELETE", `/containers/${id}?force=true&v=true`).catch(() => {});
       }
     },
+    async aggregate(files, engine, signal) {
+      if (signal.aborted) throw new DOMException("data_query was stopped", "AbortError");
+      const created = JSON.parse((await docker.ok("POST", "/containers/create", inputContainerConfig(s, "aliquot.data_query"))).toString()) as { Id: string };
+      const id = created.Id;
+      let timedOut = false;
+      const kill = () => void docker.call("POST", `/containers/${id}/kill`).catch(() => {});
+      const timer = setTimeout(() => {
+        timedOut = true;
+        kill();
+      }, s.timeoutMs);
+      signal.addEventListener("abort", kill, { once: true });
+      try {
+        await docker.ok("PUT", `/containers/${id}/archive?path=/in`, filesTar(files));
+        await docker.ok("POST", `/containers/${id}/start`);
+        const run = await docker.exec(id, ["python3", "-I", "-c", engine], AGGREGATE_CAP_BYTES + 1);
+        if (signal.aborted) throw new DOMException("data_query was stopped", "AbortError");
+        if (timedOut) return { exitCode: null, timedOut: true, stdout: "" };
+        // Over the cap is not an aggregate this engine prints; cut, it fails the shape check upstream.
+        return { exitCode: run.exitCode, timedOut: false, stdout: run.stdout.subarray(0, AGGREGATE_CAP_BYTES).toString("utf8") };
+      } catch (err) {
+        if (timedOut && !signal.aborted) return { exitCode: null, timedOut: true, stdout: "" };
+        throw err;
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", kill);
+        await docker.call("DELETE", `/containers/${id}?force=true&v=true`).catch(() => {});
+      }
+    },
     async readPdf(bytes, name) {
       if (bytes.length > PDF_CAP_BYTES) throw new Error(`${name}: ${(bytes.length / 1024 / 1024).toFixed(1)} MB is over the ${PDF_CAP_BYTES / 1024 / 1024} MB limit for a PDF source; split it into smaller files`);
       const created = JSON.parse((await docker.ok("POST", "/containers/create", pdfContainerConfig(s))).toString()) as { Id: string };
@@ -200,6 +248,15 @@ function popplerError(stderr: Buffer): string {
 
 /** One regular file in a ustar archive, owned by 65534 and read-only, for the archive endpoint. */
 export function oneFileTar(name: string, data: Uint8Array): Buffer {
+  return filesTar([{ name, data }]);
+}
+
+/** Regular files in one ustar archive, each owned by 65534 and read-only. */
+export function filesTar(files: readonly InputFile[]): Buffer {
+  return Buffer.concat([...files.flatMap((f) => tarEntry(f.name, f.data)), Buffer.alloc(1024)]);
+}
+
+function tarEntry(name: string, data: Uint8Array): Buffer[] {
   const header = Buffer.alloc(512);
   const put = (text: string, at: number) => header.write(text, at, "ascii");
   const octal = (n: number, width: number) => n.toString(8).padStart(width - 1, "0") + "\0";
@@ -216,7 +273,7 @@ export function oneFileTar(name: string, data: Uint8Array): Buffer {
   const sum = header.reduce((a, b) => a + b, 0);
   put(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
   const padding = Buffer.alloc((512 - (data.length % 512)) % 512);
-  return Buffer.concat([header, Buffer.from(data.buffer, data.byteOffset, data.byteLength), padding, Buffer.alloc(1024)]);
+  return [header, Buffer.from(data.buffer, data.byteOffset, data.byteLength), padding];
 }
 
 /** Text files first come, first kept, until 256 KB. A file with a NUL byte or invalid UTF-8 is not text. */

@@ -19,6 +19,7 @@ import { ROLES, type Role } from "./roles.ts";
 import { buildPolicy, ceilingOfStore, type Policy } from "./policy.ts";
 import { declaredClass, loadPreset, mergeClasses, type Preset } from "./preset.ts";
 import { parseDuas, type Dua } from "./dua.ts";
+import { MIN_CELL, type Table } from "./tables.ts";
 
 const placement = z.enum(PLACEMENTS);
 const KEY_ID = /^[a-z0-9][a-z0-9_-]*$/;
@@ -290,6 +291,23 @@ const schema = z.object({
     })
     .strict()
     .optional(),
+  /** Tabular sources for data_query. A column the table has and columns does not name is restricted. */
+  tables: z
+    .record(
+      z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "a table id is lowercase letters, digits, _ and -"),
+      z
+        .object({
+          description: z.string().min(1),
+          csv: z.string().min(1).optional(),
+          redcap_url: z.string().url().optional(),
+          redcap_token_env: z.string().min(1).optional(),
+          columns: z.record(z.string().min(1), z.enum(["free", "restricted"])),
+          aggregate_class: z.enum(DATA_CLASSES),
+          min_cell: z.number().int().min(MIN_CELL, `may not be below ${MIN_CELL}`).default(MIN_CELL),
+        })
+        .strict(),
+    )
+    .default({}),
   research: z.object({ contact_email_env: z.string().min(1).optional() }).strict().default({}),
   sources: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "a source id is lowercase letters, digits and -, because it starts each entry's path"), documentSource).default({}),
   directory: z
@@ -349,6 +367,7 @@ export interface LabConfig {
   readonly datasets: readonly Dataset[];
   /** [duas]: who may read each bound knowledge base, entry and dataset, and until when. Empty without the table. */
   readonly duas: readonly Dua[];
+  readonly tables: readonly Table[];
   readonly sandbox: SandboxConfig | null;
   /** The env var whose value literature tools send as the polite-pool contact. */
   readonly contactEmailEnv: string | null;
@@ -530,6 +549,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     channelFloors: c.channel_floors,
     datasets,
     duas: parseDuas(c.duas, classes, datasets),
+    tables: Object.entries(c.tables).map(([id, t]) => parseTable(id, t, dir, c.hosts)),
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
@@ -558,6 +578,19 @@ export function parseConfig(text: string, path: string): LabConfig {
     }),
     directory: { groups: c.directory.groups, emails: c.directory.emails },
   };
+}
+
+function parseTable(id: string, t: z.infer<typeof schema>["tables"][string], dir: string, hosts: Record<string, Placement>): Table {
+  const fail = (why: string): never => {
+    throw new Error(`lab.toml: [tables.${id}] ${why}`);
+  };
+  const base = { id, description: t.description, columns: t.columns, aggregateClass: t.aggregate_class, minCell: t.min_cell };
+  if (t.csv !== undefined && t.redcap_url === undefined && t.redcap_token_env === undefined) return { ...base, source: { kind: "csv", path: resolve(dir, t.csv) } };
+  if (t.csv !== undefined || t.redcap_url === undefined || t.redcap_token_env === undefined) return fail("needs csv, or redcap_url with redcap_token_env, and not both");
+  const host = new URL(t.redcap_url).hostname.toLowerCase();
+  const placed = Object.entries(hosts).find(([h]) => h.toLowerCase() === host)?.[1];
+  if (placed !== "lab" && placed !== "institution") fail(`names REDCap at ${host}, which [hosts] does not place as lab or institution; the export request carries the token there`);
+  return { ...base, source: { kind: "redcap", url: t.redcap_url, tokenEnv: t.redcap_token_env } };
 }
 
 export async function loadConfig(path: string): Promise<LabConfig> {

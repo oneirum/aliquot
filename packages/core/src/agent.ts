@@ -76,6 +76,8 @@ export interface AgentDocument {
   /** kb_read's cap per call, in estimated tokens. Defaults to DEFAULT_READ_CAP_TOKENS. */
   readonly readCapTokens?: number;
   readonly tools: readonly { readonly name: string; readonly scopes: readonly string[] }[];
+  /** Table ids from lab.toml [tables] that data_query may read for this agent. */
+  readonly tables: readonly string[];
   readonly audience: Audience;
   readonly channels: readonly string[];
   readonly autoRespond: boolean;
@@ -122,6 +124,11 @@ export interface ResolvedAgent {
   readonly knowledgeBases: readonly { readonly kbId: string; readonly snapshot: SnapshotId; readonly cls: DataClass }[];
   readonly tools: readonly { readonly name: string; readonly hash: ToolHash }[];
   readonly sandbox: null | { readonly imageDigest: Sha256; readonly mountCeiling: DataClass; readonly mounts: readonly string[] };
+  /**
+   * The lab.toml tables data_query may read, present iff the agent names any, so every version hashed before tables
+   * existed keeps its hash. A table's columns and minimum cell size are the steward's, read at call time.
+   */
+  readonly tables?: readonly string[];
   /** The algorithm is checked against the deployed reader at run start; the cap is what kb_search and kb_read read up to. */
   readonly retrieval: { readonly algorithm: "bm25-v1"; readonly readCapTokens: number };
   readonly limits: Limits;
@@ -204,6 +211,7 @@ export interface Catalog {
   endpoint(id: string): { placement: Placement; agentCli?: { kind: AgentCliKind; cliVersion: string | null } } | undefined;
   sandboxImage(): Sha256 | undefined;
   dataset(id: string): { cls: DataClass } | undefined;
+  table(id: string): { aggregateClass: DataClass } | undefined;
 }
 
 export interface Issue {
@@ -277,6 +285,7 @@ export const agentDocumentSchema = z.object({
     )
     .default([])
     .meta(says("Tools")),
+  tables: z.array(z.string()).default([]).meta(says("Tables", "Table ids from lab.toml that data_query may count and average over. Rows and restricted columns stay in the sandbox.")),
   audience: z
     .discriminatedUnion("t", [
       z.object({ t: z.literal("lab").meta(says("Whole lab")) }),
@@ -425,6 +434,15 @@ export function validateAgentDraft(doc: AgentDocument, catalog: Catalog): Issue[
     }
   }
   if (doc.tools.some((t) => t.name === "run_code") && !doc.sandbox.enabled) error("tools", "run_code needs the code sandbox enabled");
+  for (const id of doc.tables) {
+    const t = catalog.table(id);
+    if (!t) error("tables", `table ${id} is not in lab.toml`);
+    else if (!atMost(t.aggregateClass, doc.ceiling)) error("tables", `table ${id}'s aggregates are ${t.aggregateClass}, above the agent ceiling ${doc.ceiling}`);
+  }
+  const queries = doc.tools.some((t) => t.name === "data_query");
+  if (queries && !doc.tables.length) error("tools", "data_query needs at least one table in tables");
+  if (doc.tables.length && !queries) error("tables", "tables are read only through data_query; add it to tools");
+  if (queries && !catalog.sandboxImage()) error("tools", "data_query runs in the sandbox, and no sandbox image is deployed");
   return issues;
 }
 
@@ -484,6 +502,7 @@ export function resolveAgent(doc: AgentDocument, catalog: Catalog): Resolution {
     retrieval: { algorithm: RETRIEVAL_ALGORITHM, readCapTokens: doc.readCapTokens ?? DEFAULT_READ_CAP_TOKENS },
     limits: withDefaults(defaults, doc.limits ?? {}),
     prompt: PROMPT_FRAME,
+    ...(doc.tables.length ? { tables: doc.tables } : {}),
   };
   const cli = catalog.endpoint(doc.model.endpointId)?.agentCli;
   if (cli?.cliVersion) return { ok: true, agent: { ...agent, agentCli: { kind: cli.kind, cliVersion: cli.cliVersion } } };

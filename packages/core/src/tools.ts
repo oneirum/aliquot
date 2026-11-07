@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { decideEgress, describeRefusal, join, Labelled, placementOfHost, type DataClass, type EgressPolicy, type EgressRefusal, type Placement } from "./dataclass.ts";
-import { contentHash, type EntryHash, type SnapshotId, type ToolHash } from "./hash.ts";
+import { contentHash, type EntryHash, type Sha256, type SnapshotId, type ToolHash } from "./hash.ts";
 import type { Dataset } from "./config.ts";
 import { checkMount, listFiles, mountable, type MountPolicy } from "./datasets.ts";
 import type { Sandbox } from "./sandbox.ts";
@@ -25,6 +25,7 @@ import { parseAtom } from "./atom.ts";
 import { platformFetch } from "./seal.ts";
 import { citationWalk, doiLookup, europepmcFulltext, europepmcSearch } from "./literature.ts";
 import { duaAccess, memberOf, scopeKb, utcDay, type Dua, type DuaAccess, type Withheld } from "./dua.ts";
+import { dataQuery as dataQueryInput, executeQuery, QueryRefused, tableReader, type FormPost, type Table, type TableSandbox } from "./tables.ts";
 
 export type Effect = "read" | "lab-write" | "external-send";
 
@@ -171,6 +172,8 @@ export interface ToolEnv {
   readonly sandbox: MountPolicy | null;
   /** Who the run answers. Retrieval returns only the entries their scope lets them see. */
   readonly viewer: Viewer;
+  /** Table ids the agent grants data_query. */
+  readonly tables?: readonly string[];
 }
 
 /** What the loop calls. Validates input with the zod schema, builds ToolContext, journals requested/completed/failed, classifies output. */
@@ -264,6 +267,11 @@ export interface ToolRunnerDeps {
   /** lab.toml's [duas]: every knowledge base read and dataset is filtered by the run's member and today's date. */
   readonly duas?: readonly Dua[];
   readonly clock?: { now(): number };
+  readonly tables?: readonly Table[];
+  /** The sandbox image's digest, recorded with each data_query answer. */
+  readonly sandboxImage?: Sha256 | null;
+  /** Reads a secret named in lab.toml, such as a REDCap token. Defaults to the environment. */
+  readonly secret?: (env: string) => string | undefined;
 }
 
 /** What only core's own tools reach: the agent's mountable datasets and the container runner. */
@@ -273,6 +281,11 @@ interface CoreScope {
   /** The run's member's access to DUA-bound data, and what the knowledge base reads of this call withheld under it. */
   readonly access: DuaAccess;
   readonly withheld: readonly Withheld[];
+  /** The agent's granted tables, with the container data_query runs in and the egress-checked POST a REDCap export takes. */
+  readonly tables: readonly Table[];
+  readonly tableSandbox: TableSandbox | null;
+  readonly post: FormPost;
+  readonly secret: (env: string) => string | undefined;
 }
 
 /** Keyed by the context the runner built for a core tool, so any other tool, whose context is never a key, cannot reach the sandbox. */
@@ -357,7 +370,27 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
           return deps.http.request(url, payload, (event) => journal.record(event), { ...init, signal: init?.signal ?? signal }, tool.manifest.egress);
         },
       };
-      if (tool.owner === "core") coreScopes.set(ctx, { datasets: mountable(env.sandbox, deps.datasets ?? []), sandbox: deps.sandbox ?? null, access, withheld });
+      if (tool.owner === "core") {
+        const sandbox = deps.sandbox ?? null;
+        const image = deps.sandboxImage ?? null;
+        const granted = new Set(env.tables ?? []);
+        // A REDCap export request carries the token and the export's settings, under the class of everything the call has touched.
+        const post: FormPost = (url, form) => {
+          const payload = Labelled.derive(body.value, [body], `tool:${tool.manifest.name}`, join(...touched));
+          const host = new URL(url).hostname.toLowerCase();
+          return deps.http.request(url, payload, (event) => journal.record(event), { method: "POST", body: new URLSearchParams(form), signal }, [host]);
+        };
+        coreScopes.set(ctx, {
+          datasets: mountable(env.sandbox, deps.datasets ?? []),
+          sandbox,
+          tables: (deps.tables ?? []).filter((t) => granted.has(t.id)),
+          tableSandbox: sandbox && image ? { image, aggregate: (files, engine, s) => sandbox.aggregate(files, engine, s) } : null,
+          post,
+          secret: deps.secret ?? ((name) => process.env[name]),
+          access,
+          withheld,
+        });
+      }
       const startedAt = Date.now();
       let result: unknown;
       try {
@@ -367,6 +400,8 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
         const seen = join(...touched);
         if (err instanceof EgressRefused) return fail("egress-refused", err.message, false, seen);
         if (err instanceof ToolInputError) return fail("invalid-input", err.message, false, seen);
+        // A refusal's text names columns and rules, never a value: it is written at the input's class, not the table's.
+        if (err instanceof QueryRefused) return fail("invalid-input", err.message, false);
         if (signal.aborted || (err as { name?: string }).name === "AbortError") return fail("aborted", null, true);
         return fail("thrown", err instanceof Error ? err.message : String(err), true, seen);
       }
@@ -517,6 +552,27 @@ export const runCode = defineTool({
   },
 });
 
+export const dataQueryTool = defineTool({
+  name: "data_query",
+  description:
+    "Count, sum, average or take the standard deviation over a lab table (a CSV or a REDCap project), with filters and up to three group-by columns. Returns the numbers per group, never rows. A query that names a restricted column, or makes a group of fewer than the table's minimum cell size (at least 5), is refused. Use for questions like how many participants finished a visit or the mean dose in a cohort. Not for listing rows or reading a participant's record.",
+  input: dataQueryInput,
+  reads: "D0",
+  effects: "read",
+  egress: [],
+  idempotent: true,
+  async run(q, ctx) {
+    const scope = coreScope(ctx);
+    const table = scope.tables.find((t) => t.id === q.table);
+    if (!table) throw new ToolInputError(`table ${q.table} is not one this agent may query; its tables are ${scope.tables.map((t) => t.id).join(", ") || "none"}`);
+    if (!scope.tableSandbox) throw new ToolInputError("data_query runs in the sandbox, and this deployment has none");
+    const columns = Object.entries(table.columns).filter(([, c]) => c === "free").map(([name]) => name);
+    // Only an aggregate leaves the sandbox, so the answer is the table's aggregate class, not the class of its rows.
+    ctx.touched(table.aggregateClass);
+    const record = await executeQuery(table, q, { read: tableReader({ post: scope.post, secret: scope.secret }), sandbox: scope.tableSandbox, signal: ctx.signal });
+    return { ...record, freeColumns: columns };
+  },
+});
 
 export const openalexSearch = defineTool({
   name: "openalex_search",
@@ -627,7 +683,7 @@ export const arxivSearch = defineTool({
 });
 
 export function builtinTools(): RegisteredTool[] {
-  return [kbSearch, kbRead, datasetList, runCode, openalexSearch, pubmedSearch, arxivSearch, europepmcSearch, europepmcFulltext, doiLookup, citationWalk].map((t) => {
+  return [kbSearch, kbRead, datasetList, runCode, dataQueryTool, openalexSearch, pubmedSearch, arxivSearch, europepmcSearch, europepmcFulltext, doiLookup, citationWalk].map((t) => {
     const manifest = t as ToolManifest<unknown, unknown>;
     return { manifest, hash: toolSpecHash(manifest), owner: "core" };
   });

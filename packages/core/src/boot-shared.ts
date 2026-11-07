@@ -73,6 +73,10 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
       const d = config.datasets.find((x) => x.id === id);
       return d ? { cls: d.cls } : undefined;
     },
+    table: (id) => {
+      const t = config.tables.find((x) => x.id === id);
+      return t ? { aggregateClass: t.aggregateClass } : undefined;
+    },
   });
   const cliSeen = async () =>
     new Map((await db.query<{ backend_id: string; kind: string; cli_version: string }>("select backend_id, kind, cli_version from agent_cli_seen")).rows.filter((r) => backends.get(r.backend_id)?.kind === r.kind).map((r) => [r.backend_id, r.cli_version]));
