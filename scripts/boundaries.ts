@@ -42,6 +42,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/gateway.ts": ["platform-fetch", "egress-decision"],
   "packages/core/src/tools.ts": ["platform-fetch", "egress-decision", "computed-specifier", "stamp"],
   "packages/core/src/surfaces/web.ts": ["module:http"],
+  // Sign-on: the web door's only reach to the lab's OIDC provider (discovery, keys, token endpoint), over https or loopback http.
+  "packages/core/src/surfaces/signon-wire.ts": ["module:http", "module:https"],
   // aliquot ask and acp: a client of the web door's routes, over http or https.
   "packages/core/src/door-client.ts": ["module:http", "module:https"],
   // aliquot slack: Slack's Web API and Socket Mode, over https (http and ws on loopback for a test).
@@ -61,7 +63,9 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/dataclass.ts": ["egress-decision", "brand-cast"],
   "packages/core/src/frontdoor.ts": ["egress-decision"],
   "packages/core/src/record.ts": ["egress-decision", "stamp"],
-  "packages/core/src/replay.ts": ["egress-decision"],
+  // Export decides each body against the reviewer's clearance. Re-execution stamps bundle bodies at the class their
+  // verified event names, as the payload store stamps what it decrypts.
+  "packages/core/src/replay.ts": ["egress-decision", "stamp"],
   "packages/core/src/gate.ts": ["stamp"],
   "packages/core/src/kb.ts": ["stamp"],
   "packages/core/src/kb-compile.ts": ["stamp"],
@@ -74,9 +78,16 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/compose-ask.ts": ["network-globals"],
   "scripts/walk-policy.ts": ["network-globals"],
   "scripts/unit3.ts": ["module:http"],
+  // The sign-on walk drives the door over HTTP like a browser, picks a free port, and starts the door once without [auth]. It is not deployed.
+  "scripts/walk-signon.ts": ["network-globals", "module:child_process", "module:net"],
   "scripts/record-demo.ts": ["module:child_process"],
+  // The study walk runs the aliquot binary as a PI and a reviewer would, with the write flag export needs. It is not deployed.
+  "scripts/walk-study.ts": ["module:child_process"],
   "scripts/agent-demo.ts": ["module:child_process"],
   "scripts/unit2.ts": ["network-globals", "module:child_process", "module:net"],
+  // The keys walk runs the aliquot CLI, reads record pages from a door it boots, and writes last month's runs with their
+  // classes stamped as the door would have. It is not deployed.
+  "scripts/walk-keys.ts": ["network-globals", "module:child_process", "stamp"],
   // The preflight runs docker and the package managers for their versions and probes local ports. It is not deployed.
   "scripts/doctor.ts": ["module:child_process", "module:net"],
   // One booted core per studio server, kept across Next's dev reloads of this module.

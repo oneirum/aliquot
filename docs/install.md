@@ -29,7 +29,63 @@ The participant id question is the one that matters most. Every message, source 
 
 `docker compose up` starts four services. Postgres holds core's tables and the studio's tables (in a `studio` schema). The worker runs agents and compiles knowledge bases. The web door is the members' chat page and record pages, on port 3000. The studio is the authoring app, a production build on port 3001. Only the worker and the web door get `LABH_PAYLOAD_KEY`. The studio holds no payload key: it sends every read and write of core's tables to the web door with `ALIQUOT_STUDIO_TOKEN`, and connects to Postgres itself only for its own tables, as the same database user. Core applies its migrations when the worker or the web door starts. The studio applies its own committed migrations when it starts.
 
-Every port is published on `127.0.0.1`. The web door has no sign-in yet (planned for 0.7), so keep it on the machine, or behind a proxy that only lab members can reach. `LABH_BIND` in `.env` changes the address. `LABH_WEB_PORT`, `LABH_STUDIO_PORT` and `LABH_PG_PORT` change the ports.
+Every port is published on `127.0.0.1`. `LABH_BIND` in `.env` changes the address, and the web door refuses any address beyond the machine until `lab.toml` has sign-on (next section). `LABH_WEB_PORT`, `LABH_STUDIO_PORT` and `LABH_PG_PORT` change the ports.
+
+## Sign-on and a reverse proxy
+
+Without sign-on, the web door trusts the member id the page sends, so it listens on the machine only. With an `[auth]` table in `lab.toml`, members sign in with the university account through any OpenID Connect provider, and the door may face the campus network behind a reverse proxy.
+
+What a signed-in member gets: the runs they asked signed in, on `/runs`, and nobody else's (the data steward and the PI see all), a 404 for anyone else's record, events, sources, replies or stop, and the entry behind the chat's Source chip when the run retrieved it and its class allows. A member id in a request body is ignored. Each run's record names the member by the provider's stable id. A token surface's runs are never a member's own, even when they name the member, because a token client can name anyone: only the data steward and the PI see them.
+
+1. Register Aliquot with the provider as a web application (a confidential client). The redirect URI is the door's address plus `/callback`, for example `https://ask.lab.example.edu/callback`. Ask for the authorization code flow; Aliquot always sends PKCE (S256).
+2. Add to `config/lab.toml`:
+
+	[surfaces.web]
+	placement = "lab"
+	port = 3000
+	base_url = "https://ask.lab.example.edu"   # what members type; https makes the cookie Secure
+	bind = "0.0.0.0"                          # or leave it out and set LABH_BIND for compose
+
+	[auth]
+	issuer = "https://login.microsoftonline.com/<tenant-id>/v2.0"
+	client_id = "<application id>"
+	client_secret_env = "LABH_OIDC_CLIENT_SECRET"
+	# id_claim = "sub"                 # the member id each run records; eppn on an InCommon campus
+	# email_claim = "email"            # must be an email the provider says it verified (email_verified)
+	# trust_unverified_email = false   # see the Entra ID row below before setting it
+	# idle_timeout_minutes = 30        # a session unused this long ends (HIPAA automatic logoff)
+	# scopes = ["openid", "email", "profile"]
+
+3. Add to `.env`: `LABH_SESSION_SECRET=$(openssl rand -hex 32)` (it signs the session cookie; the door refuses one shorter than 32 characters) and `LABH_OIDC_CLIENT_SECRET=<the provider's client secret>`. Set `LABH_BIND=0.0.0.0` only once the proxy is in front.
+4. `docker compose up -d`. The door's start line names the provider members sign in at. Without `roles_claim`, it also warns when the studio has not created its accounts yet, because nobody can sign in until it has.
+
+Who may sign in: a person the provider vouches for whose verified email (`email_verified` true in the ID token) matches a studio account the PI added, with that account's role, read on every request, so a removed account loses access at once. A university provider vouches for the whole campus, so anyone else is told to ask the PI. A lab that manages membership in the provider instead maps a group or entitlement claim to roles, and the studio account then only matters for someone with no mapped group:
+
+	[auth]
+	roles_claim = "isMemberOf"
+
+	[auth.roles]
+	"lab0:members" = "member"
+	"lab0:pi" = "pi"
+
+A role from a claim holds for the session. A session lasts 12 hours from sign-in and ends sooner after `idle_timeout_minutes` unused; the next page goes back through the provider and returns to where it was. **Sign out** clears the session on the door, not at the provider.
+
+| Provider | `issuer` | Notes |
+|---|---|---|
+| Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Entra ID sends no `email_verified`, and its `email`, `preferred_username` and `upn` can be set by a user or a tenant admin, guest tenants included. Prefer `roles_claim = "groups"`: the claim carries group object ids, which are the keys of `[auth.roles]`, and a role from a group never rests on the email. Matching studio accounts by email needs `trust_unverified_email = true`, which is safe only for a single-tenant app registration with guest access off. |
+| Okta | `https://<org>.okta.com/oauth2/default` | A groups claim needs the authorization server's claim rule, and may need `"groups"` in `scopes`. |
+| Keycloak | `https://<host>/realms/<realm>` | Add a group membership mapper to the client for `roles_claim = "groups"`. |
+| CILogon | `https://cilogon.org` | Set `scopes = ["openid", "email", "profile", "org.cilogon.userinfo"]`: CILogon releases `eppn` and `isMemberOf` only under that scope. Then `id_claim = "eppn"`. |
+
+A campus that speaks only SAML puts Keycloak (as a SAML broker) or CILogon (through InCommon) in front, and Aliquot signs in to that.
+
+The reverse proxy terminates TLS and passes requests to the door on port 3000 with the original `Host` header. A signed-in POST must come from `base_url`'s origin or the `Host` it was sent to, so keep both the same. For Caddy:
+
+	ask.lab.example.edu {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+Sign-on covers the web door. The studio keeps its own accounts, and the token surfaces (`aliquot ask`, `aliquot acp`, Slack) keep their tokens. With sign-on on, a token surface reads and lists only its own surface's runs.
 
 ## Knowledge bases
 
@@ -59,13 +115,65 @@ Each PDF is read in its own container. The container has no network, a read-only
 	scripts/backup.sh                 # writes backups/<UTC time>/
 	scripts/restore.sh backups/<time>
 
-`backup.sh` writes `labh.dump` (a `pg_dump` of the whole database: run records, knowledge bases, the studio), `payload-key` (a copy of `LABH_PAYLOAD_KEY`) and `SHA256SUMS`. Payloads in the dump are encrypted under that key. Keep the key apart from the dump: the dump alone cannot be read, and anyone with both can read every stored question and answer.
+`backup.sh` writes `labh.dump` (a `pg_dump` of the whole database: run records, knowledge bases, the studio), `payload-key` (one `ENV=value` line for each payload key the lab holds), `key-ids` (which key id each line is) and `SHA256SUMS`. It asks the worker which keys hold bodies (`aliquot keys env`) and refuses, naming the key id, when one of them is not in `.env`. Payloads in the dump are encrypted under those keys. Keep the keys apart from the dump: the dump alone cannot be read, and anyone with both can read every stored question and answer.
 
-`restore.sh` checks the checksums. It refuses when `.env`'s `LABH_PAYLOAD_KEY` differs from the backup's, because the restored payloads would not decrypt. It then stops the worker, the web door and the studio, replaces the `labh` database, starts them again and runs `aliquot runs`, which checks every run's hash chain. It exits nonzero if any chain is broken.
+`restore.sh` checks the checksums. It refuses when `.env` lacks any key in the backup's `key-ids`, or holds a different value, and names the missing key id, because the restored payloads would not decrypt. It then stops the worker, the web door and the studio, replaces the `labh` database, starts them again and runs `aliquot runs`, which checks every run's hash chain. It exits nonzero if any chain is broken.
 
-To restore on a new machine: clone, run `docker compose run --rm init`, set `LABH_PAYLOAD_KEY` in the new `.env` to the backup's key, run `docker compose up -d --build`, then run `scripts/restore.sh`.
+To restore on a new machine: clone, run `docker compose run --rm init`, copy every line of the backup's `payload-key` into the new `.env`, run `docker compose up -d --build`, then run `scripts/restore.sh`.
 
 Both scripts honour `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` and `ALIQUOT_ENV` (the env file, `.env` by default).
+
+## Rotate the key
+
+Rotate the payload key when someone who held it leaves, on the schedule your security office sets, or to move D3 under a key of its own. Old payloads stay readable the whole time: each stored payload carries the id of the key it was written under, and a process reads it with that key. Payload hashes never change, so run records, knowledge bases and published agents are unaffected.
+
+1. Add the new key to `.env` beside the old one:
+
+	echo "LABH_PAYLOAD_KEY_2=$(openssl rand -hex 32)" >> .env
+
+2. In `config/lab.toml`, replace `key_env = "LABH_PAYLOAD_KEY"` with key ids, and make the new one current:
+
+	[store]
+	placement = "lab"
+	current = "k2"
+	[store.keys]
+	k1 = "LABH_PAYLOAD_KEY"
+	k2 = "LABH_PAYLOAD_KEY_2"
+
+   `key_env = "X"` is the same as `k1 = "X"`, so every payload already stored is under `k1`. `compose.yaml` passes `LABH_PAYLOAD_KEY`, `LABH_PAYLOAD_KEY_2` and `LABH_PAYLOAD_KEY_3` to the worker and the web door.
+
+3. Record the rotation and restart, so new payloads go under `k2`:
+
+	docker compose run --rm worker aliquot keys rotate
+	docker compose up -d worker web
+
+4. Re-encrypt what is under `k1`. It works in batches and each batch commits on its own, so a stopped run picks up where it stopped and a second run finds nothing to do:
+
+	docker compose exec worker aliquot keys reencrypt
+	docker compose exec worker aliquot keys status
+
+   `keys status` prints each key id, its env var, whether this process holds it, how many payloads it holds, and how many wait to move. When `k1` holds 0, remove `k1` from `[store.keys]`, delete `LABH_PAYLOAD_KEY` from `.env`, restart, and take a new backup.
+
+What a rotation does not do. It does not re-key the address key, the keyed hash that stops anyone from confirming a guessed body (a participant id) against a payload's hash: whoever held the old key can still compute addresses, though not read bodies under the new key. And the old ciphertext is not gone at once: Postgres keeps it in dead rows until `VACUUM` reclaims them and in WAL segments until they are recycled, and every backup taken before the re-encrypt still holds it under the old key. If the old key is the reason for the rotation, run `docker compose exec postgres vacuumdb -U postgres -d labh --full` after the re-encrypt, and destroy or re-take older backups as the lab's policy allows.
+
+To keep D3 under its own key, add `k3 = "LABH_PAYLOAD_KEY_3"` to `[store.keys]` and a `[store.class_keys]` table with `D3 = "k3"`, then run `keys reencrypt` to move D3 payloads already stored. A process that is not given `LABH_PAYLOAD_KEY_3` cannot read D3 bodies: its record pages list them as unavailable, encrypted under `k3`, and every chain still verifies. A process holding a key under an id the lab already knows, but with a different value, refuses to start.
+
+## Retention
+
+Set how long payload bodies are kept per data class in `[policy.retention]`. `keep_min_days` is the floor your records rules set (for example UW-Madison's seven years after close-out, HIPAA's six years for documentation, three years for IRB records). `purge_payload_after_days` is when a run's bodies are redacted. A class's own table overrides the lab-wide keys:
+
+	[policy.retention]
+	keep_min_days = 2555
+	[policy.retention.D3]
+	keep_min_days = 1095
+	purge_payload_after_days = 1095
+
+A class with no purge is kept. Aliquot refuses to start with a purge shorter than the same class's floor, and the sweep never redacts a body under the floor.
+
+	docker compose exec worker aliquot retention --dry-run      # lists each run past the window; changes nothing
+	docker compose exec worker aliquot retention --apply
+
+`--apply` deletes each body whose newest run is past its class's window, and clears the web door's copy of that run's reply. Each body keeps a tombstone: its hash, class, size, when it was redacted and why. Events and their hashes stay, so every record still verifies, and `--apply` checks each chain it touched. The record page shows the body as "Redacted on <date> by the lab's retention window", with its hash. Each `--apply` writes an audit event, even when nothing was past the window, and running it twice redacts nothing the second time. `--dry-run --as-of YYYY-MM-DD` shows what a sweep on a later date would take; `--apply` refuses `--as-of` and always judges the window as of today. A question asked again after its body was redacted is stored again under the current key, and the record page then shows that body as stored. Run `--apply` from cron or a systemd timer at whatever cadence the lab's policy names.
 
 ## Upgrade
 

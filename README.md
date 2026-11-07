@@ -59,7 +59,7 @@ To run the checks:
 	pnpm test
 	pnpm lab0
 
-`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `14/14 checks passed`.
+`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `16/16 checks passed`.
 
 If port 5432 is taken, set `LABH_PG_PORT` for every command, for example `export LABH_PG_PORT=55433` before `docker compose up -d postgres`.
 
@@ -86,14 +86,16 @@ A Linux machine needs only Docker. One `docker compose up` starts Postgres, the 
 
 `init` asks where the lab's model runs, the web door port and the lab's participant id patterns. It tests the patterns against ids you paste, with a PASS or FAIL line for each, and asks again on a FAIL. It writes `config/lab.toml`, and `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values and the `ALIQUOT_ACP_TOKEN` and `ALIQUOT_STUDIO_TOKEN` surface tokens. It never rewrites an existing `.env`: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable. On a machine with Node, `pnpm aliquot:init` does the same.
 
-The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. The web door has no sign-in yet, so keep it on the machine until sign-on lands in 0.7. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
+The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. Without sign-on the web door trusts the member id it is given, so it refuses to listen beyond the machine until `lab.toml` has `[auth]`; then put the lab's reverse proxy in front of it and set `LABH_BIND`. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
 
 	docker compose exec worker aliquot-kb compile --definition /etc/aliquot/kb.json --wait
 	docker compose exec worker aliquot runs
 
 **PDF sources and `run_code`** need the sandbox image: `docker build -t aliquot-sandbox sandbox`, then answer yes to init's sandbox question with the id that `docker image inspect --format '{{.Id}}' aliquot-sandbox` prints. init then adds `compose.sandbox.yaml` to `.env`, which gives the Docker socket to the worker only. A PDF is read by poppler inside that container, with no network and a read-only root. A scanned page fails with a message, because Aliquot does no OCR. The studio gets no socket, so a PDF source compiles with the kb command.
 
-**Backup and restore.** `scripts/backup.sh` writes the database dump and a copy of the payload key, with checksums. Keep the key apart from the dump: the payloads in the dump are encrypted under it, and anyone with both can read them. `scripts/restore.sh <dir>` refuses a key the backup was not made with, replaces the database, restarts the stack and checks every run's hash chain. [`docs/install.md`](docs/install.md) has the details.
+**Backup and restore.** `scripts/backup.sh` writes the database dump and a copy of every payload key the lab holds, with checksums. Keep the keys apart from the dump: the payloads in the dump are encrypted under them, and anyone with both can read them. `scripts/restore.sh <dir>` refuses when `.env` is missing one of the backup's keys and names its id, then replaces the database, restarts the stack and checks every run's hash chain. [`docs/install.md`](docs/install.md) has the details.
+
+**Keys and retention.** A data steward can rotate the payload key without a gap: `lab.toml` names keys by id, new payloads go under the current one, each stored payload is read with the key it was written under, and `aliquot keys reencrypt` moves the old ones over, in resumable batches, without changing a hash. `aliquot keys status` shows what each key holds. `[store.class_keys]` keeps D3 under a key of its own, and a process that is not given that key shows a D3 body as unavailable rather than failing. `[policy.retention]` sets a floor and a purge per class; `aliquot retention --dry-run` lists what is past the window and `--apply` deletes those bodies, clears the door's copy of the reply and keeps a tombstone with the hash, so every record still verifies and the record page says "Redacted on <date> by the lab's retention window". `pnpm walk:keys` runs the whole sequence on a synthetic lab.
 
 `scripts/compose-check.sh` proves the whole path on a machine with only Docker, and CI runs it on a clean Ubuntu runner. It brings the stack up, gets a cited answer from the lab0 handbook, reads a LaTeX PDF and a Word PDF in the sandbox, requires the scanned page to fail, then backs up, wipes the database, restores and requires the same run to verify again.
 
@@ -108,6 +110,7 @@ A lab answers the same questions every week. Where the freezer log is, how a var
 - **Built by the people who know the work.** Agents and knowledge bases are forms in a web studio, with revisions, diff, restore, a test thread and a publish button. No git, no deploy.
 - **Coverage before publish.** A knowledge base lists the questions it must answer. If the documents do not support one, publish is refused and names the gap, unless a publisher overrides it with a written note.
 - **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later: it opens with a summary of what the run read, called and refused, and downloads as JSON. Each run names the hash of the agent version that answered.
+- **Studies an IRB can cite.** A PI freezes the agent version a study uses, an IRB reads its card and a sheet generated from the deployment, and a reviewer replays a run from an exported bundle without the lab's database.
 
 ## Data classes
 
@@ -205,9 +208,15 @@ Members ask on the chat page. An answer names the entry it came from and says wh
 </picture>
 </p>
 
+A channel can hold more than one agent, say the handbook agent and a methods agent. Each question goes to the agent it fits, and the answer names that agent beside the time. When a question fits more than one, the page lists them by name with one line each and the member picks one with a click, a tap or its number; the same question goes to that agent, and the rest of the thread stays with it. The router runs in the door and calls no model, so a restricted question is routed without leaving the machine. Its decision and every agent's score are in the record. `pnpm walk:router` walks through it on the synthetic lab.
+
 **Record** under an answer opens the run's record. It starts with a summary: the outcome, the time, model calls, tokens, tool calls by name, knowledge base entries retrieved and refusals. Below it, every event in order, each marked by shape as well as name (run, model call, tool call, refused), with its data class and whether the hash chain holds. **Download JSON** saves the record, so a PI or an IRB reader can keep it without running anything. `pnpm aliquot record <run-id>` prints the same record and summary in a terminal.
 
 **Runs** at the top of every page lists the newest runs with their outcome and refusal count, and narrows to the runs that had a refusal or failed, so a PI can go straight to what was refused. On a record that refused something, **Only refusals** hides the other events. The chat thread stays put when you open a record and come back.
+
+**Source** under an answer opens the entry it names, read-only, from the knowledge base snapshot the run read, and says whether the record holds that entry's hash. An entry at D3 or R opens only for the data steward or the PI, and the chip says so instead. A Source line that names no entry the run read says that too.
+
+**Sign-on.** With an `[auth]` table in `lab.toml`, members sign in with the university's OpenID Connect provider (Entra ID, Okta, Keycloak, CILogon) and the door knows who is asking. Each run's record names the member by the provider's stable id (`sub`, or `eppn` on an InCommon campus). The role comes from the studio account with the member's email, or from a group claim the lab maps (`roles_claim`). A session unused for `idle_timeout_minutes` (30 by default) ends. The page asks as the signed-in member, whatever a request body says. **Runs** then lists the runs a member asked signed in; the data steward and the PI see everyone's, token surfaces' runs included. Another member's record, its events and its sources answer 404, and the Source chip opens only an entry the run retrieved. Only with `[auth]` may the door listen beyond the machine (`[surfaces.web] bind`). `pnpm walk:signon` walks two members and a PI through all of it against a local test provider, step by step, with a PASS or FAIL line for each; `--stills <dir>` also saves the pages. [`docs/install.md`](docs/install.md) has the setup for research IT.
 
 The chat page installs as an app called Aliquot, with the lab's name in its full name, and says how in one line until it is installed. Its service worker caches the page and its icons so the app opens without the network, and nothing else: answers, the runs list and records always come from the door, so none of them is kept on the device. Browsers install only from HTTPS or from the machine itself, so phones get it once the door is reachable under sign-on. `scripts/webapp-audit.ts` asks Chrome whether the page is installable; `scripts/icons.ts` renders the icons from `packages/core/assets/icon.svg`.
 
@@ -218,6 +227,24 @@ The chat page installs as an app called Aliquot, with the lab's name in its full
 </picture>
 </p>
 <p align="center"><sub>Captures of <code>pnpm demo</code> with its scripted fake model. Your system's light or dark setting picks the image.</sub></p>
+
+## Studies and replay
+
+A PI who uses an agent in a study freezes the version the protocol names, so nothing published later changes what participants talk to. The study owner runs these on the lab server. `--as` is self-declared, so each change is in the audit stream with the OS user who ran it beside the member it names.
+
+```sh
+pnpm aliquot study create sleep-2026 --title "Sleep diary study" --as pi-lab --floor D1 --irb IRB-2026-114
+pnpm aliquot study bind sleep-2026 web:sleep-study --as pi-lab
+pnpm aliquot study freeze sleep-2026 handbook --as pi-lab --note "the version in the pre-registration"
+```
+
+A channel bound to a study runs its frozen version and is never routed or re-resolved, and its runs record `route: pinned` with the study id. A new publish of the agent reaches every other channel and not this one. A message in a study channel takes the study's data floor as its class at least, and runs only when the frozen version's ceiling admits that class and the member is in its audience; otherwise the member is told why and nothing is sent. A freeze takes the agent's current version, or a version an earlier freeze stored a listing for, and checks that it runs on this deployment, that the agent's ceiling admits the study's data floor, and that it names the study's IRB protocol when the floor is D3. `study unfreeze <id> <agent> --as <owner> --reason <why>` ends a freeze; it is recorded as a protocol deviation, and `study show <id>` lists every deviation. The database refuses to rewrite or delete a freeze.
+
+`pnpm aliquot card <hash>` prints the agent card of a version as JSON: the model and the placement of its endpoint, each tool with its spec hash, the knowledge base snapshots with their classes, the data ceilings, the hash of the exact system prompt, and the studies that froze it. [`schemas/agent-card.schema.json`](schemas/agent-card.schema.json) is its schema. The version hash covers the system prompt text the core adds around the instructions, so a release that rewords that text gives every agent a new version, and a frozen version keeps its old text. `pnpm aliquot sheet` prints the research IT and IRB sheet for this `lab.toml`: every surface, endpoint and tool host with its placement and ceiling, the store and its key, retention, the agents, and each study with its frozen versions and deviations.
+
+A reviewer gets a bundle, not database access. `pnpm aliquot:export --study sleep-2026 --clearance D1 --out bundles/sleep-2026` writes the study's runs as JSON lines, the agent cards and resolved agents, the snapshot manifests and the entries the runs read, the tool hashes, the payload bodies at or below the clearance (each one an egress decision; the rest appear as hash and class only), the deviations, and `prov.json` in W3C PROV-JSON. Anyone with the bundle and Aliquot runs `aliquot replay <dir>`, with no lab.toml, database or key: it verifies every hash chain and every included body against the sha256 the bundle commits to, and prints what each run did. That shows the bundle is internally consistent; it shows the bundle is the lab's record only when each run's head matches the lab's anchor or a hash the lab gave out of band. `aliquot replay <dir> --reexecute --endpoint <url> --endpoint-placement lab` runs each run again against a model endpoint, with every tool answered from the recording, and reports whether the tool calls, the answer and the outcome agree or where they first diverge. The placement is the reviewer's statement of where that endpoint runs (default `public`), and a run whose bodies that placement may not receive is skipped before any request. Each export is in the lab's audit stream as `export.created`.
+
+`pnpm walk:study` runs all of this on the synthetic lab with fake models: a PI freezes the handbook agent, a publish leaves the study channel alone, the IRB reads the card, an unfreeze shows as a deviation, and a reviewer in an empty directory replays the exported run and gets exact agreement.
 
 ## The studio
 
@@ -401,6 +428,7 @@ The tests that need macOS or the sandbox image skip elsewhere, each with its rea
 | A roster of participant ids compiled on a hosted model, and a message with a roster id | Both refused, 0 requests reach the hosted endpoint |
 | A roster id hidden in a document declared as lab documents, or in the purpose | The class is raised to restricted, and the compile is refused |
 | A restricted knowledge base attached to an agent on a hosted model | Refused at intake |
+| One channel with the handbook agent and a methods agent | A handbook question and a statistics question each reach their agent and cite its entry; a question that fits both asks the member, the pick answers, and a follow-up stays with it |
 | Every run | 26 of 26 run records verify, each naming its agent version |
 | The hosted endpoint over the whole check | 1 request, the planned control message |
 | A worker with `[anchor]` set signs every chain into a log outside the database | 1 anchor line over 38 audit rows and 33 closed runs; `aliquot verify --anchors` holds |
@@ -459,21 +487,20 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
-- **0.6, ask where the lab already talks:** the Slack and Teams doors are built ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)); left is a router across several agents (today a channel is bound to one agent).
-- **0.7, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
-- **0.8, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
+- **0.6, ask where the lab already talks:** the Slack and Teams doors are built ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)), and so is the router across several agents on one channel.
+- **0.7, keys, retention and sign-on:** built: key rotation, per-class keys and the retention sweep (`aliquot keys`, `aliquot retention`), and OpenID Connect sign-on on the web door with each member seeing only their own runs (`[auth]`).
+- **0.8, studies an IRB can cite:** studies, freezes, agent cards, the deployment sheet, reviewer bundles with PROV and replay are built ([Studies and replay](#studies-and-replay)); left are a studio page for studies and the consent disclosure draft.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.
 
 **Known limits**
 
-- The version hash covers what the run loop reads, but not yet the system prompt text the core builds around it.
 - Detection of restricted text is pattern-based. A lab must give its own patterns in `lab.toml`, and text no pattern matches keeps its declared class.
 - The studio runs unsealed, as described above.
 - A lab cannot add its own tools. Aliquot runs only its eleven built-in tools. Contributed tools are planned, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
 - The seal stops a mistake in Aliquot's code or a dependency from reaching the network. It is not a sandbox for hostile code in the process.
 - A built-in tool's version is the hash of its spec, not its code. A change to a tool's code alone moves no agent version.
 - Under `dev_shared_login`, Claude Code reads its credential from the developer's keychain. That is why the mode is for a developer's machine only.
-- The web door has no sign-in and does not check an agent's audience yet. The compose stack publishes it on `127.0.0.1` only. Do not expose it beyond the machine until sign-on lands.
+- The web door does not check an agent's audience yet. Sign-on covers the web door, not the studio, which keeps its own accounts. A token surface (`aliquot ask`, `acp`, Slack, the phone bridge) still names its member in the request, and a phone pairing or an `ask` token minted from a signed-in session is not built yet.
 
 ## Repository layout
 
@@ -487,7 +514,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 ## For research IT and the IRB
 
-[`docs/for-research-it-and-irb.md`](docs/for-research-it-and-irb.md) is for the people who decide whether a lab may run Aliquot: where each class of data may go, what runs where, what is stored and under which key, and what is not covered yet.
+[`docs/for-research-it-and-irb.md`](docs/for-research-it-and-irb.md) is for the people who decide whether a lab may run Aliquot: where each class of data may go, what runs where, what is stored and under which key, and what is not covered yet. `pnpm aliquot sheet` prints the same facts for one deployment, from its `lab.toml` and its studies.
 
 ## For a security review
 

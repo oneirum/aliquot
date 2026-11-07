@@ -109,7 +109,15 @@ export type Addresser = (cls: string, value: unknown) => Sha256;
 /** HKDF info for the address subkey. Fixed for the life of the data: a change would move every address. */
 const ADDRESS_INFO = "labh:payload:address:v1";
 
+/** The address subkey a master derives. A lab keeps the first one for life (record.ts payload_keys), so a key rotation moves no address. */
+export function addressSubkey(masterKey: Uint8Array): Buffer {
+  return Buffer.from(hkdfSync("sha256", masterKey, "", ADDRESS_INFO, 32));
+}
+
+export function addresserOf(subkey: Uint8Array): Addresser {
+  return (cls, value) => createHmac("sha256", subkey).update(`${cls}\n`).update(canonicalJson(value), "utf8").digest("hex") as Sha256;
+}
+
 export function keyedAddresser(masterKey: Uint8Array): Addresser {
-  const k = Buffer.from(hkdfSync("sha256", masterKey, "", ADDRESS_INFO, 32));
-  return (cls, value) => createHmac("sha256", k).update(`${cls}\n`).update(canonicalJson(value), "utf8").digest("hex") as Sha256;
+  return addresserOf(addressSubkey(masterKey));
 }

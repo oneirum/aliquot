@@ -1,20 +1,22 @@
 #!/usr/bin/env node
-// aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n]>
+// aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n] | keys ... | retention ...>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
+// aliquot export also needs --allow-fs-write for the bundle directory (pnpm aliquot:export allows bundles/* only).
+// aliquot replay needs no lab.toml, database or key: it reads one bundle directory.
 // aliquot ask, acp, mcp, slack and teams need no lab.toml or database: they reach the web door named by --door, and only it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
-import { configProblem, databaseUrlFromEnv, loadConfig } from "../src/config.ts";
-import { connect } from "../src/db.ts";
+import { configProblem, databaseUrlFromEnv, loadConfig, type LabConfig } from "../src/config.ts";
+import { connect, type Db } from "../src/db.ts";
 import { askAnswers, defaultAnswers, InitAborted, OFFERED_CAMPUSES, parseCampus, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
 import { loadEvents, recentRunIds, verifyChain, type RunId } from "../src/record.ts";
 import { ANCHOR_KEY_ENV, AnchorRefused, newAnchorKeyPem, describeAnchorProblem, loadAnchorKey, loadAnchorVerifyKey, verifyAnchors, writeAnchor } from "../src/anchor.ts";
 import { loadAudit, verifyAudit } from "../src/audit.ts";
-import type { LabConfig } from "../src/config.ts";
-import { formatRecordView, formatRunList, recordView } from "../src/record-view.ts";
+import { formatRecordView, formatRunList, recordView, recordViewOf } from "../src/record-view.ts";
+import { brokenChains, heldKeyIds, keyStatus, openPayloadStore, pastRetention, recordRotation, reencryptAll, retentionWindows, sweepRetention } from "../src/steward.ts";
 import { DEFAULT_ALLOWANCE, PERMISSION_FLAGS, requireProcessPermission, sealNetwork } from "../src/seal.ts";
 import { acpAgent } from "../src/acp.ts";
 import { mcpServer } from "../src/mcp.ts";
@@ -24,6 +26,8 @@ import { teamsDoor } from "../src/surfaces/teams.ts";
 import { BOT_OPENID, botConnector, botVerifier, checkBase, LOGIN, serveMessages } from "../src/surfaces/teams-wire.ts";
 import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
 import { rank } from "../src/dataclass.ts";
+import { STUDY_USAGE, studyCommands } from "./study-cli.ts";
+import { exportCommand, REPLAY_USAGE, replayCommand } from "./replay-cli.ts";
 
 const denied = requireProcessPermission();
 if (denied) {
@@ -47,6 +51,16 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       $LABH_ANCHOR_KEY_FILE, append one line to the [anchor] path, and print that line, for a
                       shipper to forward to WORM storage or the SIEM. Needs --allow-fs-write=<that path>.
                       The worker writes one every [anchor] every_minutes.
+  keys status         each payload key id, its env var, whether this process holds it, what it writes, how many
+                      bodies it holds and how many wait to move; then what is past the retention window
+  keys rotate         after [store] current names a new key: keep the lab's address key under it too and record
+                      the rotation, so the old key can go once it holds no bodies
+  keys reencrypt [--batch n]
+                      move every body to its class's key, in batches (default 500); safe to stop and run again
+  keys env            one line per key id: id, env var, bodies (scripts/backup.sh reads it)
+  retention --dry-run [--as-of YYYY-MM-DD] | --apply
+                      list, or redact, the run bodies past [policy.retention] purge_payload_after_days. A redacted body keeps its
+                      hash, class and size, so every chain still verifies; --apply checks them after. --as-of previews a later date
   ask [--door url] [--user id] [--thread id] [--ceiling D0..D3] [--timeout s] <question... | ->
                       ask a question through the web door, as the chat page does; - reads it from stdin.
                       --json prints one JSON line per event: started, tool, finished, refused
@@ -83,8 +97,14 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       file) and an [anchor] table whose log is --anchor-log (default anchors.log beside lab.toml);
                       it needs write access to the key file too. Keep the key off the database host if you can.
 
-Exit codes: 0 ok, 1 no such run, init found no pattern that passes, or ask was refused or got no answer,
-2 usage or setup problem (ask: the door could not be reached), 3 a hash chain is broken or an anchor does not hold.
+${STUDY_USAGE}
+${REPLAY_USAGE}
+
+Exit codes: 0 ok, 1 no such run, init found no pattern that passes, ask was refused or got no answer, or export
+was refused (no such run or study, --out not empty), 2 usage or setup problem (ask: the door could not be
+reached; replay: no readable bundle), 3 a hash chain or a body hash is broken or an anchor does not hold, 4 a
+re-executed run did not agree exactly with its record, 5 a run could not be re-executed (its bodies are above the
+bundle's clearance or the endpoint's placement, it took a steer mid-run, or its tools are not in this build).
 `;
 
 function usage(): never {
@@ -116,6 +136,24 @@ try {
       "anchor-key": { type: "string" },
       "anchor-log": { type: "string" },
       "public-key": { type: "string" },
+      "dry-run": { type: "boolean", default: false },
+      apply: { type: "boolean", default: false },
+      "as-of": { type: "string" },
+      batch: { type: "string", default: "500" },
+      as: { type: "string" },
+      title: { type: "string" },
+      floor: { type: "string" },
+      irb: { type: "string" },
+      prereg: { type: "string" },
+      note: { type: "string" },
+      reason: { type: "string" },
+      runs: { type: "string" },
+      study: { type: "string" },
+      clearance: { type: "string" },
+      out: { type: "string" },
+      reexecute: { type: "boolean", default: false },
+      endpoint: { type: "string" },
+      "endpoint-placement": { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -133,20 +171,37 @@ if (command === "init") {
   if (runId !== undefined || values.json || (values["anchor-log"] !== undefined && values["anchor-key"] === undefined) || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
   process.exit(await init());
 }
+if (command === "replay") process.exit(await replayCommand(positionals.slice(1), { json: values.json, reexecute: values.reexecute, endpoint: values.endpoint, endpointPlacement: values["endpoint-placement"] }));
+if (command === "export") {
+  const { runs, study, clearance, out } = values;
+  process.exit(await exportCommand(positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, runs, study, clearance, out, as: values.as }));
+}
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 if (command === "slack") process.exit(await slack(positionals.slice(1)));
 if (command === "teams") process.exit(await teams(positionals.slice(1)));
+if (command === "study" || command === "card" || command === "sheet") {
+  const { as, title, floor, irb, prereg, note, reason } = values;
+  process.exit(await studyCommands(command, positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, as, title, floor, irb, prereg, note, reason }));
+}
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0 || values.campus !== undefined || values["anchor-key"] !== undefined || values["anchor-log"] !== undefined;
 const verifyOnly = values.anchors || values["public-key"] !== undefined;
+const stewardOnly = values["dry-run"] || values.apply || values["as-of"] !== undefined;
 const valid =
   extra.length === 0 &&
   !initOnly &&
   (command === "verify" || !verifyOnly) &&
-  ((command === "record" && !!runId && /^[0-9a-f-]{36}$/i.test(runId)) ||
-    (command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000) ||
-    ((command === "verify" || command === "anchor") && !runId && !values.json));
+  ((!stewardOnly && command === "record" && !!runId && /^[0-9a-f-]{36}$/i.test(runId)) ||
+    (!stewardOnly && command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000) ||
+    (!stewardOnly && (command === "verify" || command === "anchor") && !runId && !values.json) ||
+    (command === "keys" && ["status", "rotate", "reencrypt", "env"].includes(runId ?? "") && !values["dry-run"] && !values.apply && (values["as-of"] === undefined || runId === "status")) ||
+    (command === "retention" && !runId && values["dry-run"] !== values.apply));
 if (!valid) usage();
+if (command === "retention" && values.apply && values["as-of"] !== undefined) {
+  // A sweep judged at a later date would redact bodies before their floor; only a preview may look ahead.
+  process.stderr.write("aliquot retention: --as-of previews with --dry-run only; --apply always judges the window as of today.\n");
+  process.exit(2);
+}
 
 async function slack(words: readonly string[]): Promise<number> {
   if (words.length || values.json || values.user || values.ceiling || values.thread) usage();
@@ -277,6 +332,7 @@ async function viaDoor(command: "ask" | "acp" | "mcp", words: readonly string[])
     if (e.t === "started") process.stderr.write(`run ${e.runId}\n`);
     else if (e.t === "tool") process.stderr.write(`  ${e.tool}\n`);
     else if (e.t === "refused") process.stdout.write(`Not sent: ${e.message}\n`);
+    else if (e.t === "choose") process.stdout.write(`${e.message}\nAsk again in the chat page or in Slack to pick one, or name the topic more plainly.\n`);
     else if (e.refusal) process.stdout.write(`${e.refusal}\nrecord  ${e.recordUrl}\n`);
     else if (e.withheld) {
       const byCeiling = ceiling !== undefined && isDataClass(ceiling) && (e.cls === null || rank(e.cls) > rank(ceiling));
@@ -468,13 +524,120 @@ async function anchors(command: "anchor" | "verify", config: LabConfig): Promise
   }
 }
 
+/** Thrown for a setup problem the steward commands report in one line, such as a key that is not set. */
+class Setup extends Error {}
+
+async function steward(db: Db): Promise<number> {
+  const say = (line = "") => void process.stdout.write(`${line}\n`);
+  const actor = `cli:${process.env.USER ?? "operator"}`;
+  const open = async () => {
+    try {
+      return await openPayloadStore(db, config);
+    } catch (err) {
+      if ((err as { code?: string }).code) throw err;
+      throw new Setup(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const asOf = values["as-of"] ? new Date(values["as-of"]) : new Date();
+  if (Number.isNaN(asOf.getTime())) throw new Setup(`--as-of ${values["as-of"]} is not a date (use YYYY-MM-DD)`);
+  const retention = config.retention;
+  const windows = retentionWindows(retention);
+  const windowLine = () => {
+    const per = (m: Readonly<Partial<Record<string, number>>>) => {
+      const set = Object.entries(m);
+      return set.length === 5 && new Set(set.map(([, d]) => d)).size === 1 ? `${set[0]![1]} days for every class` : set.map(([cls, d]) => `${cls} ${d} days`).join(", ");
+    };
+    const floor = Object.keys(retention.keepMinDays).length ? `; floor (keep_min_days) ${per(retention.keepMinDays)}, and events and chains are never deleted` : "";
+    if (!Object.keys(windows).length) return `retention: no purge is set ([policy.retention] purge_payload_after_days), so every body is kept${floor}`;
+    return `retention: bodies purge ${per(windows)} after the last run that names them${floor}${values["as-of"] ? `; judged as of ${asOf.toISOString().slice(0, 10)}` : ""}`;
+  };
+  const held = heldKeyIds(config);
+  if (command === "keys" && runId === "env") {
+    for (const k of await keyStatus(db, config, held)) say(`${k.id} ${k.env ?? "-"} ${k.stored}`);
+    return 0;
+  }
+  if (command === "keys" && runId === "status") {
+    const keys = await keyStatus(db, config, held);
+    const past = await pastRetention(db, retention, asOf);
+    if (values.json) return say(JSON.stringify({ keys, retention: { ...retention, past: past.length, runs: new Set(past.flatMap((p) => p.runs)).size } }, null, 2)), 0;
+    const w = Math.max(3, ...keys.map((k) => k.id.length));
+    const e = Math.max(3, ...keys.map((k) => (k.env ?? "(not in lab.toml)").length));
+    say(`${"key".padEnd(w)}  ${"env".padEnd(e)}  held  ${"writes".padEnd(10)}  bodies  to move`);
+    for (const k of keys) say(`${k.id.padEnd(w)}  ${(k.env ?? "(not in lab.toml)").padEnd(e)}  ${(k.held ? "yes" : "no").padEnd(4)}  ${(k.writes.join(", ") || "-").padEnd(10)}  ${String(k.stored).padStart(6)}  ${String(k.toMove).padStart(7)}`);
+    const toMove = keys.reduce((n, k) => n + k.toMove, 0);
+    say();
+    say(toMove ? `${toMove} ${toMove === 1 ? "body waits" : "bodies wait"} for aliquot keys reencrypt, which moves each to its class's key.` : "Every body is under its class's key.");
+    for (const k of keys.filter((k) => !k.held && k.stored)) say(`${k.id} holds ${k.stored} ${k.stored === 1 ? "body" : "bodies"} this process cannot read: ${k.env ? `${k.env} is not set here` : "lab.toml no longer names it"}.`);
+    say(windowLine());
+    if (Object.keys(windows).length) say(past.length ? `${past.length} ${past.length === 1 ? "body" : "bodies"} from ${new Set(past.flatMap((p) => p.runs)).size} runs ${past.length === 1 ? "is" : "are"} past the window; aliquot retention --dry-run lists them.` : "Nothing is past the window.");
+    return 0;
+  }
+  if (command === "keys" && runId === "rotate") {
+    const { keyring } = await open();
+    await recordRotation(db, keyring, actor);
+    const keys = await keyStatus(db, config, held);
+    const kept = (await db.query<{ key_id: string }>("select key_id from payload_keys order by key_id")).rows.map((r) => r.key_id);
+    say(`${keyring.current} is current: new payloads go under it once the worker and the web door restart.`);
+    say(`The lab's address key is kept under ${kept.join(", ")}, so an old key can be removed once it holds no bodies. Payload hashes do not change.`);
+    say("A rotation does not re-key the address key, which keeps a guessed body from being confirmed against its hash: anyone who held an old key can still compute addresses.");
+    say("Old ciphertext stays in Postgres dead rows until VACUUM reclaims them, in WAL segments until they are recycled, and in every backup taken before the re-encrypt.");
+    const toMove = keys.reduce((n, k) => n + k.toMove, 0);
+    say(toMove ? `${toMove} ${toMove === 1 ? "body is" : "bodies are"} under another key and stay readable while that key is set. Next: aliquot keys reencrypt.` : "Every body is already under its class's key.");
+    return 0;
+  }
+  if (command === "keys" && runId === "reencrypt") {
+    const batch = Number(values.batch);
+    if (!Number.isInteger(batch) || batch < 1 || batch > 10_000) usage();
+    const { store, keyring } = await open();
+    const moved = await reencryptAll(db, store, keyring, actor, batch, (n) => say(`  re-encrypted ${n}`));
+    const keys = await keyStatus(db, config, held);
+    say(`Re-encrypted ${moved} ${moved === 1 ? "body" : "bodies"}. Hashes, classes and sizes are unchanged.`);
+    for (const k of keys) say(`  ${k.id}: ${k.stored} ${k.stored === 1 ? "body" : "bodies"}${k.writes.length ? ` (writes ${k.writes.join(", ")})` : ""}`);
+    const stuck = keys.filter((k) => k.toMove > 0);
+    for (const k of stuck) say(`${k.id} still holds ${k.toMove} ${k.toMove === 1 ? "body" : "bodies"} this process cannot move: it needs both ${k.id} and the target key.`);
+    for (const k of keys.filter((k) => k.stored === 0 && k.writes.length === 0)) say(`${k.id} holds no bodies. Remove it from [store.keys] and unset ${k.env ?? "its env var"} when every process has restarted.`);
+    return stuck.length ? 1 : 0;
+  }
+  if (command === "retention") {
+    say(windowLine());
+    if (values.apply) {
+      const { redacted, replies, audit } = await sweepRetention(db, retention, asOf, actor);
+      const runs = [...new Set(redacted.flatMap((c) => c.runs))] as RunId[];
+      say(`Redacted ${redacted.length} ${redacted.length === 1 ? "body" : "bodies"} (${redacted.reduce((n, c) => n + c.bytes, 0)} bytes) from ${runs.length} runs, and cleared ${replies} door ${replies === 1 ? "reply" : "replies"}. Each body keeps its hash, class and size; audit event ${audit.seq}.`);
+      const broken = await brokenChains(db, runs);
+      say(broken.length ? `CHAIN BROKEN in ${broken.join(", ")}` : `Every chain still verifies: ${runs.length} runs checked.`);
+      return broken.length ? 3 : 0;
+    }
+    const past = await pastRetention(db, retention, asOf);
+    if (!past.length) return say("Nothing is past the window."), 0;
+    const byRun = new Map<string, typeof past>();
+    for (const c of past) for (const r of c.runs) byRun.set(r, [...(byRun.get(r) ?? []), c]);
+    say(`Would redact ${past.length} ${past.length === 1 ? "body" : "bodies"} (${past.reduce((n, c) => n + c.bytes, 0)} bytes) from ${byRun.size} runs:`);
+    for (const [run, cs] of byRun) say(`  run ${run}  last used ${cs.reduce((a, c) => (c.lastUsed > a ? c.lastUsed : a), "").slice(0, 10)}  ${cs.length} ${cs.length === 1 ? "body" : "bodies"} (${[...new Set(cs.map((c) => c.cls))].join(", ")})`);
+    say("Nothing was changed. aliquot retention --apply redacts them.");
+    return 0;
+  }
+  return usage();
+}
+
 const db = connect(url);
 try {
+  if (command === "keys" || command === "retention") process.exitCode = await steward(db);
+  else await records();
+} catch (err) {
+  process.stderr.write(`${err instanceof Setup ? err.message : databaseProblem(err, url)}\n`);
+  process.exitCode = 2;
+} finally {
+  await db.end().catch(() => {});
+}
+
+async function records(): Promise<void> {
   const ids = command === "record" ? [runId as RunId] : await recentRunIds(db, limit);
+  const held = heldKeyIds(config);
   const views = [];
   for (const id of ids) {
     const events = await loadEvents(db, id);
-    if (events.length) views.push(recordView(id, events));
+    if (events.length) views.push(command === "record" ? await recordViewOf(db, id, events, held) : recordView(id, events));
   }
   if (command === "record" && !views.length) {
     process.stderr.write(`no run ${runId} in this database\n`);
@@ -484,9 +647,4 @@ try {
     process.stdout.write(`${out}\n`);
     if (views.some((v) => v.chain.firstBad !== null)) process.exitCode = 3;
   }
-} catch (err) {
-  process.stderr.write(`${databaseProblem(err, url)}\n`);
-  process.exitCode = 2;
-} finally {
-  await db.end().catch(() => {});
 }

@@ -40,6 +40,16 @@ export function mayPreview(role: Role, cls: DataClass): boolean {
   return rank(cls) < rank(RESTRICTED) || mayPublish(role, cls);
 }
 
+/** Who may see a document at this class, in words for someone who may not. */
+export function whoMayPreview(cls: DataClass): string {
+  return rank(cls) < rank(RESTRICTED) ? "every member" : "the data steward or the PI";
+}
+
+/** Whose runs a signed-in person sees on the web door: the steward and the PI see every member's, everyone else their own. */
+export function seesAllRuns(role: Role): boolean {
+  return role === "steward" || role === "pi";
+}
+
 export function mayEdit(role: Role): boolean {
   return role !== "member";
 }

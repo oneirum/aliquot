@@ -9,12 +9,13 @@
  *
  * What each Slack message becomes:
  *   mention or DM with a question -> a "looking" reply in the thread, edited to the answer, the refusal, or the link
+ *   the router unsure             -> the choices as a numbered list; a mention in the thread with a number or a name asks that agent
  *   "stop" in a thread with a run  -> the door stops that run at its next step
  *   from a bot, an edit or a join  -> nothing
  *   from outside the workspace     -> nothing (a Slack Connect channel shares the app with other workspaces)
  */
 
-import type { AskInput, AskOptions, DoorEvent } from "../door-client.ts";
+import type { AgentChoice, AskInput, AskOptions, DoorEvent } from "../door-client.ts";
 import type { SlackApi } from "./slack-wire.ts";
 
 export interface SlackDoorDeps {
@@ -63,10 +64,17 @@ export function questionText(text: string): string {
 /** Slack reads &, < and > as markup; the answer's own are shown as typed. */
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** What the thread shows for each way a door run ends. */
-export function replyFor(e: Extract<DoorEvent, { t: "finished" | "refused" }>, link: string): string {
+/** The choice a reply names: its number in the list, or its name or id. */
+export function pickOf(text: string, choices: readonly AgentChoice[]): AgentChoice | undefined {
+  const said = text.trim().replace(/[.!]$/, "").toLowerCase();
+  const n = /^\d+$/.test(said) ? Number(said) : 0;
+  return choices[n - 1] ?? choices.find((c) => said === c.name.toLowerCase() || said === c.agentId.toLowerCase());
+}
+
+/** What the thread shows for each way a door run ends. routedTo names the agent when the router chose it. */
+export function replyFor(e: Extract<DoorEvent, { t: "finished" | "refused" }>, link: string, routedTo: string | null = null): string {
   if (e.t === "refused") return escape(e.message);
-  const record = `<${link}|Record of this answer>`;
+  const record = `${routedTo ? `${escape(routedTo)} answered. ` : ""}<${link}|Record of this answer>`;
   if (e.refusal) return `${escape(e.refusal)}\n${record}`;
   if (e.withheld) return `This answer holds data above what Slack may keep, so it stays in the lab. Read it in the record: <${link}>`;
   return `${escape(e.answer ?? `No answer; the run ended ${e.outcome}.`)}\n\n${record}`;
@@ -78,6 +86,9 @@ export function slackDoor(deps: SlackDoorDeps): (msg: unknown, ack: (obj: object
   const running = new Map<string, string>();
   /** Slack resends an event it thinks was missed; a channel:ts seen here is not asked twice. */
   const seen = new Set<string>();
+
+  /** Thread to the question the router asked the member about, until they reply with a number or a name. */
+  const choosing = new Map<string, { readonly input: AskInput; readonly choices: readonly AgentChoice[] }>();
 
   async function answer(e: Required<Pick<SlackEvent, "channel" | "ts" | "user">> & SlackEvent): Promise<void> {
     const thread = e.thread_ts ?? e.ts;
@@ -92,14 +103,26 @@ export function slackDoor(deps: SlackDoorDeps): (msg: unknown, ack: (obj: object
       await deps.api("chat.postMessage", { channel: e.channel, thread_ts: thread, text: "Ask me a question about the lab's handbook, protocols or literature." });
       return;
     }
+    // A reply naming one of the choices sends the question it was about again, to that agent. Anything else is a new question.
+    // Pending choices are per member: only the member who asked may pick, since the run replays their message as them.
+    const choiceKey = `${threadKey}:${e.user}`;
+    const asked = choosing.get(choiceKey);
+    choosing.delete(choiceKey);
+    const pick = asked && pickOf(text, asked.choices);
     const looking = await deps.api("chat.postMessage", { channel: e.channel, thread_ts: thread, text: LOOKING, unfurl_links: false });
     const update = (text: string) => deps.api("chat.update", { channel: e.channel, ts: looking.ts, text });
-    const input: AskInput = { channel: e.channel, thread, message: e.ts, text, user: e.user };
+    const input: AskInput = asked && pick ? { ...asked.input, agent: pick.agentId } : { channel: e.channel, thread, message: e.ts, text, user: e.user };
+    let routedTo: string | null = null;
     try {
       for await (const ev of deps.ask(input, {})) {
-        if (ev.t === "started") running.set(threadKey, ev.runId);
-        else if (ev.t === "refused") return void (await update(replyFor(ev, "")));
-        else if (ev.t === "finished") return void (await update(replyFor(ev, deps.recordLink(ev.recordUrl))));
+        if (ev.t === "started") {
+          running.set(threadKey, ev.runId);
+          routedTo = ev.routedTo ?? null;
+        } else if (ev.t === "refused") return void (await update(replyFor(ev, "")));
+        else if (ev.t === "choose") {
+          choosing.set(choiceKey, { input, choices: ev.choices });
+          return void (await update(`${escape(ev.message)}\nMention me in this thread with the number or the name.`));
+        } else if (ev.t === "finished") return void (await update(replyFor(ev, deps.recordLink(ev.recordUrl), routedTo)));
       }
     } catch (err) {
       deps.log(`[slack] ${e.channel} ${e.ts}: ${err instanceof Error ? err.message : String(err)}`);

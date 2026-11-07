@@ -13,10 +13,15 @@ import { AUTH_HEADERS, regionOf, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
+import { ROLES, type Role } from "./roles.ts";
 import { buildPolicy, ceilingOfStore, type Policy } from "./policy.ts";
 import { declaredClass, loadPreset, mergeClasses, type Preset } from "./preset.ts";
 
 const placement = z.enum(PLACEMENTS);
+const KEY_ID = /^[a-z0-9][a-z0-9_-]*$/;
+/** scripts/backup.sh and restore.sh read these names out of .env, so they must be names, never patterns. */
+const keyEnvName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/, "an env var name is capital letters, digits and _, not starting with a digit");
+const retentionDays = z.object({ keep_min_days: z.number().int().min(0).optional(), purge_payload_after_days: z.number().int().positive().optional() }).strict();
 
 const IMAGE_BY_DIGEST = /^(?:[a-z0-9][a-z0-9._\/:-]*@)?sha256:([0-9a-f]{64})$/;
 
@@ -66,6 +71,54 @@ export interface WebSurfaceConfig {
   readonly baseUrl: string;
   /** The one channel this web surface serves, or null when the page names it. */
   readonly channel: string | null;
+  /** The address the door listens on. Beyond loopback only with [auth], because without sign-on the door trusts the member id it is given. */
+  readonly bind: string;
+}
+
+/**
+ * [auth]: OpenID Connect sign-on for the web door. The member id is the provider's stable id for the person; the role
+ * comes from a group claim when one is mapped, else from the studio account with the email the provider vouches for.
+ * Secrets are named by env var.
+ */
+export interface SignOnConfig {
+  readonly issuer: string;
+  readonly clientId: string;
+  /** Null for a public client, which PKCE alone protects. */
+  readonly clientSecretEnv: string | null;
+  /** Signs the session cookie. */
+  readonly sessionSecretEnv: string;
+  /** The ID token claim that holds the member's email: email for most providers, preferred_username for some Entra ID tenants. */
+  readonly emailClaim: string;
+  /**
+   * Accept an email the provider does not say it verified (email_verified true) as the key to a studio account. Only for
+   * a provider that never sends email_verified, and only when it vouches for every address it issues: otherwise anyone it
+   * federates with could claim the PI's address. A role from roles_claim never needs it.
+   */
+  readonly trustUnverifiedEmail: boolean;
+  /** The claim whose value is the member id every run records: sub by default, eppn on InCommon campuses. An email can change; this does not. */
+  readonly idClaim: string;
+  /** A session nobody has used for this long ends, and the next request signs in again (HIPAA automatic logoff). */
+  readonly idleMinutes: number;
+  /** A group or entitlement claim whose values name the role, or null to take every role from the studio account. */
+  readonly rolesClaim: string | null;
+  /** Claim value to role. When several values match, the highest role wins; when none does, the studio account decides. */
+  readonly roleValues: Readonly<Record<string, Role>>;
+  /** What /login asks the provider for. CILogon releases eppn only under org.cilogon.userinfo; Okta's groups claim may need groups. */
+  readonly scopes: readonly string[];
+}
+
+/** Claims that look like an email but that nobody verified: Entra ID's preferred_username and upn. */
+const UNVERIFIED_EMAIL_CLAIMS: readonly string[] = ["preferred_username", "upn", "unique_name"];
+
+/** 127.0.0.0/8, ::1 and localhost: the addresses only this machine reaches. */
+export function isLoopback(address: string): boolean {
+  const a = address.replace(/^\[|\]$/g, "").toLowerCase();
+  return a === "localhost" || a === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a);
+}
+
+/** Null when the door may be reached at this address; otherwise why not. The binary and lab.toml both ask. */
+export function bindRefusal(address: string, signOn: boolean): string | null {
+  return signOn || isLoopback(address) ? null : `${address} reaches beyond this machine, which needs [auth]: without sign-on the door trusts the member id it is given`;
 }
 
 /** A surface that names itself to the door with a bearer token, read from tokenEnv and never from lab.toml. */
@@ -81,7 +134,7 @@ export type SurfaceConfig = WebSurfaceConfig | TokenSurfaceConfig;
 /** The id is a segment of every run key, surface:channel:thread:message. */
 const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
 const webSurface = z
-  .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
+  .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional(), bind: z.string().min(1).default("127.0.0.1") })
   .strict();
 const tokenSurface = z.object({ kind: z.enum(["slack", "teams", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
 
@@ -113,7 +166,7 @@ function parseSurface(id: string, raw: unknown): SurfaceConfig {
     if (refused?.placements.includes(e.placement)) fail(`placement ${e.placement} is refused: ${refused.why}`);
     return { id: id as SurfaceId, kind: e.kind, placement: e.placement, tokenEnv: e.token_env };
   }
-  return { id: id as SurfaceId, kind: "web", placement: e.placement, port: e.port, baseUrl: e.base_url ?? `http://localhost:${e.port}`, channel: e.channel ?? null };
+  return { id: id as SurfaceId, kind: "web", placement: e.placement, port: e.port, baseUrl: e.base_url ?? `http://localhost:${e.port}`, channel: e.channel ?? null, bind: e.bind };
 }
 
 /** Web first, then every other surface in file order. Without [surfaces.web], web is lab on port 3000, as before surfaces had ids. */
@@ -132,7 +185,16 @@ function parseSurfaces(tables: Record<string, unknown>): readonly [WebSurfaceCon
 
 const schema = z.object({
   database: z.object({ url_env: z.string().default("DATABASE_URL") }).default({ url_env: "DATABASE_URL" }),
-  store: z.object({ placement: placement.default("lab"), key_env: z.string().default("LABH_PAYLOAD_KEY") }).default({ placement: "lab", key_env: "LABH_PAYLOAD_KEY" }),
+  store: z
+    .object({
+      placement: placement.default("lab"),
+      key_env: keyEnvName.optional(),
+      keys: z.record(z.string().regex(KEY_ID, "a key id is lowercase letters, digits, _ and -, because every payload row names one"), keyEnvName).optional(),
+      current: z.string().optional(),
+      class_keys: z.partialRecord(z.enum(DATA_CLASSES), z.string()).default({}),
+    })
+    .strict()
+    .default({ placement: "lab", class_keys: {} }),
   endpoints: z.record(
     z.string(),
     z.object({
@@ -157,7 +219,13 @@ const schema = z.object({
   ),
   surfaces: z.record(z.string(), z.unknown()).default({}),
   hosts: z.record(z.string(), placement).default({}),
-  policy: z.object({ review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"), participant_id_patterns: z.array(z.string()).default([]) }).default({ review_confidential: "refuse", participant_id_patterns: [] }),
+  policy: z
+    .object({
+      review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"),
+      participant_id_patterns: z.array(z.string()).default([]),
+      retention: z.object({ ...retentionDays.shape, ...Object.fromEntries(DATA_CLASSES.map((cls) => [cls, retentionDays.optional()])) }).strict().optional(),
+    })
+    .default({ review_confidential: "refuse", participant_id_patterns: [] }),
   agents: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
   /** [classes.<id>]: the lab's data classes over the five built-ins (policy.ts). */
   classes: z.record(z.string(), declaredClass).default({}),
@@ -189,12 +257,33 @@ const schema = z.object({
   research: z.object({ contact_email_env: z.string().min(1).optional() }).strict().default({}),
   lab: z.object({ name: z.string().trim().min(1).optional() }).strict().default({}),
   anchor: z.object({ path: z.string().min(1), every_minutes: z.number().int().positive().default(15) }).strict().optional(),
+  auth: z
+    .object({
+      issuer: z.string().url(),
+      client_id: z.string().min(1),
+      client_secret_env: z.string().min(1).optional(),
+      session_secret_env: z.string().min(1).default("LABH_SESSION_SECRET"),
+      email_claim: z.string().min(1).default("email"),
+      trust_unverified_email: z.boolean().default(false),
+      id_claim: z.string().min(1).default("sub"),
+      idle_timeout_minutes: z.number().int().min(1).max(12 * 60).default(30),
+      roles_claim: z.string().min(1).optional(),
+      roles: z.record(z.string().min(1), z.enum(ROLES)).optional(),
+      scopes: z.array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/, "a scope is one word")).refine((s) => s.includes("openid"), "scopes must include openid").default(["openid", "email", "profile"]),
+    })
+    .strict()
+    .refine((a) => (a.roles_claim === undefined) === (a.roles === undefined), "roles_claim and [auth.roles] go together: the claim to read, and which of its values is which role")
+    .refine(
+      (a) => a.trust_unverified_email || !UNVERIFIED_EMAIL_CLAIMS.includes(a.email_claim),
+      `email_claim names a claim nobody verified (preferred_username, upn, unique_name): a user or tenant admin can set it to any address, the PI's included. Use email, or set trust_unverified_email = true only for a provider that issues every address itself`,
+    )
+    .optional(),
 });
 
 export interface LabConfig {
   readonly path: string;
   readonly databaseUrlEnv: string;
-  readonly store: { readonly placement: Placement; readonly keyEnv: string };
+  readonly store: StoreKeys & { readonly placement: Placement };
   readonly endpoints: readonly ModelEndpoint[];
   /** Agent CLIs. Their ids share one namespace with endpoints, because an agent names either as model.endpointId. */
   readonly agentBackends: readonly AgentBackend[];
@@ -220,6 +309,66 @@ export interface LabConfig {
   readonly labName: string | null;
   /** [anchor]: the append-only log signed checkpoints of the hash chains go to (absolute), and how often the worker writes one. */
   readonly anchor: { readonly path: string; readonly everyMinutes: number } | null;
+  readonly retention: Retention;
+  /** [auth], or null: the door then trusts the member id it is given, and listens on loopback only. */
+  readonly signOn: SignOnConfig | null;
+}
+
+/**
+ * [policy.retention], resolved per class: a class's own table, else the lab-wide keys. purgeDays: a run's bodies are
+ * redacted this many days after the last run that names them; a class without one is kept. keepMinDays: the floor the
+ * lab's records rule sets (for example seven years after close-out). Events, chains and tombstones are never deleted,
+ * so the record always meets it; no body is redacted younger than it, and a purge under it is refused at startup.
+ */
+export interface Retention {
+  readonly purgeDays: Readonly<Partial<Record<DataClass, number>>>;
+  readonly keepMinDays: Readonly<Partial<Record<DataClass, number>>>;
+}
+
+type RetentionTable = { keep_min_days?: number | undefined; purge_payload_after_days?: number | undefined };
+
+function retentionOf(t: (RetentionTable & Partial<Record<DataClass, RetentionTable | undefined>>) | undefined): Retention {
+  const purgeDays: Partial<Record<DataClass, number>> = {};
+  const keepMinDays: Partial<Record<DataClass, number>> = {};
+  for (const cls of DATA_CLASSES) {
+    const purge = t?.[cls]?.purge_payload_after_days ?? t?.purge_payload_after_days;
+    const keep = t?.[cls]?.keep_min_days ?? t?.keep_min_days;
+    if (purge !== undefined && keep !== undefined && purge < keep)
+      throw new Error(`lab.toml: [policy.retention] purges ${cls} bodies after ${purge} days, under its keep_min_days of ${keep}: the purge would delete what the floor keeps. Raise purge_payload_after_days, or set a lower keep_min_days in [policy.retention.${cls}] if the lab's rules allow it`);
+    if (purge !== undefined) purgeDays[cls] = purge;
+    if (keep !== undefined) keepMinDays[cls] = keep;
+  }
+  return { purgeDays, keepMinDays };
+}
+
+/**
+ * Which env var holds each payload key id, which id new payloads go under, and the classes that name their own key.
+ * The one-key form, key_env = "X", is { k1: "X" } with k1 current, which is how every store stamped its rows before.
+ */
+export interface StoreKeys {
+  readonly keyEnvs: Readonly<Record<string, string>>;
+  readonly current: string;
+  readonly classKeys: Readonly<Partial<Record<DataClass, string>>>;
+}
+
+function storeKeys(s: { key_env?: string | undefined; keys?: Record<string, string> | undefined; current?: string | undefined; class_keys: Partial<Record<DataClass, string>> }): StoreKeys {
+  const fail = (why: string): never => {
+    throw new Error(`lab.toml: [store] ${why}`);
+  };
+  if (s.key_env !== undefined && s.keys !== undefined) fail('names both key_env and [store.keys]; key_env = "X" is the one-key form of [store.keys] k1 = "X"');
+  const keyEnvs = s.keys ?? { k1: s.key_env ?? "LABH_PAYLOAD_KEY" };
+  const ids = Object.keys(keyEnvs);
+  if (!ids.length) fail("[store.keys] names no key");
+  const current = s.current ?? (ids.length === 1 ? ids[0]! : fail(`current is missing: name which of ${ids.join(", ")} new payloads go under`));
+  if (!(current in keyEnvs)) fail(`current = "${current}" is not a key in [store.keys]`);
+  for (const [cls, id] of Object.entries(s.class_keys)) if (!(id in keyEnvs)) fail(`class_keys ${cls} = "${id}" is not a key in [store.keys]`);
+  const owner = new Map<string, string>();
+  for (const [id, env] of Object.entries(keyEnvs)) {
+    const first = owner.get(env);
+    if (first) fail(`keys ${first} and ${id} both read ${env}; one env var is one key`);
+    owner.set(env, id);
+  }
+  return { keyEnvs, current, classKeys: s.class_keys };
 }
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
@@ -264,6 +413,8 @@ export function parseConfig(text: string, path: string): LabConfig {
   const clash = Object.keys(c.agent_backends).filter((id) => id in c.endpoints);
   if (clash.length) throw new Error(`lab.toml: ${clash.join(", ")} is both an endpoint and an agent backend; ids share one namespace`);
   const surfaces = parseSurfaces(c.surfaces);
+  const refused = bindRefusal(surfaces[0].bind, c.auth !== undefined);
+  if (refused) throw new Error(`lab.toml: [surfaces.web] bind: ${refused}`);
   const bound = surfaces[0].channel;
   const lowered = Object.entries(c.channel_floors).filter(([key, cls]) => rank(cls) < rank("D1") && key !== `web:${bound}`);
   if (lowered.length)
@@ -280,7 +431,7 @@ export function parseConfig(text: string, path: string): LabConfig {
   return {
     path,
     databaseUrlEnv: c.database.url_env,
-    store: { placement: c.store.placement, keyEnv: c.store.key_env },
+    store: { placement: c.store.placement, ...storeKeys(c.store) },
     endpoints: Object.entries(c.endpoints).map(([id, e]) => ({
       id,
       baseUrl: e.base_url,
@@ -326,6 +477,22 @@ export function parseConfig(text: string, path: string): LabConfig {
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
     anchor: c.anchor ? { path: resolve(dir, c.anchor.path), everyMinutes: c.anchor.every_minutes } : null,
+    retention: retentionOf(c.policy.retention as Parameters<typeof retentionOf>[0]),
+    signOn: c.auth
+      ? {
+          issuer: c.auth.issuer,
+          clientId: c.auth.client_id,
+          clientSecretEnv: c.auth.client_secret_env ?? null,
+          sessionSecretEnv: c.auth.session_secret_env,
+          emailClaim: c.auth.email_claim,
+          trustUnverifiedEmail: c.auth.trust_unverified_email,
+          idClaim: c.auth.id_claim,
+          idleMinutes: c.auth.idle_timeout_minutes,
+          rolesClaim: c.auth.roles_claim ?? null,
+          roleValues: c.auth.roles ?? {},
+          scopes: c.auth.scopes,
+        }
+      : null,
   };
 }
 

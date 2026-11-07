@@ -13,7 +13,12 @@ backups/
 .slice1/
 .unit3/
 .lab0/
+.walk-router/
+.walk-keys/
+.walk-signon/
+.walk-study/
 .walk-policy/
 .unit2/
 .demo-agent/
 .demo/
+bundles/

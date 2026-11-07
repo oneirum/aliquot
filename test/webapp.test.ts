@@ -8,7 +8,7 @@ import { freshDatabase } from "./db.ts";
 import { chain, started } from "./events.ts";
 
 const { db } = await freshDatabase("labh_test_webapp");
-const deps = {} as IntakeDeps;
+const deps = { store: { held: new Set<string>() } } as unknown as IntakeDeps;
 const { server, port } = await listenWeb(createWebHandler(db, deps, () => {}, null, "Smith Lab"), 0);
 const base = `http://127.0.0.1:${port}`;
 after(async () => {

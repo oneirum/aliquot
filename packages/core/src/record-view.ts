@@ -6,16 +6,75 @@
  */
 
 import { describeRefusal } from "./dataclass.ts";
-import { describeFailure, verifyChain, type RunEvent, type StoredEvent } from "./record.ts";
+import type { Db } from "./db.ts";
+import { describeFailure, eventRefs, payloadStates, verifyChain, type PayloadState, type RedactionReason, type RunEvent, type StoredEvent } from "./record.ts";
+import type { PayloadHash } from "./hash.ts";
 
 export interface RecordView {
   readonly runId: string;
   readonly startedAt: string | null;
   readonly agent: string | null;
+  /** Why this agent answered, when the router chose it. Null for a channel's only agent. */
+  readonly route: string | null;
   readonly outcome: string;
   readonly chain: { readonly events: number; readonly firstBad: number | null };
   readonly summary: RunSummary;
   readonly rows: readonly { readonly seq: number; readonly ms: number; readonly t: RunEvent["t"]; readonly cls: string; readonly detail: string; readonly refused: boolean }[];
+  /** Each body the run names, once, by hash: whether it is still stored, readable here, or redacted. Never the body. */
+  readonly bodies: readonly BodyRow[];
+}
+
+export type BodyRow = {
+  readonly hash: string;
+  readonly cls: string;
+  readonly bytes: number;
+  /** The first event that names it, and what it is to that event. */
+  readonly seq: number;
+  readonly t: RunEvent["t"];
+  readonly role: string;
+} & (
+  | { readonly state: "stored"; readonly keyId: string | null }
+  /** Stored under a key id the process showing the record does not hold. */
+  | { readonly state: "unavailable"; readonly keyId: string | null }
+  | { readonly state: "redacted"; readonly at: string | null; readonly reason: RedactionReason | null }
+  | { readonly state: "missing" }
+);
+
+export function bodyRows(events: readonly StoredEvent[], states: ReadonlyMap<PayloadHash, PayloadState>, held: ReadonlySet<string>): BodyRow[] {
+  const seen = new Set<string>();
+  const rows: BodyRow[] = [];
+  for (const e of events) {
+    for (const { role, ref } of eventRefs(e.event)) {
+      if (seen.has(ref.hash)) continue;
+      seen.add(ref.hash);
+      const at = { hash: ref.hash, cls: ref.cls, bytes: ref.bytes, seq: e.seq, t: e.event.t, role };
+      const s = states.get(ref.hash);
+      if (!s) rows.push({ ...at, state: "missing" });
+      else if (s.t === "redacted") rows.push({ ...at, state: "redacted", at: s.at, reason: s.reason });
+      else rows.push({ ...at, state: s.keyId !== null && held.has(s.keyId) ? "stored" : "unavailable", keyId: s.keyId });
+    }
+  }
+  return rows;
+}
+
+/** The record with each body's state, as a process holding `held` key ids sees it. */
+export async function recordViewOf(db: Db, runId: string, events: readonly StoredEvent[], held: ReadonlySet<string>): Promise<RecordView> {
+  const hashes = [...new Set(events.flatMap((e) => eventRefs(e.event).map((r) => r.ref.hash)))];
+  return recordView(runId, events, bodyRows(events, await payloadStates(db, hashes), held));
+}
+
+/** One line for a terminal: what a reader of the record can learn about a body without reading it. */
+export function describeBody(b: BodyRow): string {
+  switch (b.state) {
+    case "stored":
+      return `stored, encrypted under key ${b.keyId}`;
+    case "unavailable":
+      return `unavailable here: encrypted under key ${b.keyId ?? "(none)"}, which this process does not hold`;
+    case "redacted":
+      return b.reason === "retention" && b.at ? `redacted on ${b.at.slice(0, 10)} by the lab's retention window` : "redacted";
+    case "missing":
+      return "missing from the payload store";
+  }
 }
 
 /** What a reader asks first: how long, how many calls, what it cost, what it read, what was refused. */
@@ -61,10 +120,36 @@ export function formatSummary(s: RunSummary): string {
   return parts.join("; ");
 }
 
+type RunRouteEvent = Extract<RunEvent, { t: "run.started" }>["route"];
+
+const BASIS = { only: "the only agent open to this member", thread: "it holds this thread", score: "the router's top score", picked: "the member picked it" } as const;
+
+/** `lab0-methods: the router's top score, confidence 0.94 (lab0-desk 0.06), router lexical-v1`. Null for a channel's only agent. */
+export function describeRoute(r: RunRouteEvent): string | null {
+  switch (r.t) {
+    case "direct":
+      return null;
+    case "pinned":
+      return `pinned by study ${r.studyId}`;
+    case "agent": {
+      const others = Object.entries(r.probs).filter(([id]) => id !== r.agentId).map(([id, p]) => `${id} ${p.toFixed(2)}`);
+      return `${r.agentId}: ${BASIS[r.basis]}, confidence ${r.confidence.toFixed(2)}${others.length ? ` (${others.join(", ")})` : ""}, router ${r.router}`;
+    }
+    case "ask-user":
+      return `the member was asked to pick from ${r.top3.join(", ")}, router ${r.router}`;
+    case "self":
+      return `the harness itself, router ${r.router}`;
+    case "unavailable":
+      return r.reason;
+  }
+}
+
 export function describeEvent(e: RunEvent): string {
   switch (e.t) {
-    case "run.started":
-      return `${e.surface} thread, trigger ${e.trigger.t}, ${e.history.length} earlier turns`;
+    case "run.started": {
+      const routed = describeRoute(e.route);
+      return `${e.surface} thread, trigger ${e.trigger.t}${"memberId" in e.trigger ? ` from ${e.trigger.memberId}` : ""}, ${e.history.length} earlier turns${routed ? `; routed to ${routed}` : ""}`;
+    }
     case "model.requested":
       return `to ${e.target.endpointId}, model ${e.target.modelId}, step ${e.step}${e.attempt > 1 ? `, attempt ${e.attempt}` : ""}${e.final ? ", final" : ""}`;
     case "model.completed":
@@ -105,7 +190,7 @@ export function describeEvent(e: RunEvent): string {
   }
 }
 
-export function recordView(runId: string, events: readonly StoredEvent[]): RecordView {
+export function recordView(runId: string, events: readonly StoredEvent[], bodies: readonly BodyRow[] = []): RecordView {
   const started = events.find((e) => e.event.t === "run.started")?.event;
   const finished = events.find((e) => e.event.t === "run.finished")?.event;
   const t0 = events.length ? Date.parse(events[0]!.at) : 0;
@@ -113,10 +198,12 @@ export function recordView(runId: string, events: readonly StoredEvent[]): Recor
     runId,
     startedAt: events[0]?.at ?? null,
     agent: started?.t === "run.started" ? started.agent : null,
+    route: started?.t === "run.started" ? describeRoute(started.route) : null,
     outcome: finished?.t === "run.finished" ? finished.outcome : "running",
     chain: { events: events.length, firstBad: verifyChain(events) },
     summary: summarize(events),
     rows: events.map((e) => ({ seq: e.seq, ms: Date.parse(e.at) - t0, t: e.event.t, cls: e.cls, detail: describeEvent(e.event), refused: e.event.t === "egress.refused" || e.event.t === "tool.withheld" })),
+    bodies,
   };
 }
 
@@ -127,11 +214,13 @@ export function formatRecordView(v: RecordView): string {
   return [
     `run      ${v.runId}`,
     `agent    ${v.agent ?? "(no run.started)"}`,
+    ...(v.route ? [`routed   ${v.route}`] : []),
     `outcome  ${v.outcome}`,
     `chain    ${chain}`,
     `summary  ${formatSummary(v.summary)}`,
     "",
     ...v.rows.map((r) => `${String(r.seq).padStart(3)}  +${String(r.ms).padStart(6)} ms  ${r.t.padEnd(width)}  ${r.cls.padEnd(2)}  ${r.detail}`),
+    ...(v.bodies.length ? ["", "bodies", ...v.bodies.map((b) => `${String(b.seq).padStart(3)}  ${`${b.t} ${b.role}`.padEnd(width + 16)}  ${b.cls.padEnd(2)}  ${`${b.bytes} B`.padStart(8)}  ${b.hash}  ${describeBody(b)}`)] : []),
   ].join("\n");
 }
 

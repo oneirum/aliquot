@@ -7,28 +7,43 @@
  *   1. gate                         -> refuse with a user-facing message, or admit with class;
  *                                      a refusal by a data class is recorded in the audit stream
  *   2. thread has an active background run -> write a steer inbox item, done      (later unit)
- *   3. channel bound to a study     -> frozen hash (router off)                   (later unit)
+ *   3. channel bound to a study     -> frozen hash (router off): choosePinned, study.ts pinFor
  *      else watched-channel post    -> shouldReply, maybe drop                    (later unit)
- *      else                         -> route(), resolve head AgentDocument -> hash (upsert)
- *                                      this build: the head bound to the channel, else the fixture; no router
+ *      else one agent on the channel -> it answers, route "direct"
+ *      else                         -> route() over the channel's agents: one answers, or the member picks (asked-user)
+ *      then resolve the AgentDocument -> hash (upsert)
  *   4. queue.enqueue(run key = surface:channel:thread:message)   idempotent
  */
 
 import { z } from "zod";
-import { modelFor, resolveAgent, versionHash, type AgentDocument, type Catalog } from "./agent.ts";
-import { decideEgress, join, MARKS, rank, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
+import { listingOf, modelFor, resolveAgent, versionHash, type AgentDocument, type AgentId, type AgentListing, type Catalog, type ResolvedAgent } from "./agent.ts";
+import { atMost, decideEgress, join, Labelled, MARKS, rank, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { appendAudit, type AuditEvent } from "./audit.ts";
-import { gateClassified, type GateDeps, type InboundMessage } from "./gate.ts";
+import { gateClassified, type GateDeps, type GateResult, type InboundMessage } from "./gate.ts";
 import { classById, residencyRefusal, residencyRuleText, retentionOf, ruleText, type Classification, type Policy } from "./policy.ts";
 import type { AgentVersionHash } from "./hash.ts";
+import { loadVersion } from "./publish.ts";
 import { ENGINES, type Engine, type Queue } from "./queue.ts";
 import type { PayloadRef, PayloadStore, RunId, ThreadKey, Trigger } from "./record.ts";
+import { audienceAdmits, eligibleOptions, picked, route, ROUTE_BASES, type RouteDecision } from "./router.ts";
+import { pinFor, type Freeze, type Study } from "./study.ts";
+
+/** An agent as a member sees it when it answers or when they pick one: its name and the first sentence of its description. */
+export interface AgentChoice {
+  readonly agentId: AgentId;
+  readonly name: string;
+  readonly line: string;
+}
+
+/** Why this agent runs, written into run.started: the router's decision, "pinned" on a study channel, or "direct" when the channel has one agent. */
+export type RunRoute = Extract<RouteDecision, { t: "agent" }> | { readonly t: "pinned"; readonly studyId: string } | { readonly t: "direct" };
 
 export type IntakeResult =
-  | { readonly t: "enqueued"; readonly runId: RunId; readonly agent: AgentVersionHash; readonly duplicate: boolean }
+  | { readonly t: "enqueued"; readonly runId: RunId; readonly agent: AgentVersionHash; readonly duplicate: boolean; readonly answeredBy: AgentChoice; readonly route: RunRoute }
   | { readonly t: "steered"; readonly runId: RunId }
-  | { readonly t: "asked-user"; readonly choices: readonly string[] }
+  /** The router was unsure: the member picks one, and the same message goes again naming that agent. */
+  | { readonly t: "asked-user"; readonly choices: readonly AgentChoice[]; readonly route: Extract<RouteDecision, { t: "ask-user" }> }
   | { readonly t: "ignored"; readonly reason: "watched-no" | "own-message" }
   | {
       readonly t: "refused";
@@ -39,6 +54,11 @@ export type IntakeResult =
 
 const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number(), marks: z.array(z.enum(MARKS)).optional() });
 type RefJson = z.infer<typeof ref>;
+const routeSchema = z.discriminatedUnion("t", [
+  z.object({ t: z.literal("direct") }),
+  z.object({ t: z.literal("pinned"), studyId: z.string() }),
+  z.object({ t: z.literal("agent"), agentId: z.string(), basis: z.enum(ROUTE_BASES), probs: z.record(z.string(), z.number()), confidence: z.number(), router: z.string() }),
+]);
 
 /** What a run job carries. Written by intake, read by drive() to write run.started. */
 export const runJobPayloadSchema = z.object({
@@ -55,6 +75,8 @@ export const runJobPayloadSchema = z.object({
   threadId: z.string(),
   input: ref,
   history: z.array(ref),
+  // A payload written before the router existed ran its channel's one agent.
+  route: routeSchema.default({ t: "direct" }),
   studyId: z.string().nullable(),
   dataClass: z.object({ id: z.string(), rule: z.string(), retentionDays: z.number().nullable() }).optional(),
 });
@@ -70,6 +92,7 @@ export interface RunJobPayload {
   readonly threadId: string;
   readonly input: PayloadRef;
   readonly history: readonly PayloadRef[];
+  readonly route: RunRoute;
   readonly studyId: string | null;
   /** The message's data class at the gate, so a refusal later in the run can name it, and the retention job can read it. */
   readonly dataClass?: { readonly id: string; readonly rule: string; readonly retentionDays: number | null };
@@ -89,7 +112,8 @@ export function parseRunJobPayload(json: unknown): RunJobPayload {
   if (!parsed.success) throw new MalformedJob(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const p = parsed.data;
   const ref = (r: RefJson): PayloadRef => ({ hash: r.hash as PayloadRef["hash"], cls: r.cls as DataClass, bytes: r.bytes, ...(r.marks?.length ? { marks: r.marks } : {}) });
-  return { ...p, agent: p.agent as AgentVersionHash, thread: p.thread as ThreadKey, input: ref(p.input), history: p.history.map(ref) };
+  const route: RunRoute = p.route.t === "agent" ? { ...p.route, agentId: p.route.agentId as AgentId } : p.route;
+  return { ...p, agent: p.agent as AgentVersionHash, thread: p.thread as ThreadKey, input: ref(p.input), history: p.history.map(ref), route };
 }
 
 export interface IntakeDeps {
@@ -99,66 +123,175 @@ export interface IntakeDeps {
   readonly gate: GateDeps;
   /** Read per message, so a publish reaches the next message without a restart. */
   readonly catalog: () => Promise<Catalog>;
-  /** The agent for a channel: the published head bound to it, else the deployment's fixture. The router replaces this for unbound channels. */
-  readonly agentFor: (channel: InboundMessage["channel"]) => Promise<AgentDocument | undefined>;
+  /** The agents that answer in a channel: the published heads bound to it, else the deployment's fixtures. Two or more are routed. */
+  readonly agentsFor: (channel: InboundMessage["channel"]) => Promise<readonly AgentDocument[]>;
   /** The region lab.toml gives a model endpoint, for a class with a residency rule. Absent, or null for an endpoint, means no region: such a class is refused. */
   readonly endpointRegion?: (endpointId: string) => string | null;
 }
 
-export async function intake(msg: InboundMessage, deps: IntakeDeps): Promise<IntakeResult> {
-  const doc = await deps.agentFor(msg.channel);
-  if (!doc) return { t: "refused", userFacing: "No agent is published for this channel." };
+/** pick is the agent the member chose from an earlier asked-user result for this same message. */
+export async function intake(msg: InboundMessage, deps: IntakeDeps, pick?: AgentId): Promise<IntakeResult> {
   const key = `msg:${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}:${msg.messageId}`;
-  return admit(msg, doc, key, (member) => ({ t: "message", surface: msg.channel.surface, messageId: msg.messageId, memberId: member }), deps);
+  return admit(msg, key, (member) => ({ t: "message", surface: msg.channel.surface, messageId: msg.messageId, memberId: member }), deps, (admitted) => chooseAgent(msg, admitted, deps, pick));
 }
 
 /** A studio test message: the same gate, resolution and queue as intake, on a draft that is not published. */
 export async function intakeTest(msg: InboundMessage, draft: AgentDocument, deps: IntakeDeps): Promise<IntakeResult> {
   const key = `test:${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}:${msg.messageId}`;
-  return admit(msg, draft, key, (member) => ({ t: "test", memberId: member }), deps);
+  return admit(msg, key, (member) => ({ t: "test", memberId: member }), deps, async () => ({ t: "agent", doc: draft, route: { t: "direct" } }));
 }
 
-async function admit(msg: InboundMessage, doc: AgentDocument, key: string, trigger: (member: string) => Trigger, deps: IntakeDeps): Promise<IntakeResult> {
+type Admitted = Extract<GateResult, { t: "admit" }>;
+type Chosen =
+  | { readonly t: "agent"; readonly doc: AgentDocument; readonly route: RunRoute }
+  /** A study channel's frozen version: run by its hash, never resolved again. cls is the message's class raised to the study's floor. */
+  | { readonly t: "pinned"; readonly freeze: Freeze; readonly cls: DataClass }
+  | Extract<IntakeResult, { t: "refused" | "asked-user" }>;
+
+const threadOf = (msg: InboundMessage) => `${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}` as ThreadKey;
+
+export function choiceOf(listing: AgentListing): AgentChoice {
+  return { agentId: listing.agentId, name: listing.name, line: listing.description.split(/(?<=[.!?])\s+/)[0] ?? "" };
+}
+
+/**
+ * Step 3, after the gate, because routing reads the message's class and the member's audiences. A study channel's pin
+ * goes first, before agentsFor: a pinned channel runs its frozen version and never reaches route().
+ */
+async function chooseAgent(msg: InboundMessage, admitted: Admitted, deps: IntakeDeps, pick: AgentId | undefined): Promise<Chosen> {
+  const pin = await pinFor(deps.db, msg.channel);
+  if (pin) return choosePinned(pin.study, pin.freezes, admitted, pick);
+  const docs = await deps.agentsFor(msg.channel);
+  if (!docs.length) return { t: "refused", userFacing: "No agent is published for this channel." };
+  if (docs.length === 1 && pick === undefined) return { t: "agent", doc: docs[0]!, route: { t: "direct" } };
+  const listings = docs.map(listingOf);
+  const input = { message: admitted.text.value, candidates: eligibleOptions(listings, admitted.cls, admitted.member, admitted.audiences), current: await threadHolder(deps.db, threadOf(msg)) };
+  const decision = pick === undefined ? route(input) : picked(input, pick);
+  switch (decision.t) {
+    case "agent":
+      return { t: "agent", doc: docs.find((d) => d.agentId === decision.agentId)!, route: decision };
+    case "ask-user":
+      return { t: "asked-user", choices: decision.top3.map((id) => choiceOf(listings.find((l) => l.agentId === id)!)), route: decision };
+    case "self":
+      return { t: "refused", userFacing: "No agent in this channel takes this message." };
+    case "unavailable":
+      return { t: "refused", userFacing: decision.reason };
+  }
+}
+
+/**
+ * The message takes the study's floor first (classes only go up). Of the active freezes, only those whose frozen
+ * listing admits that class and this member can run: one runs, several are offered, none refuses. A study channel is
+ * never routed, so these are the only checks between the message and the frozen version.
+ */
+function choosePinned(study: Study, freezes: readonly Freeze[], admitted: Admitted, pick: AgentId | undefined): Chosen {
+  if (!freezes.length) return { t: "refused", userFacing: `This channel belongs to study ${study.id}, which has no frozen agent. Ask the study owner, ${study.owner}.` };
+  const cls = join(admitted.cls, study.dataFloor);
+  const fits = freezes.filter((f) => atMost(cls, f.listing.ceiling));
+  const open = fits.filter((f) => audienceAdmits(f.listing.audience, admitted.member, admitted.audiences));
+  const freeze = pick === undefined ? (open.length === 1 ? open[0] : undefined) : open.find((f) => f.agentId === pick);
+  if (freeze) return { t: "pinned", freeze, cls };
+  if (pick !== undefined) return { t: "refused", userFacing: "That agent was not one of the choices for this message." };
+  if (!fits.length) return { t: "refused", userFacing: `Not sent. This message is ${cls} in study ${study.id}, above what its frozen agent may receive (${freezes.map((f) => `${f.agentId} up to ${f.listing.ceiling}`).join(", ")}). Ask the study owner, ${study.owner}.` };
+  if (!open.length) return { t: "refused", userFacing: `The frozen agent in study ${study.id} is not open to you. Ask the study owner, ${study.owner}.` };
+  const top = open.map((f) => f.agentId);
+  return { t: "asked-user", choices: open.map((f) => choiceOf(f.listing)), route: { t: "ask-user", top3: top, probs: {}, confidence: 0, router: "pinned" } };
+}
+
+/** The agent of the newest run in this thread, so a follow-up stays with it. */
+async function threadHolder(db: Db, thread: ThreadKey): Promise<AgentId | null> {
+  const row = await db.query<{ agent_id: AgentId }>("select v.agent_id from jobs j join agent_versions v on v.hash = j.payload->>'agent' where j.kind = 'run' and j.thread_key = $1 order by j.created_at desc limit 1", [thread]);
+  return row.rows[0]?.agent_id ?? null;
+}
+
+async function admit(msg: InboundMessage, key: string, trigger: (member: string) => Trigger, deps: IntakeDeps, choose: (admitted: Admitted) => Promise<Chosen>): Promise<IntakeResult> {
   const { result: admitted, classification, policy } = await gateClassified(msg, deps.gate);
   if (admitted.t === "refuse") return admitted.dataClass && admitted.text ? recordClassRefusal(msg, admitted.dataClass, admitted.text, admitted.userFacing, ruleText(classById(policy, admitted.dataClass.class)), policy, deps) : { t: "refused", userFacing: admitted.userFacing };
+  const dataClass = classification ? { id: classification.class, rule: classification.rule, retentionDays: retentionOf(policy, classification.class) } : undefined;
+  const chosen = await choose(admitted);
+  if (chosen.t === "pinned") {
+    const { freeze } = chosen;
+    const text = admitted.text;
+    const raised = { ...admitted, cls: chosen.cls, text: Labelled.derive(text.value, [text], text.origin, chosen.cls) };
+    const agent = await loadVersion(deps.db, freeze.hash);
+    const refused = await residencyRefused(msg, agent, raised.text, classification, policy, deps);
+    if (refused) return refused;
+    const run = { hash: freeze.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: freeze.studyId, route: { t: "pinned", studyId: freeze.studyId }, answeredBy: choiceOf(freeze.listing), dataClass } as const;
+    return enqueueRun(msg, raised, run, key, trigger, deps);
+  }
+  if (chosen.t !== "agent") return chosen;
+  const { doc } = chosen;
   const resolved = resolveAgent(doc, await deps.catalog());
   if (!resolved.ok) return { t: "refused", userFacing: `The agent cannot run: ${resolved.issues.map((i) => i.message).join("; ")}` };
-  if (classification && admitted.t === "admit") {
-    const rule = classById(policy, classification.class);
-    const endpointId = modelFor(resolved.agent, classification.level).endpointId;
-    const refusal = residencyRefusal(rule, classification, endpointId, deps.endpointRegion?.(endpointId) ?? null);
-    if (refusal) return recordClassRefusal(msg, classification, admitted.text, refusal, residencyRuleText(rule), policy, deps);
-    // A knowledge base at or above a residency class's level may hold that class, and a run that reads it moves to the
-    // model for the raised level. The snapshot carries a level, not a class, so this fails closed: that model's
-    // endpoint must be in the class's region before the run starts.
-    for (const c of policy.classes.filter((k) => k.residency !== null)) {
-      for (const kb of resolved.agent.knowledgeBases.filter((k) => rank(k.cls) >= rank(c.level))) {
-        const id = modelFor(resolved.agent, join(kb.cls, classification.level)).endpointId;
-        const held: Classification = { class: c.id, level: kb.cls, rule: `knowledge-base:${kb.kbId}`, spans: [] };
-        const r = residencyRefusal(c, held, id, deps.endpointRegion?.(id) ?? null);
-        if (r) return recordClassRefusal(msg, held, admitted.text, `${r.replace(/^Not sent\. Data class ([^;]+);/, `Not sent. Knowledge base ${kb.kbId} is at ${kb.cls} and may hold data class $1;`)}`, residencyRuleText(c), policy, deps);
-      }
-    }
-  }
+  const refused = await residencyRefused(msg, resolved.agent, admitted.text, classification, policy, deps);
+  if (refused) return refused;
   const hash = versionHash(resolved.agent);
   await deps.db.query("insert into agent_versions (hash, agent_id, body) values ($1, $2, $3) on conflict (hash) do nothing", [hash, resolved.agent.agentId, JSON.stringify(resolved.agent)]);
+  return enqueueRun(msg, admitted, { hash, engine: resolved.agent.agentCli ? "agent-cli" : "chat", kind: doc.kind, studyId: null, route: chosen.route, answeredBy: choiceOf(listingOf(doc)), dataClass }, key, trigger, deps);
+}
+
+/**
+ * A class with a residency rule refuses the message when the model it would reach, or the model a knowledge base at
+ * or above its level moves the run to, has an endpoint outside the class's region. Null when the run may start.
+ */
+async function residencyRefused(msg: InboundMessage, agent: ResolvedAgent, text: Labelled<string>, classification: Classification | null, policy: Policy, deps: IntakeDeps): Promise<IntakeResult | null> {
+  if (!classification) return null;
+  const rule = classById(policy, classification.class);
+  const endpointId = modelFor(agent, classification.level).endpointId;
+  const refusal = residencyRefusal(rule, classification, endpointId, deps.endpointRegion?.(endpointId) ?? null);
+  if (refusal) return recordClassRefusal(msg, classification, text, refusal, residencyRuleText(rule), policy, deps);
+  // A knowledge base at or above a residency class's level may hold that class, and a run that reads it moves to the
+  // model for the raised level. The snapshot carries a level, not a class, so this fails closed: that model's
+  // endpoint must be in the class's region before the run starts.
+  for (const c of policy.classes.filter((k) => k.residency !== null)) {
+    for (const kb of agent.knowledgeBases.filter((k) => rank(k.cls) >= rank(c.level))) {
+      const id = modelFor(agent, join(kb.cls, classification.level)).endpointId;
+      const held: Classification = { class: c.id, level: kb.cls, rule: `knowledge-base:${kb.kbId}`, spans: [] };
+      const r = residencyRefusal(c, held, id, deps.endpointRegion?.(id) ?? null);
+      if (r) return recordClassRefusal(msg, held, text, `${r.replace(/^Not sent\. Data class ([^;]+);/, `Not sent. Knowledge base ${kb.kbId} is at ${kb.cls} and may hold data class $1;`)}`, residencyRuleText(c), policy, deps);
+    }
+  }
+  return null;
+}
+
+async function enqueueRun(
+  msg: InboundMessage,
+  admitted: Extract<GateResult, { t: "admit" }>,
+  run: Pick<RunJobPayload, "engine" | "kind" | "route" | "studyId" | "dataClass"> & { readonly hash: AgentVersionHash; readonly answeredBy: AgentChoice },
+  key: string,
+  trigger: (member: string) => Trigger,
+  deps: IntakeDeps,
+): Promise<IntakeResult> {
+  const hash = run.hash;
   const input = await deps.store.put(admitted.text);
-  const thread = `${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}` as ThreadKey;
+  const thread = threadOf(msg);
   const payload: RunJobPayload = {
     agent: hash,
-    engine: resolved.agent.agentCli ? "agent-cli" : "chat",
-    kind: doc.kind,
+    engine: run.engine,
+    kind: run.kind,
     trigger: trigger(admitted.member),
     thread,
     surface: msg.channel.surface,
     threadId: msg.threadId,
     input,
     history: [],
-    studyId: null,
-    ...(classification ? { dataClass: { id: classification.class, rule: classification.rule, retentionDays: retentionOf(policy, classification.class) } } : {}),
+    route: run.route,
+    studyId: run.studyId,
+    ...(run.dataClass ? { dataClass: run.dataClass } : {}),
   };
   const job = await deps.queue.enqueue({ kind: "run", key }, thread, payload);
-  return { t: "enqueued", runId: job.id as RunId, agent: hash, duplicate: !job.created };
+  if (!job.created) {
+    // A resend of a message already queued: report the run that exists, not the agent this request would have picked.
+    const first = await deps.db.query<{ agent: AgentVersionHash; route: RunRoute | null; agent_id: AgentId }>(
+      "select j.payload->>'agent' as agent, j.payload->'route' as route, v.agent_id from jobs j join agent_versions v on v.hash = j.payload->>'agent' where j.id = $1",
+      [job.id],
+    );
+    const row = first.rows[0];
+    if (row && row.agent !== hash) {
+      return { t: "enqueued", runId: job.id as RunId, agent: row.agent, duplicate: true, answeredBy: { agentId: row.agent_id, name: row.agent_id, line: "" }, route: row.route ?? { t: "direct" } };
+    }
+  }
+  return { t: "enqueued", runId: job.id as RunId, agent: hash, duplicate: !job.created, answeredBy: run.answeredBy, route: run.route };
 }
 
 /**

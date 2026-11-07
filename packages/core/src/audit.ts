@@ -1,6 +1,6 @@
 /**
  * The audit stream: one hash-chained, append-only log for what happens
- * outside a run. Publishing an agent or a KB, gateway calls made before or without a run (KB compile now;
+ * outside a run. Publishing an agent or a KB, a key rotation, a re-encryption or a retention sweep, gateway calls made before or without a run (KB compile now;
  * router and publish checks later), and HTTP refusals for KB URL sources, record here through the same CallRecorder
  * a run journal implements, so a refusal is recorded in exactly one place
  * whichever side made the call.
@@ -13,6 +13,7 @@
  * cannot fork the chain.
  */
 
+import { userInfo } from "node:os";
 import type { AgentId } from "./agent.ts";
 import type { DataClass, EgressRefusal } from "./dataclass.ts";
 import type { Db, Tx } from "./db.ts";
@@ -51,7 +52,29 @@ export type AuditEvent =
     }
   /** A knowledge base source in a class no model may read, refused before its compile job existed. */
   | { readonly t: "kb.source-refused"; readonly kbId: string; readonly sourceId: string; readonly dataClass: string; readonly level: DataClass; readonly rule: string; readonly classRule: string; readonly detectors: readonly string[] }
-  | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string };
+  | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string }
+  /** A data steward's `aliquot keys rotate`, `aliquot keys reencrypt` and `aliquot retention --apply` (steward.ts). */
+  | { readonly t: "keys.rotated"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly held: readonly string[] }
+  | { readonly t: "keys.reencrypted"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly rows: number }
+  | { readonly t: "retention.swept"; readonly purgeDays: Readonly<Partial<Record<DataClass, number>>>; readonly keepMinDays: Readonly<Partial<Record<DataClass, number>>>; readonly asOf: string; readonly redacted: number; readonly bytes: number; readonly runs: number; readonly replies: number }
+  | { readonly t: "study.created"; readonly studyId: string; readonly title: string; readonly owner: string; readonly irbProtocol: string | null; readonly dataFloor: DataClass }
+  | { readonly t: "study.channel-bound"; readonly studyId: string; readonly surface: string; readonly channelId: string }
+  | { readonly t: "agent.frozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly note: string }
+  /** A protocol deviation: the study owner ended a freeze before the study did, with the reason. */
+  | { readonly t: "agent.unfrozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly reason: string }
+  /** A reviewer bundle left the database: what it covers, at what clearance, and the id its bundle.json carries. */
+  | { readonly t: "export.created"; readonly bundleId: string; readonly scope: { readonly runs: readonly string[] } | { readonly study: string }; readonly clearance: DataClass; readonly runs: number };
+
+/**
+ * The actor of a CLI write. --as is self-declared, so the row also names the operating-system user who ran it.
+ */
+export function declaredActor(member: string | null): string {
+  let os = "unknown";
+  try {
+    os = userInfo().username;
+  } catch {}
+  return member ? `${member} (os user ${os})` : `os user ${os}`;
+}
 
 export interface AuditRow {
   readonly seq: number;

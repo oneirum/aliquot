@@ -19,17 +19,12 @@ export type Framework = (typeof FRAMEWORKS)[number];
 /** `<file under test/>: <exact test name>`, as `node --test` reports it. test/review-pack.test.ts runs each one. */
 export type TestId = `${string}.test.ts: ${string}`;
 
-/**
- * The config the trust layer adds. Unit 11 (sign-on) sets signOn and unit 12 (keys and retention) sets keyRotation and
- * retention when lab.toml declares them; until they land these are absent and their rows read not-met.
- */
-export interface TrustLayerSeam {
-  readonly signOn?: object | null;
-  readonly keyRotation?: object | null;
-  readonly retention?: object | null;
-}
+export type ReviewConfig = LabConfig;
 
-export type ReviewConfig = LabConfig & TrustLayerSeam;
+/** Rotation is declared when [store.keys] names more than one key, or a class has its own. */
+const keyRotation = (c: ReviewConfig) => Object.keys(c.store.keyEnvs).length > 1 || Object.keys(c.store.classKeys).length > 0;
+/** Retention is declared when [policy.retention] sets a purge window for at least one class. */
+const retention = (c: ReviewConfig) => Object.keys(c.retention.purgeDays).length > 0;
 
 export interface Assessment {
   readonly status: Status;
@@ -85,7 +80,7 @@ function signOn(c: ReviewConfig, landed: Assessment, missing: Assessment): Asses
 /** A trust-layer row reads met only once the tests that prove it are cited on the row. */
 const UNPROVEN = "It reads met once the tests that prove it are cited here.";
 
-const NO_SIGN_ON = "No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1.";
+const NO_SIGN_ON = "No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1.";
 
 const T = {
   egressTable: "dataclass.test.ts: decideEgress follows the placement table for every class, kind and placement",
@@ -106,7 +101,7 @@ const T = {
   storeForged: "record.test.ts: the store refuses a forged label, whether parsed from JSON or built on the prototype",
   verifyChain: "record.test.ts: verifyChain finds the first tampered, reordered or misclassed event",
   eventsAppendOnly: "record.test.ts: run_events refuses updates and deletes at the database level",
-  payloadRowsFixed: "record.test.ts: payloads rows allow only a redaction and a key rewrap; the class and the address never change",
+  payloadRowsFixed: "record.test.ts: payloads rows allow only a redaction, a key rewrap and a refill of a redacted row; the class and the address never change",
   versionsAppendOnly: "record.test.ts: agent_versions refuses updates and deletes at the database level",
   chainAnchoredOnJob: "record.test.ts: the chain head is anchored on the job and a resume refuses a record that does not match it",
   auditChain: "audit.test.ts: concurrent appends form one unbroken chain, and an edited row breaks it",
@@ -229,7 +224,7 @@ const HIPAA: readonly Control[] = [
     id: "hipaa-164.312(a)(2)(iii)",
     framework: "hipaa",
     title: "Automatic logoff",
-    does: "The web door has no member sessions to end until sign-on.",
+    does: "With [auth], a member session ends after the idle timeout or 12 hours; without it the web door has no member sessions.",
     assess: (c) => signOn(c, { status: "partly", why: "Sign-on is declared; session length follows the identity provider." }, { status: "not-met", why: NO_SIGN_ON }),
     tests: [],
   },
@@ -327,7 +322,7 @@ const NIST: readonly Control[] = [
   nist("03.01.08", "Unsuccessful logon attempts", "A request with a bad token is refused with a 401 and never treated as web; lockout after repeated failures belongs to the identity provider once sign-on lands.", (c) =>
     signOn(c, { status: "lab-responsibility", why: "Sign-on is declared; lockout follows the identity provider." }, { status: "not-met", why: NO_SIGN_ON }),
   [T.surface401]),
-  nist("03.01.11", "Session termination", "No member sessions exist until sign-on.", (c) =>
+  nist("03.01.11", "Session termination", "With [auth], a member session ends after the idle timeout or 12 hours; without it there are no member sessions.", (c) =>
     signOn(c, { status: "partly", why: "Session length follows the identity provider." }, { status: "not-met", why: NO_SIGN_ON }),
   ),
   nist("03.01.12", "Remote access", "The web door listens on 127.0.0.1; remote members reach it through whatever proxy or VPN the lab puts in front.", lab("Remote access paths are the lab's network.")),
@@ -372,7 +367,7 @@ const NIST: readonly Control[] = [
   nist("03.07", "Maintenance (family)", "Aliquot is self-hosted; there is no vendor maintenance access.", lab("Maintenance of the server is research IT's.")),
   nist("03.08.01", "Media storage", "Bodies are encrypted at rest; records hold hashes and labels, not text.", (c) => ({ status: "lab-responsibility", why: `The database at ${c.store.placement} placement, its disks and backups are its operator's.` }), [T.storeRoundTrip]),
   nist("03.08.03", "Media sanitization", "Payload rows can be redacted in place without breaking the chain.", (c) =>
-    c.retention ? { status: "partly", why: "Retention is declared, so bodies past their window are redacted; disk sanitization stays with the operator." } : { status: "not-met", why: "lab.toml declares no retention, and this build has no retention sweep." },
+    retention(c) ? { status: "partly", why: "Retention is declared, so bodies past their window are redacted; disk sanitization stays with the operator." } : { status: "not-met", why: "lab.toml sets no purge window in [policy.retention], so aliquot retention redacts nothing." },
   ),
   nist("03.09", "Personnel security (family)", "Roles in the studio decide who may publish what.", lab("Screening and offboarding are the institution's.")),
   nist("03.10", "Physical protection (family)", "A lab placement means hardware the lab controls.", lab("Physical access to that hardware is the lab's.")),
@@ -391,7 +386,7 @@ const NIST: readonly Control[] = [
     [T.storeRoundTrip, T.egressTable],
   ),
   nist("03.13.10", "Cryptographic key establishment and management", "One master key from the environment, HKDF subkeys for cipher and address; payload rows already allow a key rewrap.", (c) =>
-    c.keyRotation ? { status: "partly", why: "Key rotation is declared; where the master key lives is the lab's." } : { status: "not-met", why: "lab.toml declares no key rotation, and this build stamps every row with one key id." },
+    keyRotation(c) ? { status: "partly", why: "Key rotation is declared; where the master key lives is the lab's." } : { status: "not-met", why: "lab.toml names one payload key in [store.keys], so nothing has rotated; aliquot keys rotate and reencrypt move payloads once a second key is named." },
   ),
   nist("03.13.11", "Cryptographic protection", "AES-256-GCM for bodies and HMAC-SHA256 for addresses, from Node's crypto module.", fixed("met", "Not configurable."), [T.contentAddress, T.storeRoundTrip]),
   nist("03.13.13", "Mobile code", "Pages are self-contained HTML that load nothing from another origin.", fixed("met", "Pages are built in."), [T.selfContained]),
@@ -401,7 +396,7 @@ const NIST: readonly Control[] = [
   [T.toolsRefused, T.sandboxCaps, T.sandboxPinned]),
   nist("03.14.06", "System monitoring", "Every refusal is recorded with what it refused; refused out-of-run calls go to the audit stream.", fixed("met", "Refusals are always recorded."), [T.auditRefusal, T.recordView]),
   nist("03.14.08", "Information management and retention", "Payload rows allow redaction; records keep hashes after a body is gone.", (c) =>
-    c.retention ? { status: "partly", why: "Retention is declared; the windows themselves are the lab's policy." } : { status: "not-met", why: "lab.toml declares no retention, and this build keeps every body." },
+    retention(c) ? { status: "partly", why: "Retention is declared; the windows themselves are the lab's policy." } : { status: "not-met", why: "lab.toml sets no purge window in [policy.retention], so every body is kept." },
   ),
   nist("03.15", "Planning (family)", "This pack and the research IT sheet feed the lab's system security plan.", lab("The plan and rules of behavior are the lab's.")),
   nist(
@@ -438,7 +433,7 @@ const HECVAT: readonly Control[] = [
   }), [T.gateRaises, T.gateRefuses, T.initPatterns]),
   hecvat("data-encryption", "Data: encryption at rest", "AES-256-GCM under a key held outside the database.", fixed("met", "No plaintext mode."), [T.storeRoundTrip, T.contentAddress]),
   hecvat("data-retention", "Data: retention and deletion", "Payload rows can be redacted while records keep their hashes.", (c) =>
-    c.retention ? { status: "partly", why: "Retention is declared." } : { status: "not-met", why: "lab.toml declares no retention, and this build keeps every body." },
+    retention(c) ? { status: "partly", why: "Retention is declared." } : { status: "not-met", why: "lab.toml sets no purge window in [policy.retention], so every body is kept." },
   ),
   hecvat("appsec-input", "Application security: input handling and error disclosure", "Bodies over the cap are refused before parsing, malformed input is a clean 400, and a database error answers a generic 500.", fixed("met", "Built in."), [T.bodyCap, T.badInput, T.dbError]),
   hecvat("appsec-dependencies", "Application security: third-party components", "Lockfile pins, weekly dependency updates, vendored fixes with tests, and no code from another origin on the pages.", fixed("partly", "Watched, not independently audited."), [T.deepmerge, T.selfContained]),

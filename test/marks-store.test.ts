@@ -3,13 +3,13 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { DEFAULT_POLICY, Labelled } from "../packages/core/src/dataclass.ts";
-import { createPayloadStore } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey } from "../packages/core/src/record.ts";
 import { parseRunJobPayload } from "../packages/core/src/frontdoor.ts";
 import { freshDatabase } from "./db.ts";
 
 const { db } = await freshDatabase("labh_test_marks");
 after(() => db.end());
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
 
 test("a marked payload reads back with its marks, and an unmarked one with none, as before", async () => {
   const marked = await store.put(Labelled.stamp("MRN 0012345", "D3", "gate:mrn", ["phi"]));

@@ -20,6 +20,10 @@ const asked: Record<string, any>[] = [];
 const auths: (string | undefined)[] = [];
 const stops: Record<string, any>[] = [];
 const runs = new Map<string, string>();
+const CHOICES = [
+  { agentId: "lab0-desk", name: "Lab handbook", line: "Answers practical questions from the lab handbook." },
+  { agentId: "lab0-methods", name: "Methods desk", line: "Answers study design and statistics questions." },
+];
 
 async function body(req: IncomingMessage): Promise<any> {
   const chunks: Buffer[] = [];
@@ -38,9 +42,11 @@ const doorServer = createServer(async (req, res) => {
     const b = await body(req);
     asked.push(b);
     if (b.text.includes("refuse")) return json(403, { t: "refused", userFacing: "You are not a member of this lab's harness." });
+    if (b.text.includes("ambiguous") && !b.agent) return json(200, { t: "asked-user", choices: CHOICES, route: { t: "ask-user" } });
     const runId = `00000000-0000-4000-8000-${String(asked.length).padStart(12, "0")}`;
     runs.set(runId, b.text);
-    return json(202, { t: "enqueued", runId, agent: "a", duplicate: false });
+    const picked = CHOICES.find((c) => c.agentId === b.agent);
+    return json(202, { t: "enqueued", runId, agent: "a", duplicate: false, ...(picked ? { answeredBy: picked, route: { t: "agent" } } : {}) });
   }
   if (req.method === "POST" && url.pathname === "/stop") {
     stops.push(await body(req));
@@ -150,6 +156,29 @@ test("an answer above the slack surface's placement posts the record link and no
 test("a gate refusal posts the door's message and no record link", async () => {
   const { ts } = mention("refuse me");
   assert.equal(await finalIn(ts), "You are not a member of this lab's harness.");
+});
+
+test("when the router is unsure, the thread gets the choices as a numbered list, and a mention with a number asks that agent the same question", async () => {
+  const { ts } = mention("ambiguous: are skipped diary items missing data?");
+  const list = await finalIn(ts);
+  assert.equal(list, "More than one agent answers here, and the question fits more than one. Which one should answer?\n1. Lab handbook: Answers practical questions from the lab handbook.\n2. Methods desk: Answers study design and statistics questions.\nMention me in this thread with the number or the name.");
+  // Another member's "2" is a new question of theirs, not a pick made for the asker.
+  const other = asked.length;
+  mention("2", { thread_ts: ts, user: "U0OTHER" });
+  await slack.waitFor("the other member's message", () => (asked.length > other ? true : undefined));
+  assert.equal(asked.at(-1)!.agent, undefined);
+  assert.equal(asked.at(-1)!.user, "U0OTHER");
+  const before = asked.length;
+  mention("2", { thread_ts: ts });
+  await slack.waitFor("the pick", () => (asked.length > before ? true : undefined));
+  assert.deepEqual(asked.at(-1), { channel: "C0LAB", thread: ts, message: ts, text: "ambiguous: are skipped diary items missing data?", user: "U0MEMBER", agent: "lab0-methods" });
+  const answered = await slack.waitFor("the picked agent's answer", () => {
+    const lookings = slack.calls.filter((c) => c.method === "chat.postMessage" && c.body.thread_ts === ts);
+    if (lookings.length < 3) return undefined;
+    const second = slack.calls.indexOf(lookings.at(-1)!);
+    return slack.calls.slice(second).find((c) => c.method === "chat.update" && /Record of this answer/.test(String(c.body.text)))?.body.text as string | undefined;
+  });
+  assert.match(answered, /\n\nMethods desk answered\. <https:\/\/lab\.example\.edu\/aliquot\/runs\/[0-9a-f-]+\|Record of this answer>$/);
 });
 
 test("a reply in the thread continues it, and stop in the thread stops the run in it", async () => {

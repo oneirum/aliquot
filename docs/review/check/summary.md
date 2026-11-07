@@ -6,19 +6,19 @@ Each row says what Aliquot does toward a control, and what this lab.toml makes t
 
 ## Not met (13)
 
-- **hipaa-164.308(a)(5)(ii)(C)** Log-in monitoring: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([hipaa.md](hipaa.md))
-- **hipaa-164.312(a)(2)(i)** Unique user identification: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([hipaa.md](hipaa.md))
-- **hipaa-164.312(a)(2)(iii)** Automatic logoff: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([hipaa.md](hipaa.md))
-- **800-171r3-03.01.01** Account management: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
-- **800-171r3-03.01.08** Unsuccessful logon attempts: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
-- **800-171r3-03.01.11** Session termination: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
-- **800-171r3-03.05.01** User identification and authentication: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
-- **800-171r3-03.05.03** Multi-factor authentication: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
-- **800-171r3-03.08.03** Media sanitization: lab.toml declares no retention, and this build has no retention sweep. ([nist-800-171.md](nist-800-171.md))
-- **800-171r3-03.13.10** Cryptographic key establishment and management: lab.toml declares no key rotation, and this build stamps every row with one key id. ([nist-800-171.md](nist-800-171.md))
-- **800-171r3-03.14.08** Information management and retention: lab.toml declares no retention, and this build keeps every body. ([nist-800-171.md](nist-800-171.md))
-- **hecvat-data-retention** Data: retention and deletion: lab.toml declares no retention, and this build keeps every body. ([hecvat-answers.md](hecvat-answers.md))
-- **hecvat-auth-sso** Authentication: institutional single sign-on: No sign-on in lab.toml or this build; the web door knows surfaces, not members, and listens on 127.0.0.1. ([hecvat-answers.md](hecvat-answers.md))
+- **hipaa-164.308(a)(5)(ii)(C)** Log-in monitoring: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([hipaa.md](hipaa.md))
+- **hipaa-164.312(a)(2)(i)** Unique user identification: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([hipaa.md](hipaa.md))
+- **hipaa-164.312(a)(2)(iii)** Automatic logoff: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([hipaa.md](hipaa.md))
+- **800-171r3-03.01.01** Account management: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
+- **800-171r3-03.01.08** Unsuccessful logon attempts: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
+- **800-171r3-03.01.11** Session termination: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
+- **800-171r3-03.05.01** User identification and authentication: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
+- **800-171r3-03.05.03** Multi-factor authentication: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([nist-800-171.md](nist-800-171.md))
+- **800-171r3-03.08.03** Media sanitization: lab.toml sets no purge window in [policy.retention], so aliquot retention redacts nothing. ([nist-800-171.md](nist-800-171.md))
+- **800-171r3-03.13.10** Cryptographic key establishment and management: lab.toml names one payload key in [store.keys], so nothing has rotated; aliquot keys rotate and reencrypt move payloads once a second key is named. ([nist-800-171.md](nist-800-171.md))
+- **800-171r3-03.14.08** Information management and retention: lab.toml sets no purge window in [policy.retention], so every body is kept. ([nist-800-171.md](nist-800-171.md))
+- **hecvat-data-retention** Data: retention and deletion: lab.toml sets no purge window in [policy.retention], so every body is kept. ([hecvat-answers.md](hecvat-answers.md))
+- **hecvat-auth-sso** Authentication: institutional single sign-on: No [auth] in lab.toml, so the web door knows surfaces, not members, and listens on 127.0.0.1. ([hecvat-answers.md](hecvat-answers.md))
 
 ## Counts
 

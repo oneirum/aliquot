@@ -2,20 +2,22 @@
  * The wiring every sealed process shares: lab.toml and the environment read once,
  * Postgres, the payload store, the queue, the HTTP choke point, the catalog a
  * draft resolves against, and intake. It builds no model gateway and no tool
- * runner; the sealed binaries add those in boot.ts. It reads the payload key,
+ * runner; the sealed binaries add those in boot.ts. It reads the payload keys,
  * so the studio never loads it (test/boundaries.test.ts).
  */
 
 import { readFile } from "node:fs/promises";
-import { parseAgentDocument, type AgentDocument, type Catalog, type MemberId } from "./agent.ts";
+import { LOOP_CONTRACT, parseAgentDocument, type AgentDocument, type Catalog, type Deployed, type MemberId } from "./agent.ts";
+import type { SnapshotId } from "./hash.ts";
 import { databaseUrlFromEnv, loadConfig, type LabConfig } from "./config.ts";
 import { applySchema, connect, type Db } from "./db.ts";
 import type { IntakeDeps } from "./frontdoor.ts";
 import type { GateDeps } from "./gate.ts";
-import { publishedSnapshots, snapshotFromFixture, type KbSnapshot, type LoadedSnapshot } from "./kb.ts";
-import { publishedAgentFor } from "./publish.ts";
+import { publishedSnapshots, RETRIEVAL_ALGORITHM, snapshotFromFixture, type KbSnapshot, type LoadedSnapshot } from "./kb.ts";
+import { publishedAgentsFor } from "./publish.ts";
 import { createQueue, type Queue } from "./queue.ts";
-import { createPayloadStore, type PayloadStore } from "./record.ts";
+import type { PayloadStore } from "./record.ts";
+import { openPayloadStore } from "./steward.ts";
 import { builtinTools, createHttpEgress, registryOf, type HttpEgress, type RegisteredTool, type ToolRegistry } from "./tools.ts";
 
 export interface SharedCore {
@@ -44,7 +46,7 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
   const config = await loadConfig(configPath);
   const db = connect(databaseUrlFromEnv(config, env));
   await applySchema(db);
-  const store = createPayloadStore(db, { placement: config.store.placement, policy: config.policy, key: payloadKeyFromEnv(config, env), keyId: "k1" });
+  const { store } = await openPayloadStore(db, config, env);
   const fixtureSnapshots = await Promise.all(config.kbFixtures.map(async (f) => snapshotFromFixture(JSON.parse(await readFile(f, "utf8")), store.address)));
   const planted = new Set((options.tools ?? []).map((t) => t.manifest.name));
   const registry = registryOf([...builtinTools().filter((t) => !planted.has(t.manifest.name)), ...(options.tools ?? [])]);
@@ -98,16 +100,22 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     http: createHttpEgress({ policy: config.policy, hosts: config.hosts }),
     catalog,
     agents,
-    intake: { db, store, queue: createQueue(db), gate, catalog, agentFor: async (channel) => (await publishedAgentFor(db, channel)) ?? agents[0], endpointRegion: (id) => endpoints.get(id)?.region ?? null },
+    intake: { db, store, queue: createQueue(db), gate, catalog, agentsFor: async (channel) => { const heads = await publishedAgentsFor(db, channel); return heads.length ? heads : agents; }, endpointRegion: (id) => endpoints.get(id)?.region ?? null },
     fixtureSnapshots,
     registry,
     close: () => db.end(),
   };
 }
 
-/** Reads the one secret the store needs. 64 hex characters, from the env var lab.toml names. */
-export function payloadKeyFromEnv(config: LabConfig, env: NodeJS.ProcessEnv = process.env): Uint8Array {
-  const hex = env[config.store.keyEnv];
-  if (!hex || !/^[0-9a-f]{64}$/i.test(hex)) throw new Error(`${config.store.keyEnv} must hold 64 hex characters (32 bytes) for the payload store`);
-  return Buffer.from(hex, "hex");
+/** What this deployment serves for verifyRunnable outside a worker (a freeze): tools, every snapshot it holds, this build's loop and retrieval. */
+export async function servedNow(core: Pick<SharedCore, "db" | "registry" | "fixtureSnapshots" | "config">): Promise<Deployed> {
+  const stored = await core.db.query<{ id: SnapshotId }>("select id from kb_snapshots");
+  return {
+    tools: core.registry.deployed(),
+    snapshots: new Set([...stored.rows.map((r) => r.id), ...core.fixtureSnapshots.map((s) => s.snapshot.id)]),
+    sandboxImages: new Set(core.config.sandbox ? [core.config.sandbox.digest] : []),
+    loopContract: LOOP_CONTRACT,
+    retrieval: new Set([RETRIEVAL_ALGORITHM]),
+  };
 }
+

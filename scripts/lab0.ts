@@ -24,15 +24,17 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadAudit } from "../packages/core/src/audit.ts";
+import { agentCardSchema } from "../packages/core/src/card.ts";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { loadManifest, tokenize, type KbSnapshot } from "../packages/core/src/kb.ts";
-import { createPayloadStore, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, loadEvents, verifyChain, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { startFakeSlack } from "../test/fake-slack.ts";
 import { APP_ID, APP_SECRET, startFakeTeams, TENANT } from "./fake-teams.ts";
 import { freshDatabase } from "../test/db.ts";
 import { checker, ensurePostgres, get, post, processes, runWithInput, waitFor, waitLine } from "./procs.ts";
+import { askShared, publishRoutedAgents, SHARED, type Sent } from "./routed-lab.ts";
 import { newAnchorKeyPem } from "../packages/core/src/anchor.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 
@@ -66,7 +68,7 @@ const personalToken = randomBytes(32).toString("hex");
 const slackToken = randomBytes(32).toString("hex");
 const teamsToken = randomBytes(32).toString("hex");
 const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken, LAB0_SLACK_TOKEN: slackToken, LAB0_TEAMS_TOKEN: teamsToken, LABH_ANCHOR_KEY_FILE: join(work, "anchor.key") };
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(Buffer.from(payloadKey, "hex")) });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
 function agentFile(name: string, overrides: Record<string, unknown>): string {
@@ -381,6 +383,64 @@ try {
     }
   });
 
+  await check("check R: one shared channel, two published agents: the router sends each question to the agent it fits, asks the member when unsure, runs the pick, and keeps a follow-up with it", async () => {
+    assert.ok(published, "check 1 published a snapshot");
+    const start = hosted.requests;
+    await ps.stopAll();
+    ps.startWorker(cfgHandbook, "CR");
+    const methodsKb = await compile(join(kbDir, "kb-methods.json"));
+    assert.equal(methodsKb.result?.t, "compiled", JSON.stringify(methodsKb));
+    if (methodsKb.result?.t !== "compiled") throw new Error("unreachable");
+    assert.deepEqual(lastJson((await kb(["publish", "--snapshot", methodsKb.result.snapshot])).out), { ok: true });
+    await publishRoutedAgents(root, cfgHandbook, childEnv, "agentlab", [`web:${SHARED}`]);
+    const web = await ps.startWeb(cfgHandbook);
+    const finished = (runId: string) => waitFor(`run.finished for ${runId}`, async () => {
+      const es = await loadEvents(db, runId as RunId);
+      return es.some((e) => e.event.t === "run.finished") ? es : null;
+    }, 20_000);
+    /** The run's answer and its run.started route, after checking that its chain verifies. */
+    const settle = async (runId: string) => {
+      const events = await finished(runId);
+      assert.equal(verifyChain(events), null);
+      const s = events[0]?.event;
+      assert.ok(s?.t === "run.started");
+      return { answer: await answerText(events), route: s.route };
+    };
+    const routedTo = (r: Sent, agentId: string, basis: string) => {
+      assert.equal(r.status, 202, JSON.stringify(r.json));
+      assert.ok(r.json.route?.t === "agent" && r.json.answeredBy?.agentId === agentId && r.json.route.basis === basis, JSON.stringify(r.json));
+      return { runId: r.json.runId!, confidence: (r.json.route as { confidence: number }).confidence };
+    };
+
+    const q05 = prereg.inDocument.find((q) => q.id === "Q05")!;
+    const handbook = routedTo(await askShared(web.base, "R-1", "R-1a", q05.question), "lab0-desk", "score");
+    const handbookRun = await settle(handbook.runId);
+    assert.ok(handbookRun.answer.includes(q05.expected), `the handbook answer does not name ${q05.expected}: ${handbookRun.answer}`);
+    assert.ok(handbookRun.route.t === "agent" && handbookRun.route.agentId === "lab0-desk", "run.started carries the decision");
+    const view = JSON.parse((await get(`${web.base}/runs/${handbook.runId}/view`)).text) as { route: string | null };
+    assert.match(view.route ?? "", /^lab0-desk: the router's top score, confidence [01]\.\d\d \(lab0-methods 0\.\d\d\), router lexical-v1$/);
+
+    const methods = routedTo(await askShared(web.base, "R-2", "R-2a", "How many participants per group for a two-group comparison?"), "lab0-methods", "score");
+    const methodsRun = await settle(methods.runId);
+    assert.ok(methodsRun.answer.includes("methods/sample-size.md"), `the methods answer does not cite methods/sample-size.md: ${methodsRun.answer}`);
+
+    const unsure = "Do skipped diary items count as missing data?";
+    const asked = await askShared(web.base, "R-3", "R-3a", unsure);
+    assert.equal(asked.status, 200, JSON.stringify(asked.json));
+    assert.equal(asked.json.t, "asked-user");
+    assert.deepEqual(asked.json.choices?.map((c) => c.name).sort(), ["Lab handbook", "Methods desk"]);
+    const pickedRun = routedTo(await askShared(web.base, "R-3", "R-3a", unsure, "lab0-methods"), "lab0-methods", "picked");
+    assert.ok((await settle(pickedRun.runId)).answer.includes("methods/missing-data.md"), "the picked agent searched its own KB");
+    const followUp = routedTo(await askShared(web.base, "R-3", "R-3b", "What about the diary nights?"), "lab0-methods", "thread");
+    await settle(followUp.runId);
+    const alone = await askShared(web.base, "R-4", "R-4a", "What about the diary nights?");
+    assert.equal(alone.json.answeredBy?.agentId, "lab0-desk", "the same follow-up in a new thread goes to the handbook, so the thread is what held it");
+    await settle(alone.json.runId!);
+    assert.equal(hosted.requests, start, "routing sent nothing to the hosted endpoint");
+    return `${q05.id} to Lab handbook (confidence ${handbook.confidence}), cites ${q05.expected}; sample size to Methods desk (${methods.confidence}), cites methods/sample-size.md; "${unsure}": asked, choices Lab handbook and Methods desk; pick ran Methods desk; follow-up stayed (basis thread), alone it went to Lab handbook; record page shows the route; hosted requests ${start} -> ${hosted.requests}`;
+  });
+
+
   await check("check T: through a fake Teams and Bot Framework, a channel mention gets the cited answer in its thread with a record link that resolves, and a participant id is refused with zero hosted requests", async () => {
     assert.ok(published, "check 1 published a snapshot");
     await ps.stopAll();
@@ -588,6 +648,28 @@ try {
     for (const [cfg, set] of hashes) if (set.size !== 1) bad.push(`${cfg}: ${set.size} version hashes for one agent and one published snapshot`);
     assert.deepEqual(bad, []);
     return `${runs.length} runs, every chain verified, ${hashes.size} agents with one version hash each`;
+  });
+
+  await check("check Y: aliquot sheet lists exactly lab0's surfaces, endpoints and agents, and aliquot card of the handbook's version matches the card schema", async () => {
+    const sheet = await runWithInput(root, "aliquot.ts", ["--config", cfgHandbook, "sheet"], childEnv, "");
+    assert.equal(sheet.code, 0, sheet.stdout);
+    const rows = (heading: string) =>
+      sheet.stdout.split(`## ${heading}\n`)[1]!.split("\n## ")[0]!.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| ---")).slice(1).map((l) => l.split(" | ").map((c) => c.replace(/^\| | \|$/g, "")));
+    assert.deepEqual(rows("Surfaces").map((r) => [r[0], r[2], r[3]]), [["web", "lab", "up to D3"], ["acp", "zdr", "up to D1"], ["mcp", "zdr", "up to D1"], ["personal", "public", "up to D0"], ["slack", "approved", "up to D2"], ["teams", "institution", "up to D2"]]);
+    assert.deepEqual(rows("Model endpoints").map((r) => [r[0], r[1], r[2]]), [["local", compiler.url, "lab"], ["agentlab", agentModel.url, "lab"], ["hosted", hosted.url, "zdr"]]);
+    assert.deepEqual(rows("Agents").map((r) => [r[0], r[2], r[3]]), [["lab0-desk", "published", "scripted-1 on agentlab"], ["lab0-methods", "published", "scripted-1 on agentlab"], ["lab0-handbook", "lab.toml", "scripted-1 on agentlab"]]);
+    assert.match(sheet.stdout, /No study is registered\./);
+    const run = runs.find((r) => r.label.startsWith("Q") && r.cfg === cfgHandbook)!;
+    const started = (await loadEvents(db, run.runId)).find((e) => e.event.t === "run.started")!.event;
+    assert.ok(started.t === "run.started");
+    const printed = await runWithInput(root, "aliquot.ts", ["--config", cfgHandbook, "card", started.agent], childEnv, "");
+    assert.equal(printed.code, 0, printed.stdout);
+    const card = agentCardSchema.parse(JSON.parse(printed.stdout));
+    assert.deepEqual([card.hash, card.model.endpointId, card.model.placement, card.model.receivesUpTo], [started.agent, "agentlab", "lab", "D3"]);
+    assert.deepEqual(card.tools.map((t) => [t.name, t.deployedNow]), [["kb_search", true], ["kb_read", true]]);
+    assert.deepEqual(card.knowledgeBases.map((k) => [k.kbId, k.snapshot, k.cls]), [["lab0-handbook", published!.id, published!.cls]]);
+    assert.match(card.prompt.systemTextSha256 ?? "", /^[0-9a-f]{64}$/);
+    return `sheet: 6 surfaces, 3 endpoints, 3 agents (two published by check R); card ${card.hash.slice(0, 12)} validates`;
   });
 
   await check("total: the hosted endpoint saw exactly the one control request", async () => {

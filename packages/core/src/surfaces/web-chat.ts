@@ -21,7 +21,8 @@ const FAILED = icon('<path d="M8 2.25l6 10.5H2z" fill="none" stroke="currentColo
 const CLOSE = icon('<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>');
 const SEND = icon('<path d="M8 13V3.5M3.75 7.5L8 3.25l4.25 4.25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>');
 
-export function chatPage(where = ""): string {
+/** me is the signed-in member when sign-on is on: the page asks as them, and seesAll says whether the runs list is everyone's. */
+export function chatPage(where = "", me: { readonly id: string; readonly name: string; readonly seesAll: boolean } | null = null): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -54,7 +55,10 @@ svg { display: block; }
 .side .label { margin: 24px 0 8px; padding: 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .history .row { color: var(--ink-2); }
 .me { flex: none; display: flex; align-items: center; height: calc(72px + env(safe-area-inset-bottom)); padding: 0 16px env(safe-area-inset-bottom); font-size: 14px; line-height: 20px; }
-.me > span:last-child { display: grid; min-width: 0; }
+.me > span:first-child { display: grid; min-width: 0; flex: 1; }
+.me form { flex: none; margin: 0; }
+.me .out { font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0; padding: 12px 0 12px 12px; cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .me .out:hover { color: var(--ink); } }
 .me #who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me .where { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scrim { display: none; }
@@ -122,12 +126,28 @@ body[data-side="closed"] .pane { padding-left: 0; --safe-l: env(safe-area-inset-
 .refusal .title svg { width: 16px; height: 16px; flex: none; }
 .refusal p { margin: 0; line-height: 26px; }
 .refusal p:last-child { color: var(--ink-2); }
+/* The router's question: the agents that could answer, one row each, its name and one line. A row is a 56 px
+   target; its number is the key that picks it, shown only where there is a keyboard. */
+.choose { display: grid; gap: 12px; transition: opacity 200ms var(--ease-out); }
+@starting-style { .choose { opacity: 0; } }
+.choose > p { margin: 0; line-height: 26px; color: var(--ink-2); }
+.choices { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+button.choice { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; width: 100%; min-height: 56px; padding: 9px 15px; border: 1px solid var(--edge); border-radius: 12px; background: none; color: var(--ink); font: 15px/22px var(--sans); text-align: left; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease; }
+button.choice:active { transform: scale(0.98); }
+.choice .name { font-weight: 500; }
+.choice .line { grid-column: 1; font-size: 14px; line-height: 20px; color: var(--muted); }
+.choice kbd { grid-column: 2; grid-row: 1 / span 2; display: none; min-width: 24px; height: 24px; place-items: center; border: 1px solid var(--line); border-radius: 6px; font: 12px/1 var(--mono); color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { button.choice:hover { background: var(--hover); } .choice kbd { display: grid; } }
+.meta .agent { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
 
 .margin { display: grid; gap: 16px; margin-top: 24px; }
 .margin:empty { display: none; }
 .margin p { margin: 0; }
 .cite { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .doc { color: var(--ink-2); font-weight: 500; overflow-wrap: anywhere; }
+a.doc { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) { a.doc:hover { text-decoration-thickness: 2px; } }
+.cite .who { flex-basis: 100%; }
 /* Two 32 px rows: the status and Check, then the hash and Open record. 6 px above and below each 20 px line centres it
    on Check's pill, so the rows step 32 px baseline to baseline; a status that wraps grows downward with Check on its
    first line. */
@@ -188,7 +208,7 @@ button.send:disabled { cursor: default; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
-  .icon, .try, .row, button.verify, .trail a, button.send { transition: none; }
+  .icon, .try, .row, button.verify, .trail a, button.send, button.choice { transition: none; }
 }
 </style>
 </head>
@@ -200,13 +220,13 @@ button.send:disabled { cursor: default; transform: none; }
   </nav>
   <nav class="side-nav" aria-labelledby="records">
     <p class="label" id="records">Records</p>
-    <a class="row" href="/runs">${RUNS}<span>All runs</span></a>
+    <a class="row" href="/runs">${RUNS}<span>${me && !me.seesAll ? "Your runs" : "All runs"}</span></a>
     <a class="row" href="/runs?show=refusals">${REFUSED}<span>Refusals</span></a>
     <a class="row" href="/runs?show=failed">${FAILED}<span>Failed runs</span></a>
   </nav>
   <ol class="history" id="history"></ol>
   <p class="install" id="install">To open Aliquot like an app, choose Add to Home Screen or Install in the browser menu.</p>
-  <div class="me"><span><span id="who"></span>${whereSpan(where)}</span></div>
+  <div class="me"><span><span id="who"></span>${whereSpan(where)}</span>${me ? `<form method="post" action="/logout"><button type="submit" class="out">Sign out</button></form>` : ""}</div>
 </aside>
 <div class="scrim" id="scrim"></div>
 <div class="pane">
@@ -229,7 +249,9 @@ button.send:disabled { cursor: default; transform: none; }
 <script type="module">
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
-const user = params.get("user") || "member-1";
+// Signed in, the door names the member and ignores any user the page sends; without sign-on, the page names one.
+const user = ${me ? JSON.stringify(me.id).replace(/</g, "\\u003c") : 'params.get("user") || "member-1"'};
+const shown = ${me ? JSON.stringify(me.name).replace(/</g, "\\u003c") : "user"};
 const channel = params.get("channel") || undefined;
 // The thread lives in this tab's sessionStorage, so a reload or a visit to a record and back keeps it.
 const KEY = "aliquot.thread." + (channel || "") + "." + user;
@@ -245,7 +267,7 @@ const clock = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-di
 const dayName = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const hex = (h) => h.slice(0, 16).replace(/(.{4})(?!$)/g, "$1 ");
 
-$("who").textContent = user;
+$("who").textContent = shown;
 
 // The sidebar sits beside the thread on a wide screen, where the toggle hides it and the choice is remembered, and
 // slides over it as a drawer on a phone, where it starts closed.
@@ -347,11 +369,23 @@ function refusal(title, text) {
   return b;
 }
 
-// The document the answer names on its Source line.
-function cite(source) {
+// The entry the answer names on its Source line. The door finds it in the snapshots the run's record says it read, and
+// says whether this person may open it; the chip then opens it, or says who can, or that no such entry was read.
+async function cite(source, runId) {
   if (!source) return null;
   const c = el("p", "cite");
-  c.append(el("span", "k", "Source"), el("span", "doc", source));
+  c.append(el("span", "k", "Source"));
+  const q = "/runs/" + runId + "/source";
+  const found = await fetchJson(q + ".json?path=" + encodeURIComponent(source)).catch(() => null);
+  if (found && found.found && found.open) {
+    const a = el("a", "doc", found.title); a.href = q + "?path=" + encodeURIComponent(source); a.title = found.kb + ", " + found.path;
+    c.append(a);
+  } else if (found && found.found) {
+    c.append(el("span", "doc", found.path), el("span", "who", found.cls + ": " + found.who.charAt(0).toUpperCase() + found.who.slice(1) + " can open this entry."));
+  } else {
+    c.append(el("span", "doc", source));
+    if (found) c.append(el("span", "who", "Not an entry this run retrieved."));
+  }
   return c;
 }
 
@@ -468,7 +502,7 @@ function turnOf(t, n) {
   const entry = el("article", "entry"); entry.id = "e" + n;
   const head = el("p", "meta");
   const time = el("time", "", clock(at)); time.dateTime = at;
-  head.append(time, el("span", "who", user));
+  head.append(time, el("span", "who", shown));
   const body = el("div", "body");
   body.append(el("h3", "q", t.q));
   const margin = el("aside", "margin");
@@ -485,21 +519,65 @@ function stepsOf(turn) {
   return steps;
 }
 const done = (steps, node) => { clearInterval(steps.timer); steps.replaceWith(node); };
+// The agent's name beside the time, when the router chose it among several.
+const byline = (turn, name) => { turn.head.querySelector(".agent")?.remove(); turn.head.append(el("span", "agent", name)); };
+
+// The router could not tell which agent the question is for: one row per agent, picked by click, tap, Enter, the
+// arrow keys or its number. The pick sends the same message again, naming that agent.
+function chooser(t, turn) {
+  const box = el("div", "choose"); box.setAttribute("role", "group"); box.setAttribute("aria-label", "Choose who answers");
+  box.append(el("p", "", "More than one agent answers here. Which one should take this?"));
+  const list = el("ul", "choices");
+  const buttons = t.choices.map((c, i) => {
+    const b = el("button", "choice"); b.type = "button";
+    b.append(el("span", "name", c.name), el("span", "line", c.line), el("kbd", "", String(i + 1)));
+    b.onclick = () => pick(t, turn, box, c);
+    const li = el("li"); li.append(b); list.append(li);
+    return b;
+  });
+  box.addEventListener("keydown", (e) => {
+    const at = buttons.indexOf(document.activeElement);
+    const n = Number(e.key);
+    if (n >= 1 && n <= buttons.length) { e.preventDefault(); buttons[n - 1].click(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); buttons[(at + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length].focus(); }
+  });
+  box.append(list);
+  return box;
+}
+function pick(t, turn, box, c) {
+  const steps = stepsOf(turn);
+  box.remove();
+  send(t, turn, steps, c.agentId);
+}
 
 async function ask(text) {
-  const t = { q: text, at: new Date().toISOString() };
+  const t = { q: text, at: new Date().toISOString(), message: state.thread + "-" + (state.n++) };
   state.turns.push(t); save();
   const turn = turnOf(t, state.turns.length), steps = stepsOf(turn);
   turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
+  await send(t, turn, steps);
+}
+async function send(t, turn, steps, agent) {
   const fail = (msg) => { t.error = msg; save(); done(steps, el("p", "err", msg)); };
   let body;
   try {
-    const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: state.thread + "-" + (state.n++), text, user }) });
+    const res = await fetch("/message", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel, thread: state.thread, message: t.message || state.thread + "-" + (state.n++), text: t.q, user, agent }) });
     body = await res.json();
   } catch { return fail("The web door did not answer. Check that it is running, then ask again."); }
-  if (body.t === "refused") { t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); return; }
+  if (body.t === "refused") { delete t.choices; t.notice = body.userFacing; save(); done(steps, refusal("Not sent", body.userFacing)); return; }
+  if (body.t === "asked-user") {
+    t.choices = body.choices; save();
+    const box = chooser(t, turn);
+    done(steps, box);
+    box.querySelector("button").focus({ preventScroll: true });
+    turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });
+    return;
+  }
   if (body.t !== "enqueued") return fail(body.error || "The web door did not take the question, so ask it again.");
-  t.runId = body.runId; save();
+  delete t.choices;
+  t.runId = body.runId;
+  if (body.route && body.route.t === "agent") { t.by = body.answeredBy.name; byline(turn, t.by); }
+  save();
   await follow(turn, steps, body.runId, true);
 }
 
@@ -513,7 +591,7 @@ async function watch(turn, steps, runId, scroll) {
     const finished = events.find((e) => e.event.t === "run.finished");
     if (finished) {
       const started = events.find((e) => e.event.t === "run.started");
-      if (started) turn.head.lastChild.textContent = started.event.trigger.memberId || user;
+      if (started) turn.head.querySelector(".who").textContent = started.event.trigger.memberId === user ? shown : started.event.trigger.memberId || user;
       const replies = await fetchJson("/replies?runId=" + runId);
       const refused = events.find((e) => e.event.t === "egress.refused");
       const withheld = events.filter((e) => e.event.t === "tool.withheld").length;
@@ -530,7 +608,7 @@ async function watch(turn, steps, runId, scroll) {
         done(steps, answer(m ? raw.slice(0, m.index) : raw));
         if (withheld) turn.body.append(el("p", "withheld", withheld + (withheld === 1 ? " tool result was" : " tool results were") + " withheld from the model"));
       }
-      const c = cite(source);
+      const c = await cite(source, runId);
       if (c) turn.margin.append(c);
       turn.margin.append(witness(runId, events));
       turn.entry.dataset.entryDone = "";
@@ -562,9 +640,11 @@ for (const b of document.querySelectorAll(".fresh")) b.addEventListener("click",
 document.documentElement.classList.add("restoring");
 state.turns.forEach((t, i) => {
   const turn = turnOf(t, i + 1);
+  if (t.by) byline(turn, t.by);
   if (t.notice) turn.body.append(refusal("Not sent", t.notice));
   else if (t.error) turn.body.append(el("p", "err", t.error));
   else if (t.runId) follow(turn, stepsOf(turn), t.runId, false);
+  else if (t.choices) turn.body.append(chooser(t, turn));
 });
 save();
 requestAnimationFrame(() => { document.documentElement.classList.remove("restoring"); if (state.turns.length) scrollTo(0, document.body.scrollHeight); });

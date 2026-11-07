@@ -58,7 +58,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { loadManifest } from "../packages/core/src/kb.ts";
-import { createPayloadStore, loadEvents, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, loadEvents, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { freshDatabase } from "../test/db.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { ensurePostgres, processes, waitFor, type Proc } from "./procs.ts";
@@ -131,7 +131,7 @@ const agentModel = await startFakeModel("scripted-1", "search-then-answer");
 const compiler = await startFakeModel("scripted-1", "compile");
 const hosted = await startFakeModel("hosted-2", "answer");
 const payloadKey = randomBytes(32).toString("hex");
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(Buffer.from(payloadKey, "hex")) });
 
 const configPath = join(work, "lab.toml");
 writeFileSync(

@@ -23,7 +23,11 @@ function moved(before: ReviewConfig, after: ReviewConfig): readonly string[] {
   return [...a.keys()].filter((id) => a.get(id) !== b.get(id)).sort();
 }
 
-const TRUST_LAYER: ReviewConfig = { ...parse(checkText), signOn: {}, keyRotation: {}, retention: {} };
+// What sign-on, a second payload key and a purge window look like once lab.toml declares them.
+const signOn = (c: ReviewConfig): ReviewConfig => ({ ...c, signOn: { issuer: "https://idp.example.edu", clientId: "aliquot", clientSecretEnv: "S", sessionSecretEnv: "T", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid"] } });
+const twoKeys = (c: ReviewConfig): ReviewConfig => ({ ...c, store: { ...c.store, keyEnvs: { k1: "LABH_PAYLOAD_KEY", k2: "LABH_PAYLOAD_KEY_2" }, current: "k2" } });
+const purge = (c: ReviewConfig): ReviewConfig => ({ ...c, retention: { purgeDays: { D3: 365 }, keepMinDays: {} } });
+const TRUST_LAYER: ReviewConfig = purge(twoKeys(signOn(parse(checkText))));
 
 test("control ids are unique and every HIPAA section, 800-171r3 family and HECVAT area the brief names has a row", () => {
   const ids = CONTROLS.map((c) => c.id);
@@ -59,7 +63,7 @@ test("moving the payload store off lab placement moves only the rows about where
 
 test("declaring sign-on, key rotation, retention or an anchor flips exactly the rows that read it, with no prose edit", () => {
   const base = parse(checkText);
-  assert.deepEqual(moved(base, { ...base, signOn: {} }), [
+  assert.deepEqual(moved(base, signOn(base)), [
     "800-171r3-03.01.01",
     "800-171r3-03.01.08",
     "800-171r3-03.01.11",
@@ -70,10 +74,10 @@ test("declaring sign-on, key rotation, retention or an anchor flips exactly the 
     "hipaa-164.312(a)(2)(i)",
     "hipaa-164.312(a)(2)(iii)",
   ]);
-  assert.deepEqual(moved(base, { ...base, keyRotation: {} }), ["800-171r3-03.13.10"]);
+  assert.deepEqual(moved(base, twoKeys(base)), ["800-171r3-03.13.10"]);
   const anchored = parse(`${checkText}\n[anchor]\npath = "anchors.jsonl"\n`);
   assert.deepEqual(moved(base, anchored), ["800-171r3-03.03.08"]);
-  assert.deepEqual(moved(base, { ...base, retention: {} }), ["800-171r3-03.08.03", "800-171r3-03.14.08", "hecvat-data-retention"]);
+  assert.deepEqual(moved(base, purge(base)), ["800-171r3-03.08.03", "800-171r3-03.14.08", "hecvat-data-retention"]);
 });
 
 test("the committed pack for deploy/check/lab.toml is what review-pack writes today", async () => {

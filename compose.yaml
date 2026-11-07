@@ -1,7 +1,7 @@
 # The Aliquot stack on one machine: docker compose up -d starts Postgres, the worker, the web door and the
 # production studio. It reads two files you make once with `docker compose run --rm init`: config/lab.toml
 # (what is where) and .env (its secrets). Every port is published on 127.0.0.1 unless .env sets LABH_BIND;
-# put the lab's reverse proxy in front of the web door and the studio. LABH_PAYLOAD_KEY goes to the sealed
+# put the lab's reverse proxy in front of the web door and the studio. LABH_PAYLOAD_KEY (and _2, _3) go to the sealed
 # services only, the worker and the web door; the studio reaches core through the door with ALIQUOT_STUDIO_TOKEN.
 #
 # For development and the checks, docker compose up -d postgres still starts only the database.
@@ -15,6 +15,8 @@ x-app: &app
   environment: &app-env
     DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-labh}@postgres:5432/labh
     LABH_PAYLOAD_KEY: ${LABH_PAYLOAD_KEY:-}
+    LABH_PAYLOAD_KEY_2: ${LABH_PAYLOAD_KEY_2:-}    # a rotated key, or a class's own key ([store.keys] in lab.toml)
+    LABH_PAYLOAD_KEY_3: ${LABH_PAYLOAD_KEY_3:-}
     LABH_CONFIG: /etc/aliquot/lab.toml
   volumes: ["./config:/etc/aliquot:ro"]
 
@@ -37,12 +39,14 @@ services:
 
   web:
     <<: *app
-    command: ["node", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/web.ts", "--config", "/etc/aliquot/lab.toml", "--host", "0.0.0.0", "--port", "3000"]
+    command: ["node", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/web.ts", "--config", "/etc/aliquot/lab.toml", "--host", "0.0.0.0", "--published", "${LABH_BIND:-127.0.0.1}", "--port", "3000"]   # --published: the door refuses an address beyond the machine unless lab.toml has [auth]
     environment:
       <<: *app-env
       ALIQUOT_STUDIO_TOKEN: ${ALIQUOT_STUDIO_TOKEN:-}
       ALIQUOT_SLACK_TOKEN: ${ALIQUOT_SLACK_TOKEN:-}    # the [surfaces.slack] token, so the door knows the Slack door
       ALIQUOT_TEAMS_TOKEN: ${ALIQUOT_TEAMS_TOKEN:-}    # the [surfaces.teams] token, so the door knows the Teams door
+      LABH_SESSION_SECRET: ${LABH_SESSION_SECRET:-}    # signs session cookies when lab.toml has [auth]
+      LABH_OIDC_CLIENT_SECRET: ${LABH_OIDC_CLIENT_SECRET:-}   # [auth] client_secret_env, when the provider gave the door a secret
     ports: ["${LABH_BIND:-127.0.0.1}:${LABH_WEB_PORT:-3000}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]

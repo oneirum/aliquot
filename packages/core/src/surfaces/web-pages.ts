@@ -12,7 +12,7 @@
 import type { RecordView } from "../record-view.ts";
 import { APP_HEAD, THEME } from "./web-app.ts";
 
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 export const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(where)}</span>` : "");
 /** JSON inside a script element: `<` is escaped so no string in it can close the element. */
 const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
@@ -68,7 +68,7 @@ header .where { padding-left: 16px; border-left: 1px solid var(--line); }
 .pill.d3, .pill.r { background: var(--ink); color: var(--bg); }
 `;
 
-const PAGE_CSS = `
+export const PAGE_CSS = `
 .shell { max-width: 960px; margin: 0 auto; padding: 0 20px 64px; }
 .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 36px 0 18px; }
 .top .actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -104,7 +104,8 @@ const SHOWS: Record<RunFilter, (r: RunListRow) => boolean> = {
 };
 
 /** The newest runs, server-rendered: a table needs no script, and the times are localized by a few lines if script runs. */
-export function runsPage(newest: readonly RunListRow[], filter: RunFilter, limit: number, where = ""): string {
+/** mine is the signed-in member's id when the list holds only their runs, and null when it holds every member's. */
+export function runsPage(newest: readonly RunListRow[], filter: RunFilter, limit: number, where = "", mine: string | null = null): string {
   const rows = newest.filter(SHOWS[filter]);
   const tab = (f: RunFilter, text: string) => `<a class="btn" href="/runs${f === "all" ? "" : `?show=${f}`}"${f === filter ? ' aria-current="true"' : ""}>${text} <span class="count">${newest.filter(SHOWS[f]).length}</span></a>`;
   const row = (r: RunListRow) => {
@@ -150,7 +151,7 @@ td.agent { font: 12.5px var(--mono); color: var(--muted); }
 <body>
 <div class="shell">
   ${header("runs", where)}
-  <div class="top"><div><h1>Runs</h1><p class="when">The newest ${limit}, newest first. Open one to read its record.</p></div></div>
+  <div class="top"><div><h1>${mine === null ? "Runs" : "Your runs"}</h1><p class="when">${mine === null ? `The newest ${limit}` : `Your newest ${limit}, as ${escapeHtml(mine)}`}, newest first. Open one to read its record.</p></div></div>
   <nav class="tabs" aria-label="Show">${tab("all", "All")}${tab("refusals", "With a refusal")}${tab("failed", "Failed")}</nav>
   ${rows.length ? `<table><thead><tr><th>Started</th><th>Outcome</th><th class="num">Refused</th><th class="num">Events</th><th>Agent</th></tr></thead><tbody>${rows.map(row).join("")}</tbody></table>` : `<p class="state">${empty}</p>`}
 </div>
@@ -203,6 +204,12 @@ tr.refused td.ev { color: var(--warn-ink); }
 .legend .refused .kind { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--warn-ink); }
 .legend[hidden] { display: none; }
 .only-refused tr:not(.refused) { display: none; }
+h2.sub { font-size: 15px; font-weight: 620; margin: 30px 0 10px; }
+h2.sub[hidden] { display: none; }
+td.detail .hash { font: 12px/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; margin-top: 2px; }
+tr.body td.ev .kind { width: 9px; height: 9px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); border-radius: 50%; }
+tr.body.redacted td.ev .kind { box-shadow: none; background: linear-gradient(to top right, transparent 44%, var(--muted) 44%, var(--muted) 56%, transparent 56%); border-radius: 0; }
+tr.body.unavailable td.detail .st, tr.body.missing td.detail .st { color: var(--warn-ink); }
 @media print { .summary { border-color: #999; } .note { color: #333; } }
 .note { color: var(--muted); font-size: 13px; margin-top: 16px; max-width: 70ch; }
 @media (max-width: 640px) {
@@ -238,7 +245,9 @@ tr.refused td.ev { color: var(--warn-ink); }
   <p class="state" id="state" hidden></p>
   <p class="legend" id="legend" hidden><span class="run"><i class="kind"></i>Run</span><span class="model"><i class="kind"></i>Model call</span><span class="tool"><i class="kind"></i>Tool call</span><span class="refused"><i class="kind"></i>Refused or withheld</span><span>Labels: D0 public, D1 internal, D2 confidential, D3 restricted</span></p>
   <table id="table" hidden><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Label</th><th>Detail</th></tr></thead><tbody id="rows"></tbody></table>
-  <p class="note">Bodies are encrypted in the payload store and never shown here. The label is the data class of the event row; a refusal names the class of what it refused. Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
+  <h2 class="sub" id="bodies-h" hidden>Bodies</h2>
+  <table id="bodies" hidden><thead><tr><th>#</th><th>Size</th><th>Body</th><th>Label</th><th>State and hash</th></tr></thead><tbody id="body-rows"></tbody></table>
+  <p class="note">Bodies are encrypted in the payload store and never shown here. The Bodies table names each one by its hash and says whether it is still stored. The label is the data class of the event row; a refusal names the class of what it refused. Each event's hash covers the one before it, so an edited or deleted event breaks the chain from that point on.</p>
 </div>
 <script type="application/json" id="view">${scriptJson(view)}</script>
 <script type="module">
@@ -295,6 +304,7 @@ if (v.chain.events) {
 const fact = (k, val) => { $("facts").append(el("dt", "", k)); const d = el("dd"); typeof val === "string" ? (d.textContent = val) : d.append(val); $("facts").append(d); };
 fact("Run", v.runId);
 if (v.agent) fact("Agent version", v.agent);
+if (v.route) fact("Routed to", v.route);
 const cm = (ok) => { const m = el("span", "", ok ? "\u2713" : "\u2717"); m.setAttribute("aria-hidden", "true"); return m; };
 if (v.chain.events === 0) fact("Chain", el("span", "chain none", "Nothing to verify yet"));
 else { const c = el("span", "chain " + (v.chain.firstBad === null ? "ok" : "bad")); c.append(cm(v.chain.firstBad === null), v.chain.firstBad === null ? "Verified: chain intact over " + v.chain.events + " events" : "Chain broken at event " + v.chain.firstBad); fact("Chain", c); }
@@ -308,7 +318,61 @@ for (const r of v.rows) {
   tr.append(el("td", "detail", r.detail));
   $("rows").append(tr);
 }
+const day = (at) => new Date(at).toLocaleDateString(undefined, { dateStyle: "medium" });
+const bodyState = (b) =>
+  b.state === "stored" ? "Stored, encrypted under key " + b.keyId
+  : b.state === "unavailable" ? "Unavailable on this server: encrypted under key " + (b.keyId || "(none)") + ", which it does not hold"
+  : b.state === "redacted" ? (b.reason === "retention" && b.at ? "Redacted on " + day(b.at) + " by the lab's retention window" : "Redacted")
+  : "Missing from the payload store";
+const bytes = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
+for (const b of v.bodies) {
+  const tr = el("tr", "body " + b.state);
+  const ev = el("td", "ev"); const k = el("i", "kind"); k.setAttribute("aria-hidden", "true"); ev.append(k, b.t + " " + b.role);
+  tr.append(el("td", "seq", String(b.seq)), el("td", "t", bytes(b.bytes)), ev);
+  const cls = el("td", "cls"); const pill = el("span", "pill " + String(b.cls).toLowerCase(), b.cls); pill.title = CLASS_NAMES[b.cls] || b.cls; cls.append(pill); tr.append(cls);
+  const d = el("td", "detail"); d.append(el("div", "st", bodyState(b)), el("div", "hash", b.hash)); tr.append(d);
+  $("body-rows").append(tr);
+}
+if (v.bodies.length) { $("bodies-h").hidden = false; $("bodies").hidden = false; }
 </script>
+</body>
+</html>`;
+}
+
+/**
+ * What the door shows a browser without a session while sign-on is on: one way in. note is why the person is here again
+ * (signed out, a sign-in that did not finish, an address with no lab account), shown above the button.
+ */
+export function signInPage(where: string, provider: string, next: string, note: string | null = null): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Aliquot</title>
+${APP_HEAD}
+<style>${BASE_CSS}
+.signin { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
+.card { width: 100%; max-width: 400px; }
+.card .wordmark { display: inline-block; margin-bottom: 40px; }
+.card h1 { font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; font-weight: 650; margin: 0 0 10px; }
+.card p { margin: 0 0 24px; color: var(--ink-2); font-size: 15px; }
+.card .note { color: var(--ink); background: var(--quiet); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14.5px; }
+.card .btn.go { width: 100%; justify-content: center; padding: 13px 16px; font-size: 15px; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.card .where { display: block; margin-top: 28px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="signin">
+  <div class="card">
+    <a class="wordmark" href="/">Aliquot</a>
+    <h1>Sign in to ask the lab</h1>
+    ${note ? `<p class="note" role="status">${escapeHtml(note)}</p>` : ""}
+    <p>You sign in with your university account at ${escapeHtml(provider)}. Your questions and their records are yours to read; the lab's PI and data steward can read them too.</p>
+    <a class="btn go" href="/login?next=${escapeHtml(encodeURIComponent(next))}">Sign in</a>
+    ${whereSpan(where)}
+  </div>
+</main>
 </body>
 </html>`;
 }

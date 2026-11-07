@@ -151,7 +151,20 @@ ${`${labName} `.padEnd(36)}# shown at the top of the chat and record pages; unse
 
 [surfaces.web]
 placement = "lab"
-port = ${a.port}                        # the web door, on this machine only until sign-on lands
+port = ${a.port}                        # the web door, on this machine only until [auth] below is filled in
+# base_url = "https://ask.your-lab.edu"   # where members open the door through the lab's reverse proxy; sign-on returns here
+# bind = "0.0.0.0"                        # listen beyond this machine: refused without [auth]
+
+# University sign-on (OpenID Connect: Entra ID, Okta, Keycloak, CILogon). Register the door with research IT as a web
+# application whose redirect URI is base_url + /callback, then fill this in. docs/install.md walks through it.
+# [auth]
+# issuer = "https://login.microsoftonline.com/<tenant-id>/v2.0"
+# client_id = "<application id>"
+# client_secret_env = "LABH_OIDC_CLIENT_SECRET"   # the secret goes in .env, never here
+# session_secret_env = "LABH_SESSION_SECRET"      # signs session cookies; add it to .env: openssl rand -hex 32
+# email_claim = "email"                           # Entra ID sends no email_verified: see docs/install.md
+# id_claim = "sub"                                # the member id every run records; "eppn" on an InCommon campus
+# idle_timeout_minutes = 30                       # an unused session ends (HIPAA automatic logoff)
 
 # aliquot acp for T3 Code and other ACP clients. T3 Code keeps a copy of every thread, so the door shows this surface
 # D1 at most and withholds anything above it with the record link only. The client sets ALIQUOT_SURFACE_TOKEN to this token.

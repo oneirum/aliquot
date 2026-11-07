@@ -41,11 +41,13 @@ const errors = (overrides: Record<string, unknown>) => {
   return r.ok ? [] : r.issues.map((i) => `${i.field}: ${i.message}`);
 };
 
-test("the fixture's version hash is the one it had before bands and native providers existed", () => {
+test("the fixture without bands has no modelsByClass, so its stored version keeps the hash it had before bands existed", () => {
   const r = resolve({});
   assert.ok(r.ok);
   assert.equal("modelsByClass" in r.agent, false);
-  assert.equal(versionHash(r.agent), "d1d1b21ce2857a7052283160d26f2c99bd9252f9b3e742079ffc1ac0efeda970");
+  const { prompt: _frame, ...beforeTheFrame } = r.agent;
+  assert.equal(versionHash(beforeTheFrame), "d1d1b21ce2857a7052283160d26f2c99bd9252f9b3e742079ffc1ac0efeda970", "the stored row, which has no prompt frame");
+  assert.equal(versionHash(r.agent), "98102c54805d6e3b9bc6237274c37107bd4fa4d730f2cbcfe260007ace1bc046", "resolved now, with the prompt frame in the hash");
   const empty = resolve({ modelsByClass: [] });
   assert.ok(empty.ok);
   assert.equal(versionHash(empty.agent), versionHash(r.agent), "an empty band list is the same version");
