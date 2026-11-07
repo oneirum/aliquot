@@ -21,7 +21,7 @@
  * the report with their units.
  */
 
-import { listingOf, parseAgentDocument, resolveAgent, versionHash, type AgentDocument, type AgentId, type Catalog, type Issue, type MemberId } from "./agent.ts";
+import { AgentUnavailable, listingOf, parseAgentDocument, resolveAgent, versionHash, type AgentDocument, type AgentId, type Catalog, type Issue, type MemberId, type ResolvedAgent } from "./agent.ts";
 import { appendAuditInTx } from "./audit.ts";
 import { join, type DataClass } from "./dataclass.ts";
 import type { Db, Tx } from "./db.ts";
@@ -192,6 +192,16 @@ export async function publishedAgentFor(db: Db, channel: ChannelRef): Promise<Ag
   const parsed = parseAgentDocument(row.rows[0].document);
   if (!parsed.ok) throw new Error(`agent_heads holds a document that no longer parses: ${parsed.issues.map((i) => `${i.field}: ${i.message}`).join("; ")}`);
   return parsed.doc;
+}
+
+/** An agent_versions row as the agent it names: present, hashing to its own id, and in this build's schema. */
+export async function loadVersion(db: Db, hash: AgentVersionHash): Promise<ResolvedAgent> {
+  const row = await db.query<{ body: ResolvedAgent }>("select body from agent_versions where hash = $1", [hash]);
+  const body = row.rows[0]?.body;
+  if (!body) throw new AgentUnavailable(hash, "missing");
+  if (versionHash(body) !== hash) throw new AgentUnavailable(hash, "hash-mismatch");
+  if (body.schema !== 2) throw new AgentUnavailable(hash, "schema");
+  return body;
 }
 
 export async function unpublish(_agentId: AgentId, _actor: MemberId, _reason: string): Promise<void> {

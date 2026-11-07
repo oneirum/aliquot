@@ -611,16 +611,3 @@ export function verifyRunnable(agent: ResolvedAgent, deployed: Deployed): Unrunn
   }
   return out;
 }
-
-/** Agent card: every ResolvedAgent field, the hash, eval results, the listing at freeze time, and the validity sentence. */
-export interface AgentCard {
-  readonly hash: AgentVersionHash;
-  readonly agent: ResolvedAgent;
-  readonly listingAtFreeze: AgentListing;
-  readonly evals: readonly { readonly question: string; readonly passed: boolean; readonly runId: string }[];
-  readonly markdown: string;
-}
-
-export function renderAgentCard(_hash: AgentVersionHash, _agent: ResolvedAgent, _listing: AgentListing, _evals: AgentCard["evals"]): AgentCard {
-  throw new Error("agent cards arrive with studies");
-}

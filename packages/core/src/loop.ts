@@ -211,7 +211,7 @@ export async function drive(job: LeasedJob, journal: RunJournal, deps: LoopDeps)
   try {
     if (journal.events().length === 0) {
       const p = parseRunJobPayload(job.payload);
-      await journal.append({ t: "run.started", agent: p.agent, kind: p.kind, trigger: p.trigger, thread: p.thread, surface: p.surface, threadId: p.threadId, input: p.input, history: p.history, route: { t: "direct" }, studyId: p.studyId });
+      await journal.append({ t: "run.started", agent: p.agent, kind: p.kind, trigger: p.trigger, thread: p.thread, surface: p.surface, threadId: p.threadId, input: p.input, history: p.history, route: p.studyId ? { t: "pinned", studyId: p.studyId } : { t: "direct" }, studyId: p.studyId });
     }
     const start = fold(journal.events());
     const known = deps.surfaces(start.surface);

@@ -5,7 +5,8 @@
  * and the lease fence against a real process.
  */
 
-import { AgentUnavailable, LOOP_CONTRACT, versionHash, type Deployed, type ResolvedAgent } from "./agent.ts";
+import { LOOP_CONTRACT, type Deployed, type ResolvedAgent } from "./agent.ts";
+import { loadVersion } from "./publish.ts";
 import { RETRIEVAL_ALGORITHM } from "./kb.ts";
 import { boot, type Core } from "./boot.ts";
 import { runCompileJob } from "./kb-compile.ts";
@@ -119,14 +120,7 @@ export async function workOn(core: Core, opts: WorkerOptions): Promise<void> {
   });
   await listener.query("listen run_stop");
 
-  const loadAgent = async (hash: AgentVersionHash): Promise<ResolvedAgent> => {
-    const row = await core.db.query<{ body: ResolvedAgent }>("select body from agent_versions where hash = $1", [hash]);
-    const body = row.rows[0]?.body;
-    if (!body) throw new AgentUnavailable(hash, "missing");
-    if (versionHash(body) !== hash) throw new AgentUnavailable(hash, "hash-mismatch");
-    if (body.schema !== 2) throw new AgentUnavailable(hash, "schema");
-    return body;
-  };
+  const loadAgent = (hash: AgentVersionHash): Promise<ResolvedAgent> => loadVersion(core.db, hash);
   /** Endpoint id -> which of a band agent's targets (every band, and model above them) it serves now, for verifyRunnable. */
   const servedBands = async (targets: readonly ModelTarget[]): Promise<Map<string, Set<string>>> => {
     const served = new Map<string, Set<string>>();

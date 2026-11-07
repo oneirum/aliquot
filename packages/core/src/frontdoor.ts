@@ -6,7 +6,7 @@
  * intake() order, all in one place:
  *   1. gate                         -> refuse with a user-facing message, or admit with class
  *   2. thread has an active background run -> write a steer inbox item, done      (later unit)
- *   3. channel bound to a study     -> frozen hash (router off)                   (later unit)
+ *   3. channel bound to a study     -> frozen hash (router off): admitPinned, study.ts pinFor
  *      else watched-channel post    -> shouldReply, maybe drop                    (later unit)
  *      else                         -> route(), resolve head AgentDocument -> hash (upsert)
  *                                      this build: the head bound to the channel, else the fixture; no router
@@ -17,10 +17,12 @@ import { z } from "zod";
 import { resolveAgent, versionHash, type AgentDocument, type Catalog } from "./agent.ts";
 import { decideEgress, type DataClass, type EgressPolicy, type Labelled, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
-import { gate, type GateDeps, type InboundMessage } from "./gate.ts";
+import { gate, type GateDeps, type GateResult, type InboundMessage } from "./gate.ts";
 import type { AgentVersionHash } from "./hash.ts";
+import { loadVersion } from "./publish.ts";
 import { ENGINES, type Engine, type Queue } from "./queue.ts";
 import type { PayloadRef, PayloadStore, RunId, ThreadKey, Trigger } from "./record.ts";
+import { pinFor } from "./study.ts";
 
 export type IntakeResult =
   | { readonly t: "enqueued"; readonly runId: RunId; readonly agent: AgentVersionHash; readonly duplicate: boolean }
@@ -92,10 +94,24 @@ export interface IntakeDeps {
 }
 
 export async function intake(msg: InboundMessage, deps: IntakeDeps): Promise<IntakeResult> {
+  const key = `msg:${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}:${msg.messageId}`;
+  const trigger = (member: string): Trigger => ({ t: "message", surface: msg.channel.surface, messageId: msg.messageId, memberId: member });
+  const pinned = await pinFor(deps.db, msg.channel);
+  if (pinned) return admitPinned(msg, pinned, key, trigger, deps);
   const doc = await deps.agentFor(msg.channel);
   if (!doc) return { t: "refused", userFacing: "No agent is published for this channel." };
-  const key = `msg:${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}:${msg.messageId}`;
-  return admit(msg, doc, key, (member) => ({ t: "message", surface: msg.channel.surface, messageId: msg.messageId, memberId: member }), deps);
+  return admit(msg, doc, key, trigger, deps);
+}
+
+/** Step 3 for a study channel: the frozen hash runs as it is, never resolved again and never routed. */
+async function admitPinned(msg: InboundMessage, pinned: NonNullable<Awaited<ReturnType<typeof pinFor>>>, key: string, trigger: (member: string) => Trigger, deps: IntakeDeps): Promise<IntakeResult> {
+  const [only, ...more] = pinned.freezes;
+  if (!only) return { t: "refused", userFacing: `This channel belongs to study ${pinned.study.id}, which has no frozen agent. Ask the study owner, ${pinned.study.owner}.` };
+  if (more.length) return { t: "asked-user", choices: pinned.freezes.map((f) => f.agentId) };
+  const admitted = await gate(msg, deps.gate);
+  if (admitted.t === "refuse") return { t: "refused", userFacing: admitted.userFacing };
+  const agent = await loadVersion(deps.db, only.hash);
+  return enqueueRun(msg, admitted, { hash: only.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: pinned.study.id }, key, trigger, deps);
 }
 
 /** A studio test message: the same gate, resolution and queue as intake, on a draft that is not published. */
@@ -111,19 +127,31 @@ async function admit(msg: InboundMessage, doc: AgentDocument, key: string, trigg
   if (!resolved.ok) return { t: "refused", userFacing: `The agent cannot run: ${resolved.issues.map((i) => i.message).join("; ")}` };
   const hash = versionHash(resolved.agent);
   await deps.db.query("insert into agent_versions (hash, agent_id, body) values ($1, $2, $3) on conflict (hash) do nothing", [hash, resolved.agent.agentId, JSON.stringify(resolved.agent)]);
+  return enqueueRun(msg, admitted, { hash, engine: resolved.agent.agentCli ? "agent-cli" : "chat", kind: doc.kind, studyId: null }, key, trigger, deps);
+}
+
+async function enqueueRun(
+  msg: InboundMessage,
+  admitted: Extract<GateResult, { t: "admit" }>,
+  run: { readonly hash: AgentVersionHash; readonly engine: Engine; readonly kind: RunJobPayload["kind"]; readonly studyId: string | null },
+  key: string,
+  trigger: (member: string) => Trigger,
+  deps: IntakeDeps,
+): Promise<IntakeResult> {
+  const hash = run.hash;
   const input = await deps.store.put(admitted.text);
   const thread = `${msg.channel.surface}:${msg.channel.channelId}:${msg.threadId}` as ThreadKey;
   const payload: RunJobPayload = {
     agent: hash,
-    engine: resolved.agent.agentCli ? "agent-cli" : "chat",
-    kind: doc.kind,
+    engine: run.engine,
+    kind: run.kind,
     trigger: trigger(admitted.member),
     thread,
     surface: msg.channel.surface,
     threadId: msg.threadId,
     input,
     history: [],
-    studyId: null,
+    studyId: run.studyId,
   };
   const job = await deps.queue.enqueue({ kind: "run", key }, thread, payload);
   return { t: "enqueued", runId: job.id as RunId, agent: hash, duplicate: !job.created };

@@ -19,6 +19,7 @@ import { slackDoor } from "../src/surfaces/slack.ts";
 import { checkApiBase, runSocketMode, slackApi, SLACK_API } from "../src/surfaces/slack-wire.ts";
 import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
 import { rank } from "../src/dataclass.ts";
+import { STUDY_USAGE, studyCommands } from "./study-cli.ts";
 
 const denied = requireProcessPermission();
 if (denied) {
@@ -55,6 +56,7 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       sample ids, and write .env with new secrets when it does not exist yet. --force
                       replaces lab.toml, never .env. --yes takes every default and needs --sample.
                       Run it as pnpm aliquot:init, which allows writes to config/lab.toml and .env only.
+${STUDY_USAGE}
 
 Exit codes: 0 ok, 1 no such run, init found no pattern that passes, or ask was refused or got no answer,
 2 usage or setup problem (ask: the door could not be reached), 3 a hash chain is broken.
@@ -83,6 +85,13 @@ try {
       thread: { type: "string" },
       ceiling: { type: "string" },
       timeout: { type: "string", default: "180" },
+      as: { type: "string" },
+      title: { type: "string" },
+      floor: { type: "string" },
+      irb: { type: "string" },
+      prereg: { type: "string" },
+      note: { type: "string" },
+      reason: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -102,6 +111,10 @@ if (command === "init") {
 }
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 if (command === "slack") process.exit(await slack(positionals.slice(1)));
+if (command === "study" || command === "card" || command === "sheet") {
+  const { as, title, floor, irb, prereg, note, reason } = values;
+  process.exit(await studyCommands(command, positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, as, title, floor, irb, prereg, note, reason }));
+}
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0;
 const valid =

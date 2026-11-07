@@ -7,12 +7,13 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { parseAgentDocument, type AgentDocument, type Catalog, type MemberId } from "./agent.ts";
+import { LOOP_CONTRACT, parseAgentDocument, type AgentDocument, type Catalog, type Deployed, type MemberId } from "./agent.ts";
+import type { SnapshotId } from "./hash.ts";
 import { databaseUrlFromEnv, loadConfig, type LabConfig } from "./config.ts";
 import { applySchema, connect, type Db } from "./db.ts";
 import type { IntakeDeps } from "./frontdoor.ts";
 import type { GateDeps } from "./gate.ts";
-import { publishedSnapshots, snapshotFromFixture, type KbSnapshot, type LoadedSnapshot } from "./kb.ts";
+import { publishedSnapshots, RETRIEVAL_ALGORITHM, snapshotFromFixture, type KbSnapshot, type LoadedSnapshot } from "./kb.ts";
 import { publishedAgentFor } from "./publish.ts";
 import { createQueue, type Queue } from "./queue.ts";
 import { createPayloadStore, type PayloadStore } from "./record.ts";
@@ -101,6 +102,18 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     fixtureSnapshots,
     registry,
     close: () => db.end(),
+  };
+}
+
+/** What this deployment serves for verifyRunnable outside a worker (a freeze): tools, every snapshot it holds, this build's loop and retrieval. */
+export async function servedNow(core: Pick<SharedCore, "db" | "registry" | "fixtureSnapshots" | "config">): Promise<Deployed> {
+  const stored = await core.db.query<{ id: SnapshotId }>("select id from kb_snapshots");
+  return {
+    tools: core.registry.deployed(),
+    snapshots: new Set([...stored.rows.map((r) => r.id), ...core.fixtureSnapshots.map((s) => s.snapshot.id)]),
+    sandboxImages: new Set(core.config.sandbox ? [core.config.sandbox.digest] : []),
+    loopContract: LOOP_CONTRACT,
+    retrieval: new Set([RETRIEVAL_ALGORITHM]),
   };
 }
 

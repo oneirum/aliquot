@@ -30,7 +30,12 @@ export type AuditEvent =
   | { readonly t: "kb.compile-failed"; readonly job: string; readonly kbId: string; readonly reason: string; readonly refusal: EgressRefusal | null }
   | { readonly t: "kb.published"; readonly kbId: string; readonly snapshot: SnapshotId; readonly override?: { readonly note: string; readonly gaps: readonly string[] } }
   | { readonly t: "kb.publish-refused"; readonly kbId: string; readonly snapshot: SnapshotId; readonly gaps: readonly string[] }
-  | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string };
+  | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string }
+  | { readonly t: "study.created"; readonly studyId: string; readonly title: string; readonly owner: string; readonly irbProtocol: string | null; readonly dataFloor: DataClass }
+  | { readonly t: "study.channel-bound"; readonly studyId: string; readonly surface: string; readonly channelId: string }
+  | { readonly t: "agent.frozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly note: string }
+  /** A protocol deviation: the study owner ended a freeze before the study did, with the reason. */
+  | { readonly t: "agent.unfrozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly reason: string };
 
 export interface AuditRow {
   readonly seq: number;
