@@ -12,7 +12,7 @@ import { connect, type Db } from "../src/db.ts";
 import { askAnswers, defaultAnswers, InitAborted, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
 import { loadEvents, recentRunIds, type RunId } from "../src/record.ts";
 import { formatRecordView, formatRunList, recordView, recordViewOf } from "../src/record-view.ts";
-import { brokenChains, heldKeyIds, keyStatus, openPayloadStore, pastRetention, recordRotation, reencryptAll, sweepRetention } from "../src/steward.ts";
+import { brokenChains, heldKeyIds, keyStatus, openPayloadStore, pastRetention, recordRotation, reencryptAll, retentionWindows, sweepRetention } from "../src/steward.ts";
 import { DEFAULT_ALLOWANCE, PERMISSION_FLAGS, requireProcessPermission, sealNetwork } from "../src/seal.ts";
 import { acpAgent } from "../src/acp.ts";
 import { mcpServer } from "../src/mcp.ts";
@@ -42,7 +42,7 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       move every body to its class's key, in batches (default 500); safe to stop and run again
   keys env            one line per key id: id, env var, bodies (scripts/backup.sh reads it)
   retention --dry-run | --apply [--as-of YYYY-MM-DD]
-                      list, or redact, the run bodies past [policy] retention_days. A redacted body keeps its
+                      list, or redact, the run bodies past [policy.retention] purge_payload_after_days. A redacted body keeps its
                       hash, class and size, so every chain still verifies; --apply checks them after
   ask [--door url] [--user id] [--thread id] [--ceiling D0..D3] [--timeout s] <question... | ->
                       ask a question through the web door, as the chat page does; - reads it from stdin.
@@ -330,12 +330,16 @@ async function steward(db: Db): Promise<number> {
   };
   const asOf = values["as-of"] ? new Date(values["as-of"]) : new Date();
   if (Number.isNaN(asOf.getTime())) throw new Setup(`--as-of ${values["as-of"]} is not a date (use YYYY-MM-DD)`);
-  const days = config.retentionDays;
+  const retention = config.retention;
+  const windows = retentionWindows(retention);
   const windowLine = () => {
-    const set = Object.entries(days);
-    if (!set.length) return "retention: no window is set ([policy] retention_days), so every body is kept";
-    const same = set.length === 5 && new Set(set.map(([, d]) => d)).size === 1;
-    return `retention: ${same ? `${set[0]![1]} days for every class` : set.map(([cls, d]) => `${cls} ${d} days`).join(", ")} after the last run that names a body${values["as-of"] ? `, judged as of ${asOf.toISOString().slice(0, 10)}` : ""}`;
+    const per = (m: Readonly<Partial<Record<string, number>>>) => {
+      const set = Object.entries(m);
+      return set.length === 5 && new Set(set.map(([, d]) => d)).size === 1 ? `${set[0]![1]} days for every class` : set.map(([cls, d]) => `${cls} ${d} days`).join(", ");
+    };
+    const floor = Object.keys(retention.keepMinDays).length ? `; floor (keep_min_days) ${per(retention.keepMinDays)}, and events and chains are never deleted` : "";
+    if (!Object.keys(windows).length) return `retention: no purge is set ([policy.retention] purge_payload_after_days), so every body is kept${floor}`;
+    return `retention: bodies purge ${per(windows)} after the last run that names them${floor}${values["as-of"] ? `; judged as of ${asOf.toISOString().slice(0, 10)}` : ""}`;
   };
   const held = heldKeyIds(config);
   if (command === "keys" && runId === "env") {
@@ -344,8 +348,8 @@ async function steward(db: Db): Promise<number> {
   }
   if (command === "keys" && runId === "status") {
     const keys = await keyStatus(db, config, held);
-    const past = await pastRetention(db, days, asOf);
-    if (values.json) return say(JSON.stringify({ keys, retention: { days, past: past.length, runs: new Set(past.flatMap((p) => p.runs)).size } }, null, 2)), 0;
+    const past = await pastRetention(db, retention, asOf);
+    if (values.json) return say(JSON.stringify({ keys, retention: { ...retention, past: past.length, runs: new Set(past.flatMap((p) => p.runs)).size } }, null, 2)), 0;
     const w = Math.max(3, ...keys.map((k) => k.id.length));
     const e = Math.max(3, ...keys.map((k) => (k.env ?? "(not in lab.toml)").length));
     say(`${"key".padEnd(w)}  ${"env".padEnd(e)}  held  ${"writes".padEnd(10)}  bodies  to move`);
@@ -355,7 +359,7 @@ async function steward(db: Db): Promise<number> {
     say(toMove ? `${toMove} ${toMove === 1 ? "body waits" : "bodies wait"} for aliquot keys reencrypt, which moves each to its class's key.` : "Every body is under its class's key.");
     for (const k of keys.filter((k) => !k.held && k.stored)) say(`${k.id} holds ${k.stored} ${k.stored === 1 ? "body" : "bodies"} this process cannot read: ${k.env ? `${k.env} is not set here` : "lab.toml no longer names it"}.`);
     say(windowLine());
-    if (Object.keys(days).length) say(past.length ? `${past.length} ${past.length === 1 ? "body" : "bodies"} from ${new Set(past.flatMap((p) => p.runs)).size} runs ${past.length === 1 ? "is" : "are"} past the window; aliquot retention --dry-run lists them.` : "Nothing is past the window.");
+    if (Object.keys(windows).length) say(past.length ? `${past.length} ${past.length === 1 ? "body" : "bodies"} from ${new Set(past.flatMap((p) => p.runs)).size} runs ${past.length === 1 ? "is" : "are"} past the window; aliquot retention --dry-run lists them.` : "Nothing is past the window.");
     return 0;
   }
   if (command === "keys" && runId === "rotate") {
@@ -385,14 +389,14 @@ async function steward(db: Db): Promise<number> {
   if (command === "retention") {
     say(windowLine());
     if (values.apply) {
-      const { redacted, audit } = await sweepRetention(db, days, asOf, actor);
+      const { redacted, replies, audit } = await sweepRetention(db, retention, asOf, actor);
       const runs = [...new Set(redacted.flatMap((c) => c.runs))] as RunId[];
-      say(`Redacted ${redacted.length} ${redacted.length === 1 ? "body" : "bodies"} (${redacted.reduce((n, c) => n + c.bytes, 0)} bytes) from ${runs.length} runs. Each keeps its hash, class and size; audit event ${audit.seq}.`);
+      say(`Redacted ${redacted.length} ${redacted.length === 1 ? "body" : "bodies"} (${redacted.reduce((n, c) => n + c.bytes, 0)} bytes) from ${runs.length} runs, and cleared ${replies} door ${replies === 1 ? "reply" : "replies"}. Each body keeps its hash, class and size; audit event ${audit.seq}.`);
       const broken = await brokenChains(db, runs);
       say(broken.length ? `CHAIN BROKEN in ${broken.join(", ")}` : `Every chain still verifies: ${runs.length} runs checked.`);
       return broken.length ? 3 : 0;
     }
-    const past = await pastRetention(db, days, asOf);
+    const past = await pastRetention(db, retention, asOf);
     if (!past.length) return say("Nothing is past the window."), 0;
     const byRun = new Map<string, typeof past>();
     for (const c of past) for (const r of c.runs) byRun.set(r, [...(byRun.get(r) ?? []), c]);

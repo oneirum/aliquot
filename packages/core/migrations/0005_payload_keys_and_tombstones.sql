@@ -15,6 +15,10 @@ create table payload_keys (
 -- and why the body went. Both are written with the redaction, never after.
 alter table payloads add column redacted_at timestamptz, add column redaction_reason text;
 
+-- The door keeps a copy of each reply for the chat page. The retention sweep
+-- clears that text with the run's answer and marks when.
+alter table web_messages add column redacted_at timestamptz;
+
 create or replace function payloads_guard() returns trigger language plpgsql as $$
 begin
   if tg_op = 'DELETE' then

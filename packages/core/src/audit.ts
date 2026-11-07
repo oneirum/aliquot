@@ -34,7 +34,7 @@ export type AuditEvent =
   /** A data steward's `aliquot keys rotate`, `aliquot keys reencrypt` and `aliquot retention --apply` (steward.ts). */
   | { readonly t: "keys.rotated"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly held: readonly string[] }
   | { readonly t: "keys.reencrypted"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly rows: number }
-  | { readonly t: "retention.swept"; readonly days: Readonly<Partial<Record<DataClass, number>>>; readonly asOf: string; readonly redacted: number; readonly bytes: number; readonly runs: number };
+  | { readonly t: "retention.swept"; readonly purgeDays: Readonly<Partial<Record<DataClass, number>>>; readonly keepMinDays: Readonly<Partial<Record<DataClass, number>>>; readonly asOf: string; readonly redacted: number; readonly bytes: number; readonly runs: number; readonly replies: number };
 
 export interface AuditRow {
   readonly seq: number;

@@ -16,6 +16,7 @@ import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
 
 const placement = z.enum(PLACEMENTS);
 const KEY_ID = /^[a-z0-9][a-z0-9_-]*$/;
+const retentionDays = z.object({ keep_min_days: z.number().int().min(0).optional(), purge_payload_after_days: z.number().int().positive().optional() }).strict();
 
 const IMAGE_BY_DIGEST = /^(?:[a-z0-9][a-z0-9._\/:-]*@)?sha256:([0-9a-f]{64})$/;
 
@@ -161,7 +162,7 @@ const schema = z.object({
     .object({
       review_confidential: z.enum(["refuse", "lab-only"]).default("refuse"),
       participant_id_patterns: z.array(z.string()).default([]),
-      retention_days: z.union([z.number().int().positive(), z.partialRecord(z.enum(DATA_CLASSES), z.number().int().positive())]).optional(),
+      retention: z.object({ ...retentionDays.shape, ...Object.fromEntries(DATA_CLASSES.map((cls) => [cls, retentionDays.optional()])) }).strict().optional(),
     })
     .default({ review_confidential: "refuse", participant_id_patterns: [] }),
   agents: z.object({ fixtures: z.array(z.string()).default([]) }).default({ fixtures: [] }),
@@ -215,8 +216,34 @@ export interface LabConfig {
   readonly contactEmailEnv: string | null;
   /** [lab] name: what the web pages show as the lab's name, or null to show the machine's hostname. */
   readonly labName: string | null;
-  /** [policy] retention_days by class: how long a run's payload bodies are kept after the last run that names them. A class not listed is kept. */
-  readonly retentionDays: Readonly<Partial<Record<DataClass, number>>>;
+  readonly retention: Retention;
+}
+
+/**
+ * [policy.retention], resolved per class: a class's own table, else the lab-wide keys. purgeDays: a run's bodies are
+ * redacted this many days after the last run that names them; a class without one is kept. keepMinDays: the floor the
+ * lab's records rule sets (for example seven years after close-out). Events, chains and tombstones are never deleted,
+ * so the record always meets it; no body is redacted younger than it, and a purge under it is refused at startup.
+ */
+export interface Retention {
+  readonly purgeDays: Readonly<Partial<Record<DataClass, number>>>;
+  readonly keepMinDays: Readonly<Partial<Record<DataClass, number>>>;
+}
+
+type RetentionTable = { keep_min_days?: number | undefined; purge_payload_after_days?: number | undefined };
+
+function retentionOf(t: (RetentionTable & Partial<Record<DataClass, RetentionTable | undefined>>) | undefined): Retention {
+  const purgeDays: Partial<Record<DataClass, number>> = {};
+  const keepMinDays: Partial<Record<DataClass, number>> = {};
+  for (const cls of DATA_CLASSES) {
+    const purge = t?.[cls]?.purge_payload_after_days ?? t?.purge_payload_after_days;
+    const keep = t?.[cls]?.keep_min_days ?? t?.keep_min_days;
+    if (purge !== undefined && keep !== undefined && purge < keep)
+      throw new Error(`lab.toml: [policy.retention] purges ${cls} bodies after ${purge} days, under its keep_min_days of ${keep}: the purge would delete what the floor keeps. Raise purge_payload_after_days, or set a lower keep_min_days in [policy.retention.${cls}] if the lab's rules allow it`);
+    if (purge !== undefined) purgeDays[cls] = purge;
+    if (keep !== undefined) keepMinDays[cls] = keep;
+  }
+  return { purgeDays, keepMinDays };
 }
 
 /**
@@ -321,7 +348,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
-    retentionDays: typeof c.policy.retention_days === "number" ? Object.fromEntries(DATA_CLASSES.map((cls) => [cls, c.policy.retention_days])) : (c.policy.retention_days ?? {}),
+    retention: retentionOf(c.policy.retention as Parameters<typeof retentionOf>[0]),
   };
 }
 

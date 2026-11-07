@@ -143,10 +143,17 @@ contact_email_env = "LABH_CONTACT_EMAIL"
 [policy]
 review_confidential = "refuse"           # or "lab-only"
 participant_id_patterns = ["\\bP-\\d{5}\\b"]   # anything matching is D3
-# Retention: aliquot retention --apply redacts a run's payload bodies this many days after the last run that names
-# them. Events keep their hashes, so every record still verifies. One number for every class, or days per class; a
-# class not listed is kept, for example { D3 = 90, D2 = 365 }. Without it nothing is redacted.
-# retention_days = 365
+# Retention: aliquot retention --apply redacts a run's payload bodies purge_payload_after_days after the last run that
+# names them, and clears the door's copy of the reply. keep_min_days is the floor the lab's records rules set (for
+# example seven years after close-out). Events, chains and tombstones are never deleted, so every record still
+# verifies; no body is redacted under the floor, and a purge under it is refused at startup. A class's own table
+# overrides the lab-wide keys. A class with no purge is kept, and without this table nothing is redacted.
+# [policy.retention]
+# keep_min_days = 2555
+# purge_payload_after_days = 2555
+# [policy.retention.D3]
+# keep_min_days = 1095
+# purge_payload_after_days = 1095
 
 # An agent published in the studio answers in the channels it names (surface:channel, for example web:lab).
 # Until the router arrives, the fixture agent answers in every other channel. Knowledge bases come from fixtures.

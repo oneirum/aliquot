@@ -82,8 +82,8 @@ export interface WebReply {
 }
 
 export async function readReplies(db: Db, runId: RunId): Promise<WebReply[]> {
-  const rows = await db.query<{ kind: WebReply["kind"]; text: string; at: Date }>("select kind, text, at from web_messages where run_id = $1 order by id", [runId]);
-  return rows.rows.map((r) => ({ kind: r.kind, text: r.text, at: r.at.toISOString() }));
+  const rows = await db.query<{ kind: WebReply["kind"]; text: string; at: Date; redacted_at: Date | null }>("select kind, text, at, redacted_at from web_messages where run_id = $1 order by id", [runId]);
+  return rows.rows.map((r) => ({ kind: r.kind, text: r.redacted_at ? `Redacted on ${r.redacted_at.toISOString().slice(0, 10)} by the lab's retention window.` : r.text, at: r.at.toISOString() }));
 }
 
 /** How many runs the runs page lists. */

@@ -147,13 +147,18 @@ test("each [store] key rule refuses with one line", () => {
   refuse('currrent = "k1"\n', /currrent/);
 });
 
-test("[policy] retention_days is one number for every class or days per class; without it nothing is redacted", () => {
-  const days = (toml: string) => parseConfig(`${base}[policy]\n${toml}`, "/l/lab.toml").retentionDays;
-  assert.deepEqual(days(""), {});
-  assert.deepEqual(days("retention_days = 365\n"), { D0: 365, D1: 365, D2: 365, D3: 365, R: 365 });
-  assert.deepEqual(days("retention_days = { D3 = 90, D2 = 365 }\n"), { D3: 90, D2: 365 });
-  assert.throws(() => days("retention_days = 0\n"));
-  assert.throws(() => days("retention_days = { D9 = 1 }\n"));
+test("[policy.retention] sets a floor and a purge per class, a class table over the lab-wide keys, and refuses a purge under the floor", () => {
+  const retention = (toml: string) => parseConfig(`${base}[policy.retention]\n${toml}`, "/l/lab.toml").retention;
+  assert.deepEqual(parseConfig(base, "/l/lab.toml").retention, { purgeDays: {}, keepMinDays: {} });
+  const all = { D0: 2555, D1: 2555, D2: 2555, D3: 2555, R: 2555 };
+  assert.deepEqual(retention("keep_min_days = 2555\n"), { purgeDays: {}, keepMinDays: all });
+  assert.deepEqual(retention("keep_min_days = 2555\npurge_payload_after_days = 3650\n[policy.retention.D3]\nkeep_min_days = 1095\npurge_payload_after_days = 1095\n"), {
+    purgeDays: { D0: 3650, D1: 3650, D2: 3650, D3: 1095, R: 3650 },
+    keepMinDays: { ...all, D3: 1095 },
+  });
+  assert.throws(() => retention("keep_min_days = 2555\n[policy.retention.D3]\npurge_payload_after_days = 90\n"), /purges D3 bodies after 90 days, under its keep_min_days of 2555: the purge would delete what the floor keeps/);
+  assert.throws(() => retention("purge_payload_after_days = 0\n"));
+  assert.throws(() => retention("[policy.retention.D9]\nkeep_min_days = 1\n"));
 });
 
 test("lab.example.toml's commented key and retention tables parse once uncommented", () => {
@@ -163,6 +168,8 @@ test("lab.example.toml's commented key and retention tables parse once uncomment
   const end = text.indexOf("\n\n", at);
   const keyed = `${text.slice(0, at)}${text.slice(at, end).replace(/^# ((?:\[|[A-Za-z_0-9]+ = ).*)$/gm, "$1")}${text.slice(end)}`.replace(/^key_env = .*$/m, "");
   assert.deepEqual(parseConfig(keyed, path).store, { placement: "lab", keyEnvs: { k1: "LABH_PAYLOAD_KEY", k2: "LABH_PAYLOAD_KEY_2", k3: "LABH_PAYLOAD_KEY_3" }, current: "k2", classKeys: { D3: "k3" } });
-  assert.equal(parseConfig(text.replace("# retention_days = 365\n", "retention_days = 365\n"), path).retentionDays.D1, 365);
-  assert.deepEqual(parseConfig(text.replace("# retention_days = 365\n", "retention_days = { D3 = 90, D2 = 365 }\n"), path).retentionDays, { D3: 90, D2: 365 });
+  const r = text.indexOf("# [policy.retention]");
+  const rEnd = text.indexOf("\n\n", r);
+  const retained = `${text.slice(0, r)}${text.slice(r, rEnd).replace(/^# ((?:\[|[a-z_]+ = ).*)$/gm, "$1")}${text.slice(rEnd)}`;
+  assert.deepEqual(parseConfig(retained, path).retention, { purgeDays: { D0: 2555, D1: 2555, D2: 2555, D3: 1095, R: 2555 }, keepMinDays: { D0: 2555, D1: 2555, D2: 2555, D3: 1095, R: 2555 } });
 });

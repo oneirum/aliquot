@@ -9,7 +9,7 @@
  */
 
 import { appendAudit, appendAuditInTx, type AuditRow } from "./audit.ts";
-import type { LabConfig } from "./config.ts";
+import type { LabConfig, Retention } from "./config.ts";
 import { DATA_CLASSES, type DataClass } from "./dataclass.ts";
 import type { Db, Tx } from "./db.ts";
 import type { PayloadHash } from "./hash.ts";
@@ -121,38 +121,61 @@ const PAST_WINDOW = `
   having max(e.at) < $2::timestamptz - make_interval(days => ($1::jsonb ->> p.cls)::int)
   order by max(e.at), p.hash`;
 
+/** Days per class a body must go unused before a sweep redacts it: the purge, never under the floor. A class without a purge is absent. */
+export function retentionWindows(r: Retention): Partial<Record<DataClass, number>> {
+  return Object.fromEntries(Object.entries(r.purgeDays).map(([cls, purge]) => [cls, Math.max(purge, r.keepMinDays[cls as DataClass] ?? 0)]));
+}
+
 /**
  * Run bodies past the window: every run that names the body (a later turn's history names earlier turns) is older
- * than its class's days. Knowledge base entries and compile prompts are not run bodies and are never candidates.
+ * than its class's window. Knowledge base entries and compile prompts are not run bodies and are never candidates.
  */
-export async function pastRetention(db: Pick<Db, "query">, days: LabConfig["retentionDays"], now: Date): Promise<RetentionCandidate[]> {
-  if (!Object.keys(days).length) return [];
-  const res = await db.query<{ hash: PayloadHash; cls: DataClass; bytes: number; last_used: Date; runs: string[] }>(PAST_WINDOW, [JSON.stringify(days), now.toISOString()]);
+export async function pastRetention(db: Pick<Db, "query">, retention: Retention, now: Date): Promise<RetentionCandidate[]> {
+  const windows = retentionWindows(retention);
+  if (!Object.keys(windows).length) return [];
+  const res = await db.query<{ hash: PayloadHash; cls: DataClass; bytes: number; last_used: Date; runs: string[] }>(PAST_WINDOW, [JSON.stringify(windows), now.toISOString()]);
   return res.rows.map((r) => ({ hash: r.hash, cls: r.cls, bytes: r.bytes, lastUsed: r.last_used.toISOString(), runs: r.runs as RunId[] }));
 }
 
 /**
  * Redacts every candidate's body and keeps its tombstone (hash, class, bytes, when, why), with one audit event for
- * the sweep in the same transaction, even when nothing was past the window. Returns what this sweep redacted.
+ * the sweep in the same transaction, even when nothing was past the window. asOf judges the window (a steward can
+ * ask what a later date would redact); the tombstone and the audit event record when the sweep actually ran. The door's copy of a run's reply in
+ * web_messages, the one body kept outside the payload store, goes with the run's answer: once the answer is redacted
+ * (or the run had none and lost a body), the reply and notice text is cleared and the row marked. Returns what this
+ * sweep redacted.
  */
-export async function sweepRetention(db: Db, days: LabConfig["retentionDays"], now: Date, actor: string): Promise<{ readonly redacted: readonly RetentionCandidate[]; readonly audit: AuditRow }> {
+export async function sweepRetention(db: Db, retention: Retention, asOf: Date, actor: string): Promise<{ readonly redacted: readonly RetentionCandidate[]; readonly replies: number; readonly audit: AuditRow }> {
   return inTx(db, async (tx) => {
-    const candidates = await pastRetention(tx, days, now);
+    const candidates = await pastRetention(tx, retention, asOf);
     const done = await tx.query<{ hash: PayloadHash }>(
-      "update payloads set ciphertext = null, nonce = null, redacted_at = $2, redaction_reason = 'retention' where hash = any($1) and ciphertext is not null returning hash",
-      [candidates.map((c) => c.hash), now.toISOString()],
+      "update payloads set ciphertext = null, nonce = null, redacted_at = now(), redaction_reason = 'retention' where hash = any($1) and ciphertext is not null returning hash",
+      [candidates.map((c) => c.hash)],
     );
     const hit = new Set(done.rows.map((r) => r.hash));
     const redacted = candidates.filter((c) => hit.has(c.hash));
+    const runs = [...new Set(redacted.flatMap((c) => c.runs))];
+    const answers = await tx.query<{ run_id: string; answer: PayloadHash | null }>(
+      "select run_id::text, event->'answer'->>'hash' as answer from run_events where run_id = any($1::uuid[]) and event->>'t' = 'run.finished'",
+      [runs],
+    );
+    const answered = new Map(answers.rows.map((r) => [r.run_id, r.answer]));
+    const gone = runs.filter((id) => {
+      const answer = answered.get(id);
+      return !answer || hit.has(answer);
+    });
+    const replies = await tx.query("update web_messages set text = '', redacted_at = now() where run_id = any($1::uuid[]) and redacted_at is null", [gone]);
     const audit = await appendAuditInTx(tx, actor, {
       t: "retention.swept",
-      days,
-      asOf: now.toISOString(),
+      purgeDays: retention.purgeDays,
+      keepMinDays: retention.keepMinDays,
+      asOf: asOf.toISOString(),
       redacted: redacted.length,
       bytes: redacted.reduce((n, c) => n + c.bytes, 0),
-      runs: new Set(redacted.flatMap((c) => c.runs)).size,
+      runs: runs.length,
+      replies: replies.rowCount ?? 0,
     });
-    return { redacted, audit };
+    return { redacted, replies: replies.rowCount ?? 0, audit };
   });
 }
 

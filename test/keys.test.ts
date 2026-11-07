@@ -6,6 +6,7 @@ import { DEFAULT_POLICY, Labelled, type DataClass } from "../packages/core/src/d
 import { createPayloadStore, KeyNotHeld, labAddressKey, payloadStates, PayloadUnavailable, verifyChain, type Keyring, type PayloadRef, type RunEvent, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { recordViewOf } from "../packages/core/src/record-view.ts";
 import { recordPage } from "../packages/core/src/surfaces/web-pages.ts";
+import { readReplies } from "../packages/core/src/surfaces/web.ts";
 import { pastRetention, reencryptAll, sweepRetention } from "../packages/core/src/steward.ts";
 import { freshDatabase } from "./db.ts";
 import { chain, started } from "./events.ts";
@@ -82,20 +83,30 @@ test("the retention sweep redacts bodies whose newest run is past the window, ke
   const newRun = "00000000-0000-4000-8000-0000000000a2" as RunId;
   const oldEvents = await insertRun(oldRun, [started(question), { t: "run.finished", outcome: "answered", answer, reason: null, flags: [] }, { t: "inbox.consumed", inboxId: "i1", item: { t: "steer", text: publicNote, by: "alice" } }], Date.parse("2026-01-10T00:00:00Z"));
   await insertRun(newRun, [{ ...(started(followUp) as Extract<RunEvent, { t: "run.started" }>), history: [question] }], Date.parse("2026-05-01T00:00:00Z"));
-  const days = { D1: 30 };
+  const reply = "Freezer 3 runs at minus eighty.";
+  await db.query("insert into web_messages (run_id, thread_id, kind, text) values ($1, 't', 'reply', $2), ($3, 't', 'reply', 'Freezer 4 too.')", [oldRun, reply, newRun]);
+  const retention = { purgeDays: { D1: 30 }, keepMinDays: {} };
 
-  const preview = await pastRetention(db, days, new Date("2026-03-01T00:00:00Z"));
+  const floored = await pastRetention(db, { purgeDays: { D1: 30 }, keepMinDays: { D1: 60 } }, new Date("2026-03-01T00:00:00Z"));
+  assert.deepEqual(floored, [], "a body 50 days unused is under a 60-day floor, whatever the purge says");
+  const preview = await pastRetention(db, retention, new Date("2026-03-01T00:00:00Z"));
   assert.deepEqual(preview.map((c) => [c.hash, c.runs]), [[answer.hash, [oldRun]]], "the question is still in a later turn's history, and D0 has no window");
   assert.equal(await keyOf(answer), "k2", "a preview changes nothing");
 
   const summaryBefore = (await recordViewOf(db, oldRun, oldEvents, store.held)).summary;
-  const swept = await sweepRetention(db, days, new Date("2026-03-01T00:00:00Z"), "steward");
+  const swept = await sweepRetention(db, retention, new Date("2026-03-01T00:00:00Z"), "steward");
   assert.deepEqual(swept.redacted.map((c) => c.hash), [answer.hash]);
-  assert.deepEqual(swept.audit.event, { t: "retention.swept", days, asOf: "2026-03-01T00:00:00.000Z", redacted: 1, bytes: answer.bytes, runs: 1 });
+  assert.deepEqual(swept.audit.event, { t: "retention.swept", purgeDays: { D1: 30 }, keepMinDays: {}, asOf: "2026-03-01T00:00:00.000Z", redacted: 1, bytes: answer.bytes, runs: 1, replies: 1 });
+  const replyText = async (run: RunId) => (await db.query<{ text: string }>("select text from web_messages where run_id = $1", [run])).rows[0]!.text;
+  assert.equal(await replyText(oldRun), "", "the door's plaintext copy of the redacted answer is gone");
+  assert.equal((await db.query("select 1 from web_messages where text like '%minus eighty%'")).rowCount, 0);
+  assert.deepEqual((await readReplies(db, oldRun)).map((r) => r.text), [`Redacted on ${new Date().toISOString().slice(0, 10)} by the lab's retention window.`]);
+  assert.equal(await replyText(newRun), "Freezer 4 too.", "a run whose answer is kept keeps its reply");
   assert.equal(await read(store, answer), "(redacted)");
   assert.deepEqual(await read(store, question), { text: "how cold is freezer 3?" });
   const tomb = (await db.query("select hash, cls, bytes, ciphertext, redacted_at, redaction_reason from payloads where hash = $1", [answer.hash])).rows[0];
-  assert.deepEqual(tomb, { hash: answer.hash, cls: "D1", bytes: answer.bytes, ciphertext: null, redacted_at: new Date("2026-03-01T00:00:00Z"), redaction_reason: "retention" });
+  assert.ok(tomb && Date.now() - (tomb.redacted_at as Date).getTime() < 60_000, "the tombstone records when the sweep ran, not the date it judged the window by");
+  assert.deepEqual({ ...tomb, redacted_at: null }, { hash: answer.hash, cls: "D1", bytes: answer.bytes, ciphertext: null, redacted_at: null, redaction_reason: "retention" });
   await assert.rejects(db.query("update payloads set redacted_at = now() where hash = $1", [answer.hash]), /tombstone is written once/);
 
   const view = await recordViewOf(db, oldRun, oldEvents, store.held);
@@ -111,13 +122,13 @@ test("the retention sweep redacts bodies whose newest run is past the window, ke
     ],
   );
   const redacted = view.bodies[1]!;
-  assert.deepEqual(redacted, { hash: answer.hash, cls: "D1", bytes: answer.bytes, seq: 1, t: "run.finished", role: "answer", state: "redacted", at: "2026-03-01T00:00:00.000Z", reason: "retention" });
+  assert.deepEqual(redacted, { hash: answer.hash, cls: "D1", bytes: answer.bytes, seq: 1, t: "run.finished", role: "answer", state: "redacted", at: (tomb!.redacted_at as Date).toISOString(), reason: "retention" });
   const page = recordPage(view);
   assert.ok(page.includes(`"state":"redacted"`) && page.includes(answer.hash), "the record page carries the redacted body and its hash");
   assert.ok(page.includes("by the lab's retention window"), "and the line it shows for it");
 
-  const again = await sweepRetention(db, days, new Date("2026-03-01T00:00:00Z"), "steward");
+  const again = await sweepRetention(db, retention, new Date("2026-03-01T00:00:00Z"), "steward");
   assert.equal(again.redacted.length, 0, "a second sweep redacts nothing");
   assert.deepEqual((await loadAudit(db)).filter((r) => r.event.t === "retention.swept").map((r) => (r.event as { redacted: number }).redacted), [1, 0], "and each sweep is audited");
-  assert.deepEqual((await sweepRetention(db, days, new Date("2026-07-01T00:00:00Z"), "steward")).redacted.map((c) => c.hash).sort(), [question.hash, followUp.hash].sort(), "once the later run is past the window too, its bodies go");
+  assert.deepEqual((await sweepRetention(db, retention, new Date("2026-07-01T00:00:00Z"), "steward")).redacted.map((c) => c.hash).sort(), [question.hash, followUp.hash].sort(), "once the later run is past the window too, its bodies go");
 });

@@ -139,9 +139,18 @@ to a tool's code alone moves no agent version.
 ## What is stored, and how
 
 - **Payload store** (Postgres table `payloads`). Every prompt, answer, tool input and tool output is stored here. The
-  cipher is AES-256-GCM. Each row is addressed by an HMAC-SHA256 of its class and content. Both the cipher key and the
-  address key are derived by HKDF from one 32-byte master key, which the worker reads from an environment variable and
-  never writes down (`packages/core/src/record.ts`). The store refuses content above its placement's ceiling.
+  cipher is AES-256-GCM. Each row is addressed by an HMAC-SHA256 of its class and content. Each row's cipher key is
+  derived by HKDF from a 32-byte master key, which the worker and the web door read from an environment variable and
+  never write down; the row carries that key's id (`k1`, `k2`, ...), so a lab can rotate to a new key and re-encrypt,
+  and can keep D3 under a key of its own that only some processes are given. The address key is the lab's for life,
+  stored wrapped under each master key (table `payload_keys`), so a rotation never changes a hash
+  (`packages/core/src/record.ts`, `packages/core/src/steward.ts`). The store refuses content above its placement's
+  ceiling.
+- **Retention.** A lab sets, per class, a floor (`keep_min_days`) and when payload bodies are purged
+  (`purge_payload_after_days`) in `lab.toml`. Aliquot refuses a purge shorter than its class's floor.
+  `aliquot retention --apply` deletes each body past its window and keeps a tombstone (hash, class, size, when, why);
+  run records, audit events and their hashes are never deleted, so every chain still verifies. The sweep also clears
+  the web door's copy of the reply, and writes an audit event.
 - **Run record** (`run_events`). One append-only, hash-chained log per run. It holds every model call, tool call,
   refusal, stop and the final answer, with class labels and payload references, not plaintext.
 - **Audit stream** (`audit_events`). One hash-chained log for publishes, role changes and calls made outside a run.
@@ -162,7 +171,7 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. |
 | Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
 | Single sign-on? | Not yet. The web door has no member sign-in and listens on 127.0.0.1 only. A bearer token says which surface a request comes from, not which member sent it. |
-| Key rotation and retention? | Not yet. |
+| Key rotation and retention? | Yes. `aliquot keys rotate` and `aliquot keys reencrypt` move payloads to a new key without changing a hash; `[store.class_keys]` keeps D3 under its own key. `[policy.retention]` sets a floor and a purge per class; `aliquot retention --apply` redacts bodies past the window and keeps tombstones, so records still verify. Retention runs when someone or a timer runs it, not on its own. |
 
 ## Not covered yet
 
@@ -170,11 +179,12 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
   own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,
   and refuses a pattern that matches ordinary text or no sample id.
 - **No sign-on.** Keep the web door on the machine until sign-on lands.
-- **No key rotation, no per-class keys, no retention sweep.**
+- **Retention runs only when it is run.** Nothing in Aliquot schedules the sweep; research IT runs
+  `aliquot retention --apply` from cron or a timer. A backup taken before a sweep still holds the redacted bodies.
 - **The version hash does not yet cover the system prompt text that the core builds around an agent's instructions.**
 - **The studio runs outside the network seal and still holds the database password.** It holds no payload key, so it
   cannot read a stored payload. But it connects to Postgres as the same user as the worker, for its own tables, and
-  the web door's reply table (`web_messages`) holds answers as text. A separate database user for the studio is planned.
+  the web door's reply table (`web_messages`) holds answers as text until the retention sweep clears them. A separate database user for the studio is planned.
 - **A lab cannot add its own tools yet.** Contributed tools are planned, behind an operating-system boundary (a
   separate user, a container or a VM).
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.
