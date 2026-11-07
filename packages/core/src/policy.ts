@@ -342,6 +342,9 @@ export function ceilingOfStore(level: DataClass, placement: Placement, egress: E
  * level, because content from a knowledge base or a tool carries a level, not a detector. Null for a refusal that is
  * not about a class (a host or model rule), which keeps the generic notice.
  */
+/** The sentence every refused run has always opened with; the class and the rule follow it, so earlier readers of the notice still match. */
+export const RUN_REFUSED = "This request cannot be answered here: it contains restricted data that the configured model may not receive.";
+
 export function runRefusalText(policy: Policy, refusal: EgressRefusal, messageClass?: { readonly id: string; readonly rule: string }): string | null {
   const level: DataClass | null =
     refusal.code === "class-above-ceiling" || refusal.code === "destination-receives-nothing" ? refusal.payload
@@ -355,7 +358,7 @@ export function runRefusalText(policy: Policy, refusal: EgressRefusal, messageCl
   const found = own && messageClass?.rule.startsWith("detector:") ? `, found by detector ${messageClass.rule.slice("detector:".length)}` : "";
   const tiers = [...new Set(candidates.map((c) => ruleText(c)))].join(" / ");
   const where = refusal.code === "class-above-ceiling" ? `this agent's model may receive ${refusal.ceiling} at most and the content is ${level}` : "this agent's model may not receive it";
-  return `This request cannot be answered here. Data class ${named}${found}; rule ${tiers}: ${where}. The run's record shows the refusal.`;
+  return `${RUN_REFUSED} Data class ${named}${found}; rule ${tiers}: ${where}. The run's record shows the refusal.`;
 }
 
 /** The rule a residency refusal applied: `residency = "us"`. */
