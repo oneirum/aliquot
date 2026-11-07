@@ -1,0 +1,26 @@
+name: trust
+
+# The deterministic half of pnpm trust on every push: lab1's 350 questions through the real run loop with a scripted
+# worst-case model. No Postgres, no key, about a second. Fails when a refusal, citation or injection count is worse
+# than the committed docs/trust.json.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  trust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm trust --check
+      - run: node --test test/trust.test.ts
