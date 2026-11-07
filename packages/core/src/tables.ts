@@ -16,6 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { DataClass } from "./dataclass.ts";
 import { sha256, type Sha256 } from "./hash.ts";
@@ -102,8 +103,16 @@ export interface QueryRecord {
   readonly groups: readonly Group[];
 }
 
-export const ENGINE = readFileSync(new URL("./table-engine.py", import.meta.url), "utf8");
-export const ENGINE_HASH = sha256(ENGINE);
+let engineMemo: { readonly source: string; readonly sha256: Sha256 } | null = null;
+
+/** Read at the first query, not at import: the studio's bundle loads this module through config.ts and has no engine file. */
+export function engine(): { readonly source: string; readonly sha256: Sha256 } {
+  if (!engineMemo) {
+    const source = readFileSync(fileURLToPath(new URL("./table-engine.py", import.meta.url)), "utf8");
+    engineMemo = { source, sha256: sha256(source) };
+  }
+  return engineMemo;
+}
 
 /** A refusal the agent sees. Its text names columns and rules, never a value or a cell's size. */
 export class QueryRefused extends Error {
@@ -188,7 +197,7 @@ export async function executeQuery(t: Table, q: DataQuery, deps: { readonly read
   const bytes = await deps.read.bytes(t);
   const free = Object.entries(t.columns).filter(([c, cls]) => cls === "free" && !flaggedBy(c, identifiers)).map(([c]) => c);
   const envelope = JSON.stringify({ query: q, free, minCell: t.minCell, maxGroups: MAX_GROUPS });
-  const run = await deps.sandbox.aggregate([{ name: "table.csv", data: bytes }, { name: "query.json", data: Buffer.from(envelope) }], ENGINE, deps.signal);
+  const run = await deps.sandbox.aggregate([{ name: "table.csv", data: bytes }, { name: "query.json", data: Buffer.from(envelope) }], engine().source, deps.signal);
   if (run.timedOut) throw new Error(`table ${t.id}: the query took longer than the sandbox's timeout`);
   // stderr is never read: a traceback quotes the line it failed on, and that line can hold a row.
   if (run.exitCode !== 0) throw new Error(`table ${t.id}: the query engine exited with ${run.exitCode}`);
@@ -213,7 +222,7 @@ export async function executeQuery(t: Table, q: DataQuery, deps: { readonly read
     table: t.id,
     query: q,
     source: { kind: t.source.kind, sha256: sha256(bytes), bytes: bytes.length },
-    engine: { sha256: ENGINE_HASH, image: deps.sandbox.image },
+    engine: { sha256: engine().sha256, image: deps.sandbox.image },
     minCell: t.minCell,
     rowsRead: parsed.rowsRead,
     rowsMatched: parsed.rowsMatched,
