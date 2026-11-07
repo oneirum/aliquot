@@ -20,7 +20,7 @@ import type { LeasedJob } from "../packages/core/src/queue.ts";
 import type { RunEvent, RunId, ThreadKey } from "../packages/core/src/record.ts";
 import { createSandbox, type Sandbox } from "../packages/core/src/sandbox.ts";
 import type { Surface } from "../packages/core/src/frontdoor.ts";
-import { executeQuery, sameAnswer, tableReader, type DataQuery, type QueryRecord, type Table, type TableSandbox } from "../packages/core/src/tables.ts";
+import { executeQuery, restrictedColumn, sameAnswer, tableReader, type DataQuery, type QueryRecord, type Table, type TableSandbox } from "../packages/core/src/tables.ts";
 import { builtinTools, createHttpEgress, createToolRunner, registryOf, type ToolEnv } from "../packages/core/src/tools.ts";
 import { lab0Dosing, startFakeRedcap } from "../scripts/fake-redcap.ts";
 import { startFakeModel } from "./fake-model.ts";
@@ -154,6 +154,12 @@ test("a query that names a restricted column is refused before the table is read
   assert.deepEqual(flagged, { ok: false, code: "invalid-input", detail: "column mrn of table misfiled is restricted; it never leaves the sandbox (the source flags it as an identifier)", cls: "D1" });
   assert.equal(counted.aggregates(), 0, "no container was started");
   assert.deepEqual(redcap.requests.slice(before).map((r) => r.content), ["metadata"]);
+});
+
+test("a REDCap identifier flag covers the field's checkbox columns, field___1 and on", () => {
+  const t: Table = { ...DOSING, columns: { arm: "free", race___1: "free", race_other: "free" } };
+  const q = (column: string): DataQuery => ({ table: "dosing", where: [], groupBy: [column], measures: [{ fn: "count" }] });
+  assert.deepEqual(["race___1", "race_other", "arm"].map((c) => restrictedColumn(t, q(c), ["race"])), ["race___1", null, null]);
 });
 
 test("a cell under 5 is refused inside the container, and the refusal names no value and no size", opts, async () => {

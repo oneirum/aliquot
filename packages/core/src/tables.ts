@@ -75,8 +75,11 @@ export function columnsOf(q: DataQuery): string[] {
 
 /** The first column the query names that is not free, or null. `identifiers` are the source's own identifier flags (REDCap's metadata). */
 export function restrictedColumn(t: Table, q: DataQuery, identifiers: readonly string[] = []): string | null {
-  return columnsOf(q).find((c) => t.columns[c] !== "free" || identifiers.includes(c)) ?? null;
+  return columnsOf(q).find((c) => t.columns[c] !== "free" || flaggedBy(c, identifiers)) ?? null;
 }
+
+/** REDCap exports a checkbox field as one column per choice, field___1 and so on, and flags only the field. */
+const flaggedBy = (column: string, identifiers: readonly string[]) => identifiers.some((f) => column === f || column.startsWith(`${f}___`));
 
 const groupOut = z.object({ key: z.record(z.string(), z.string().max(200)), n: z.number().int().min(0), values: z.record(z.string(), z.number().finite().nullable()) }).strict();
 
@@ -183,7 +186,7 @@ export async function executeQuery(t: Table, q: DataQuery, deps: { readonly read
   const flagged = restrictedColumn(t, q, identifiers);
   if (flagged) throw new QueryRefused(`${REFUSALS["restricted-column"](t, flagged)} (the source flags it as an identifier)`);
   const bytes = await deps.read.bytes(t);
-  const free = Object.entries(t.columns).filter(([c, cls]) => cls === "free" && !identifiers.includes(c)).map(([c]) => c);
+  const free = Object.entries(t.columns).filter(([c, cls]) => cls === "free" && !flaggedBy(c, identifiers)).map(([c]) => c);
   const envelope = JSON.stringify({ query: q, free, minCell: t.minCell, maxGroups: MAX_GROUPS });
   const run = await deps.sandbox.aggregate([{ name: "table.csv", data: bytes }, { name: "query.json", data: Buffer.from(envelope) }], ENGINE, deps.signal);
   if (run.timedOut) throw new Error(`table ${t.id}: the query took longer than the sandbox's timeout`);
