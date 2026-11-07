@@ -70,6 +70,7 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/kb.ts": ["stamp"],
   "packages/core/src/kb-compile.ts": ["stamp"],
   "packages/core/src/sources.ts": ["stamp"],
+  "packages/core/src/sources-graph.ts": ["stamp"],
   "packages/core/src/agent.ts": ["stamp"],
   "packages/core/src/loop.ts": ["stamp"],
   // The slice harness spawns the binaries and drives them over HTTP. It is not deployed.
@@ -85,6 +86,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/walk-signon.ts": ["network-globals", "module:child_process", "module:net"],
   // The fake Drive API the sources test and the sources walk serve. It is not deployed.
   "scripts/fake-drive.ts": ["module:http"],
+  // The fake Microsoft Graph the Graph source test and lab0 serve. It is not deployed.
+  "scripts/fake-graph.ts": ["module:http"],
   // The fake REDCap API the data checks and pnpm walk:data query. It is not deployed.
   "scripts/fake-redcap.ts": ["module:http"],
   // pnpm walk:data reruns each recorded query against the fake REDCap API. It is not deployed.

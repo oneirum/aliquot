@@ -109,7 +109,7 @@ try {
     }
     case "sync": {
       const configs = core.config.sources;
-      if (!configs.length) throw new Error("lab.toml has no [sources.<id>]; add a synced folder or a Drive folder (docs/sources.md)");
+      if (!configs.length) throw new Error("lab.toml has no [sources.<id>]; add a synced folder, a Drive folder or a SharePoint library (docs/sources.md)");
       const labPatterns = core.config.participantIdPatterns;
       const sources = sourcesFromConfig(configs, { http: core.http, db: core.db, directory: directoryFromConfig(core.config.directory), labPatterns, ...(core.sandbox ? { pdf: core.sandbox.readPdf } : {}) }, process.env);
       const deps = { db: core.db, store: core.store, labPatterns, actor: values.actor ?? "source-sync" };
@@ -120,7 +120,7 @@ try {
         break;
       }
       const folders = new Map(configs.flatMap((c) => (c.kind === "folder" ? [[c.id, c.path] as const] : [])));
-      const polls = new Map(configs.flatMap((c) => (c.kind === "gdrive" ? [[c.id, c.pollSeconds] as const] : [])));
+      const polls = new Map(configs.flatMap((c) => (c.kind !== "folder" ? [[c.id, c.pollSeconds] as const] : [])));
       const w = watchSources(deps, sources, folders, polls, (line) => console.log(line));
       await w.ready;
       console.log(`watching ${sources.length} ${sources.length === 1 ? "source" : "sources"}: ${configs.map((c) => `${c.id} (${c.kind === "folder" ? "on change" : `every ${c.pollSeconds} s`})`).join(", ")}`);

@@ -215,6 +215,21 @@ const documentSource = z.discriminatedUnion("kind", [
       ...sourceCommon,
     })
     .strict(),
+  /** A SharePoint document library or a OneDrive through Microsoft Graph, by delta. Scope from each file's permissions. */
+  z
+    .object({
+      kind: z.literal("graph"),
+      drive_id: z.string().min(1),
+      /** Only files under this folder of the library, and their locations relative to it. */
+      folder: z.string().min(1).optional(),
+      token_env: z.string().min(1),
+      base_url: z.string().url().default("https://graph.microsoft.com"),
+      poll_seconds: z.number().int().min(5).default(60),
+      /** SharePoint group display name -> who it is in the lab, for a library shared with "Lab Members". */
+      site_groups: z.record(z.string().min(1), scopeItem).default({}),
+      ...sourceCommon,
+    })
+    .strict(),
   /** Named so a lab sees them in the docs; not built in this release. */
   z.object({ kind: z.enum(["labarchives", "benchling"]) }).passthrough(),
 ]);
@@ -483,7 +498,8 @@ function storeKeys(s: { key_env?: string | undefined; keys?: Record<string, stri
 
 export type DocumentSourceConfig =
   | { readonly id: string; readonly kind: "folder"; readonly kb: string; readonly cls: DataClass; readonly licence: (typeof LICENCES)[number]; readonly path: string; readonly scope: readonly string[] }
-  | { readonly id: string; readonly kind: "gdrive"; readonly kb: string; readonly cls: DataClass; readonly licence: (typeof LICENCES)[number]; readonly folderId: string; readonly tokenEnv: string; readonly baseUrl: string; readonly pollSeconds: number };
+  | { readonly id: string; readonly kind: "gdrive"; readonly kb: string; readonly cls: DataClass; readonly licence: (typeof LICENCES)[number]; readonly folderId: string; readonly tokenEnv: string; readonly baseUrl: string; readonly pollSeconds: number }
+  | { readonly id: string; readonly kind: "graph"; readonly kb: string; readonly cls: DataClass; readonly licence: (typeof LICENCES)[number]; readonly driveId: string; readonly folder: string | null; readonly tokenEnv: string; readonly baseUrl: string; readonly pollSeconds: number; readonly siteGroups: Readonly<Record<string, string>> };
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
 const TOOL_FOLDERS_REFUSED = "lab.toml has a [tools] table, but Aliquot does not load contributed tools yet. Remove [tools]: Aliquot runs only its built-in tools.";
@@ -614,6 +630,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     sources: Object.entries(c.sources).map(([id, s]): DocumentSourceConfig => {
       if (s.kind === "folder") return { id, kind: "folder", kb: s.kb, cls: s.class, licence: s.licence, path: resolve(s.path), scope: s.scope };
       if (s.kind === "gdrive") return { id, kind: "gdrive", kb: s.kb, cls: s.class, licence: s.licence, folderId: s.folder_id, tokenEnv: s.token_env, baseUrl: s.base_url.replace(/\/+$/, ""), pollSeconds: s.poll_seconds };
+      if (s.kind === "graph") return { id, kind: "graph", kb: s.kb, cls: s.class, licence: s.licence, driveId: s.drive_id, folder: s.folder ?? null, tokenEnv: s.token_env, baseUrl: s.base_url.replace(/\/+$/, ""), pollSeconds: s.poll_seconds, siteGroups: s.site_groups };
       throw new Error(`lab.toml: source ${id}: ${s.kind} is not a source kind in this release; sync its exports to a folder and register that folder (kind = "folder")`);
     }),
     directory: { groups: c.directory.groups, emails: c.directory.emails },

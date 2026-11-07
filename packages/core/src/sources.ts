@@ -4,6 +4,8 @@
  *   [sources.<id>] kind = "folder"   a Box, OneDrive or Google Drive desktop sync folder; the vendor's client keeps it
  *                                    current, and watchSources re-ingests it on every change. Scope from lab.toml.
  *   [sources.<id>] kind = "gdrive"   a Drive folder through the Drive API, polled. Scope from each file's permissions.
+ *   [sources.<id>] kind = "graph"    a SharePoint library or OneDrive through Microsoft Graph delta, polled
+ *                                    (sources-graph.ts). Scope from each file's permissions.
  *
  *   scan          one DocumentSource -> its documents: location, text, modifiedAt, scope
  *   buildSynced   every source feeding one KB -> a snapshot, one entry per document, each with provenance
@@ -39,6 +41,7 @@ import { diffSnapshots, hashEntry, loadManifest, saveSnapshot, snapshotId, type 
 import { DEFINITION_CLASS, publishSnapshot, readFileSource, SOURCE_FILE_TYPES } from "./kb-compile.ts";
 import type { MemberDirectory } from "./members.ts";
 import type { PayloadStore } from "./record.ts";
+import { graphSource } from "./sources-graph.ts";
 import type { HttpEgress } from "./tools.ts";
 
 export interface SourceDocument {
@@ -438,7 +441,7 @@ export function sourcesFromConfig(configs: readonly DocumentSourceConfig[], driv
   return configs.map((c) => {
     if (c.kind === "folder") return folderSource(c, drive.pdf);
     const token = env[c.tokenEnv];
-    if (!token) throw new Error(`source ${c.id}: ${c.tokenEnv} is not set; it holds the Drive OAuth access token`);
-    return driveSource(c, { ...drive, token });
+    if (!token) throw new Error(`source ${c.id}: ${c.tokenEnv} is not set; it holds the ${c.kind === "graph" ? "Microsoft Graph" : "Drive OAuth"} access token`);
+    return c.kind === "graph" ? graphSource(c, { ...drive, token }) : driveSource(c, { ...drive, token });
   });
 }
