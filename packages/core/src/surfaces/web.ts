@@ -320,14 +320,14 @@ export function createWebHandler(
           }
         }
         // POST only, as the page's Sign out form sends it, so an image or a link on another page cannot sign anyone out.
-        if (req.method === "POST" && url.pathname === "/logout") return redirect(res, "/?signed-out", signOn.signOut());
+        if (req.method === "POST" && url.pathname === "/logout") return redirect(res, "/?signed-out", await signOn.signOut(req.headers.cookie));
         const session = await signOn.session(req.headers.cookie);
         const page = req.method === "GET" && PAGE.test(url.pathname);
-        if (session.t === "idle") {
-          // Automatic logoff: the session ends, and a page goes straight back through the provider to where it was.
+        if (session.t === "ended") {
+          // Automatic logoff or a time limit: the session ends, and a page goes straight back through the provider to where it was.
           if (page) return redirect(res, `/login?next=${encodeURIComponent(`${url.pathname}${url.search}`)}`, [session.setCookie]);
           res.setHeader("set-cookie", session.setCookie);
-          throw new HttpError(401, `your session ended after ${session.minutes} minutes unused: sign in again at /login`);
+          throw new HttpError(401, `your session ${session.why}: sign in again at /login`);
         }
         if (session.t === "none") {
           if (page) {
@@ -339,7 +339,6 @@ export function createWebHandler(
         // SameSite=Lax keeps the cookie off another site's POST; this also refuses one from an origin the door does not serve.
         const origin = req.headers.origin;
         if (req.method === "POST" && origin && origin !== signOn.origin && URL.parse(origin)?.host !== req.headers.host) throw new HttpError(403, `a signed-in POST must come from ${signOn.origin}`);
-        res.setHeader("set-cookie", session.setCookie);
         viewer = { t: "member", id: session.member.id, email: session.member.email, role: session.member.role };
       } else if (signOn) viewer = { t: "surface", id: surface };
 
