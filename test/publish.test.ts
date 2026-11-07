@@ -7,7 +7,7 @@ import { loadAudit, verifyAudit } from "../packages/core/src/audit.ts";
 import { DEFAULT_POLICY, type SurfaceId } from "../packages/core/src/dataclass.ts";
 import { intake, type IntakeDeps } from "../packages/core/src/frontdoor.ts";
 import type { SnapshotId, ToolHash } from "../packages/core/src/hash.ts";
-import { confirmPublish, draftHashOf, PublishRefused, publishedAgentFor, requestPublish } from "../packages/core/src/publish.ts";
+import { confirmPublish, draftHashOf, PublishRefused, publishedAgentsFor, requestPublish } from "../packages/core/src/publish.ts";
 import { mayPreview, type Actor } from "../packages/core/src/roles.ts";
 import { createQueue } from "../packages/core/src/queue.ts";
 import { createPayloadStore } from "../packages/core/src/record.ts";
@@ -79,7 +79,7 @@ test("a publisher cannot take a restricted head by lowering the ceiling, or bind
   const squatter = doc({ agentId: "consent-squatter", ceiling: "D1", channels: ["web:consent"] });
   assert.deepEqual((await requestPublish(deps, squatter, publisher)).refusal, { t: "role", role: "publisher", cls: "D3" });
   assert.equal(await refusalOf(confirmPublish(deps, squatter, draftHashOf(squatter), publisher, "take the channel")), "role");
-  assert.deepEqual(await publishedAgentFor(db, { surface: "web", channelId: "consent" }), held, "the steward's agent still serves the channel");
+  assert.deepEqual(await publishedAgentsFor(db, { surface: "web", channelId: "consent" }), [held], "the steward's agent still serves the channel");
   const elsewhere = doc({ agentId: "consent-squatter", ceiling: "D1", channels: ["web:other"] });
   assert.equal((await confirmPublish(deps, elsewhere, draftHashOf(elsewhere), publisher, "own channel")).t, "published");
   assert.equal((await confirmPublish(deps, lowered, draftHashOf(lowered), steward, "the steward may lower it")).t, "published");
@@ -142,8 +142,8 @@ test("publish moves the head and appends one audit row; republishing an edit mak
     ],
   );
   assert.equal(verifyAudit(await loadAudit(db)), null);
-  assert.equal((await publishedAgentFor(db, { surface: WEB_SURFACE, channelId: "flow" }))?.instructions, v2.instructions);
-  assert.equal(await publishedAgentFor(db, { surface: WEB_SURFACE, channelId: "elsewhere" }), undefined);
+  assert.equal((await publishedAgentsFor(db, { surface: WEB_SURFACE, channelId: "flow" }))[0]?.instructions, v2.instructions);
+  assert.deepEqual(await publishedAgentsFor(db, { surface: WEB_SURFACE, channelId: "elsewhere" }), []);
 });
 
 test("intake runs the head bound to the channel; a studio test runs the unpublished draft with trigger test", async () => {
@@ -154,7 +154,7 @@ test("intake runs the head bound to the channel; a studio test runs the unpublis
     queue: createQueue(db),
     catalog: async () => catalog,
     gate: { members: async (id) => ({ id: id as MemberId, audiences: [{ t: "lab" }] }), channelFloor: async () => "D1", labPatterns: [], policy: DEFAULT_POLICY },
-    agentFor: (channel) => publishedAgentFor(db, channel),
+    agentsFor: (channel) => publishedAgentsFor(db, channel),
   };
   const head = doc({ agentId: "bound", channels: ["web:bound"] });
   const published = await confirmPublish(deps, head, draftHashOf(head), publisher, "bind");

@@ -1,5 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import type { Db } from "../packages/core/src/db.ts";
 import type { IntakeDeps } from "../packages/core/src/frontdoor.ts";
 import type { LabConfig } from "../packages/core/src/config.ts";
@@ -103,12 +104,13 @@ test("both pages name the lab at the top, escaped, and carry no slogan or status
 });
 
 test("the record view of a run with no events yet is empty, running and intact", async () => {
-  assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, startedAt: null, agent: null, outcome: "running", chain: { events: 0, firstBad: null }, summary: { ms: 0, modelCalls: 0, tokens: { input: 0, output: 0 }, toolCalls: [], entriesRetrieved: 0, refused: 0, withheld: 0 }, rows: [] } });
+  assert.deepEqual(await call("GET", `/runs/${UUID}/view`), { status: 200, body: { runId: UUID, startedAt: null, agent: null, route: null, outcome: "running", chain: { events: 0, firstBad: null }, summary: { ms: 0, modelCalls: 0, tokens: { input: 0, output: 0 }, toolCalls: [], entriesRetrieved: 0, refused: 0, withheld: 0 }, rows: [] } });
 });
 
 test("a web surface bound to a channel puts every message there and refuses a body that names another", async () => {
   const seen: string[] = [];
-  const probe = { agentFor: async (c: { channelId: string }) => (seen.push(c.channelId), undefined) } as unknown as IntakeDeps;
+  const gate = { members: async (id: string) => ({ id, audiences: [] }), channelFloor: async () => "D1", labPatterns: [], policy: DEFAULT_POLICY };
+  const probe = { gate, agentsFor: async (c: { channelId: string }) => (seen.push(c.channelId), []) } as unknown as IntakeDeps;
   const message = (extra: Record<string, unknown>) => JSON.stringify({ thread: "t", message: "m", text: "hi", user: "alice", ...extra });
   for (const [bound, body, want] of [
     ["public", message({}), { status: 403, channel: "public" }],

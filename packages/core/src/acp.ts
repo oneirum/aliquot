@@ -82,6 +82,8 @@ export function acpAgent(deps: AcpDeps): (line: string) => Promise<void> {
         else if (e.t === "tool") {
           const toolCallId = `${e.runId}-${randomUUID().slice(0, 8)}`;
           update(sessionId, { sessionUpdate: "tool_call", toolCallId, title: e.tool, kind: e.tool.startsWith("kb_") ? "read" : "search", status: "completed" });
+        } else if (e.t === "choose") {
+          say(e.message);
         } else if (e.t === "refused") {
           say(e.message);
           stopReason = "refusal";

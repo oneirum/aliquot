@@ -182,6 +182,7 @@ async function viaDoor(command: "ask" | "acp" | "mcp", words: readonly string[])
     if (e.t === "started") process.stderr.write(`run ${e.runId}\n`);
     else if (e.t === "tool") process.stderr.write(`  ${e.tool}\n`);
     else if (e.t === "refused") process.stdout.write(`Not sent: ${e.message}\n`);
+    else if (e.t === "choose") process.stdout.write(`${e.message}\nAsk again in the chat page or in Slack to pick one, or name the topic more plainly.\n`);
     else if (e.refusal) process.stdout.write(`${e.refusal}\nrecord  ${e.recordUrl}\n`);
     else if (e.withheld) {
       const byCeiling = ceiling !== undefined && isDataClass(ceiling) && (e.cls === null || rank(e.cls) > rank(ceiling));

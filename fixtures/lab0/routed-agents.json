@@ -1,0 +1,32 @@
+[
+  {
+    "agentId": "lab0-desk",
+    "name": "Lab handbook",
+    "description": "Answers practical questions from the lab handbook: freezer samples, the sleep diary codebook, onboarding and equipment. Use when a member asks how something in the lab is done. Not for statistics, power or study design.",
+    "instructions": "You answer lab members' practical questions from the lab0 handbook. Call kb_search with the member's question and answer from those entries only.",
+    "knowledgeBases": ["lab0-handbook"],
+    "sampleQuestions": [
+      "How long are samples kept in the freezer?",
+      "Who do I call when the freezer alarm sounds?",
+      "How is a skipped item coded in the sleep diary?",
+      "Where do I request a keycard?",
+      "When are timesheets due?",
+      "What training do new research assistants complete?"
+    ]
+  },
+  {
+    "agentId": "lab0-methods",
+    "name": "Methods desk",
+    "description": "Answers study design and statistics questions: sample size, power, mixed models, missing data, multiple comparisons and preregistration. Use when a member plans a study or an analysis. Not for lab procedures, equipment or the codebook.",
+    "instructions": "You answer lab members' study design and statistics questions from the lab0 methods guide. Call kb_search with the member's question and answer from those entries only.",
+    "knowledgeBases": ["lab0-methods"],
+    "sampleQuestions": [
+      "How many participants do I need to detect a medium effect?",
+      "What power should the study be planned for?",
+      "Should I fit a mixed model for repeated measures?",
+      "How should missing data be handled in the analysis?",
+      "How do I correct for multiple comparisons?",
+      "When should I preregister my analysis plan?"
+    ]
+  }
+]

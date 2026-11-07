@@ -4,7 +4,7 @@
  * replies here and the page reads them, with no second channel.
  *
  * Routes:
- *   POST /message  {channel?, thread, message, text, user}  -> intake as the caller's surface; a bound web surface serves only its own channel
+ *   POST /message  {channel?, thread, message, text, user, agent?} -> intake as the caller's surface; a bound web surface serves only its own channel; agent is a pick after asked-user
  *   POST /stop     {runId, user, confirmed?}                -> run_inbox stop (+ NOTIFY); confirmed is the second click
  *   GET  /replies?runId=                                     -> the run's reply and notices
  *   GET  /runs/:id/events                                    -> the run record (events, no bodies)
@@ -38,6 +38,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { once } from "node:events";
 import { gzipSync } from "node:zlib";
 import { z } from "zod";
+import type { AgentId } from "../agent.ts";
 import type { SurfaceId } from "../dataclass.ts";
 import type { Db } from "../db.ts";
 import { intake, type IntakeDeps, type Surface } from "../frontdoor.ts";
@@ -142,7 +143,8 @@ export const STUDIO_MAX_BODY_BYTES = 32 * 1024 * 1024;
 /** Serves POST /studio/<op> for the studio's surface: studioRoute in studio-door.ts, bound to the door's core. */
 export type StudioHandler = (surface: SurfaceId, op: string, json: unknown) => Promise<{ readonly status: number; readonly body: unknown }>;
 
-const messageSchema = z.object({ channel: z.string().optional(), thread: z.string().min(1), message: z.string().min(1), text: z.string().min(1), user: z.string().min(1) });
+// agent is the member's pick after an asked-user answer: the same message again, naming one of the choices.
+const messageSchema = z.object({ channel: z.string().optional(), thread: z.string().min(1), message: z.string().min(1), text: z.string().min(1), user: z.string().min(1), agent: z.string().min(1).max(200).optional() });
 const stopSchema = z.object({ runId: z.string().uuid(), user: z.string().min(1), confirmed: z.boolean().default(false) });
 const uuid = z.string().uuid();
 
@@ -242,8 +244,10 @@ export function createWebHandler(
         const result = await intake(
           { channel: { surface, channelId: boundHere ?? m.channel ?? "lab" }, threadId: m.thread, messageId: m.message, platformUserId: m.user, text: m.text, attachments: [], addressed: true, at: new Date().toISOString() },
           deps,
+          m.agent as AgentId | undefined,
         );
-        return send(req, res, result.t === "refused" ? 403 : 202, result);
+        // 200 for asked-user: nothing was queued, and the member's pick sends the message again.
+        return send(req, res, result.t === "refused" ? 403 : result.t === "asked-user" ? 200 : 202, result);
       }
       if (req.method === "POST" && url.pathname === "/stop") {
         const s = stopSchema.parse(await readJson(req));

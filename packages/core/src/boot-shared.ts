@@ -13,7 +13,7 @@ import { applySchema, connect, type Db } from "./db.ts";
 import type { IntakeDeps } from "./frontdoor.ts";
 import type { GateDeps } from "./gate.ts";
 import { publishedSnapshots, snapshotFromFixture, type KbSnapshot, type LoadedSnapshot } from "./kb.ts";
-import { publishedAgentFor } from "./publish.ts";
+import { publishedAgentsFor } from "./publish.ts";
 import { createQueue, type Queue } from "./queue.ts";
 import { createPayloadStore, type PayloadStore } from "./record.ts";
 import { builtinTools, createHttpEgress, registryOf, type HttpEgress, type RegisteredTool, type ToolRegistry } from "./tools.ts";
@@ -97,7 +97,7 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     http: createHttpEgress({ policy: config.policy, hosts: config.hosts }),
     catalog,
     agents,
-    intake: { db, store, queue: createQueue(db), gate, catalog, agentFor: async (channel) => (await publishedAgentFor(db, channel)) ?? agents[0] },
+    intake: { db, store, queue: createQueue(db), gate, catalog, agentsFor: async (channel) => { const heads = await publishedAgentsFor(db, channel); return heads.length ? heads : agents; } },
     fixtureSnapshots,
     registry,
     close: () => db.end(),

@@ -86,6 +86,7 @@ export function mcpServer(deps: McpDeps): (line: string) => Promise<void> {
       for await (const e of deps.ask(input, { signal: abort.signal, ...(deps.ceiling ? { ceiling: deps.ceiling } : {}) })) {
         if (e.t === "started") run.runId = e.runId;
         else if (e.t === "refused") return result(e.message, { answer: null, withheld: false, refused: e.message, recordUrl: null });
+        else if (e.t === "choose") return result(e.message, { answer: null, withheld: false, refused: null, recordUrl: null });
         else if (e.t === "finished") {
           if (e.refusal) return result(`${e.refusal}\n\nRecord: ${e.recordUrl}`, { answer: null, withheld: false, refused: e.refusal, recordUrl: e.recordUrl });
           if (e.withheld) return result(`The answer is above what this client may keep. Read it in the record: ${e.recordUrl}`, { answer: null, withheld: true, refused: null, recordUrl: e.recordUrl });
