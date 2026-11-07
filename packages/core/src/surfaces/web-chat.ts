@@ -21,7 +21,8 @@ const FAILED = icon('<path d="M8 2.25l6 10.5H2z" fill="none" stroke="currentColo
 const CLOSE = icon('<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>');
 const SEND = icon('<path d="M8 13V3.5M3.75 7.5L8 3.25l4.25 4.25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>');
 
-export function chatPage(where = ""): string {
+/** me is the signed-in member when sign-on is on: the page asks as them, and seesAll says whether the runs list is everyone's. */
+export function chatPage(where = "", me: { readonly id: string; readonly seesAll: boolean } | null = null): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -54,7 +55,10 @@ svg { display: block; }
 .side .label { margin: 24px 0 8px; padding: 0 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .history .row { color: var(--ink-2); }
 .me { flex: none; display: flex; align-items: center; height: calc(72px + env(safe-area-inset-bottom)); padding: 0 16px env(safe-area-inset-bottom); font-size: 14px; line-height: 20px; }
-.me > span:last-child { display: grid; min-width: 0; }
+.me > span:first-child { display: grid; min-width: 0; flex: 1; }
+.me form { flex: none; margin: 0; }
+.me .out { font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0; padding: 12px 0 12px 12px; cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .me .out:hover { color: var(--ink); } }
 .me #who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me .where { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scrim { display: none; }
@@ -128,6 +132,9 @@ body[data-side="closed"] .pane { padding-left: 0; --safe-l: env(safe-area-inset-
 .margin p { margin: 0; }
 .cite { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .doc { color: var(--ink-2); font-weight: 500; overflow-wrap: anywhere; }
+a.doc { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) { a.doc:hover { text-decoration-thickness: 2px; } }
+.cite .who { flex-basis: 100%; }
 /* Two 32 px rows: the status and Check, then the hash and Open record. 6 px above and below each 20 px line centres it
    on Check's pill, so the rows step 32 px baseline to baseline; a status that wraps grows downward with Check on its
    first line. */
@@ -200,13 +207,13 @@ button.send:disabled { cursor: default; transform: none; }
   </nav>
   <nav class="side-nav" aria-labelledby="records">
     <p class="label" id="records">Records</p>
-    <a class="row" href="/runs">${RUNS}<span>All runs</span></a>
+    <a class="row" href="/runs">${RUNS}<span>${me && !me.seesAll ? "Your runs" : "All runs"}</span></a>
     <a class="row" href="/runs?show=refusals">${REFUSED}<span>Refusals</span></a>
     <a class="row" href="/runs?show=failed">${FAILED}<span>Failed runs</span></a>
   </nav>
   <ol class="history" id="history"></ol>
   <p class="install" id="install">To open Aliquot like an app, choose Add to Home Screen or Install in the browser menu.</p>
-  <div class="me"><span><span id="who"></span>${whereSpan(where)}</span></div>
+  <div class="me"><span><span id="who"></span>${whereSpan(where)}</span>${me ? `<form method="post" action="/logout"><button type="submit" class="out">Sign out</button></form>` : ""}</div>
 </aside>
 <div class="scrim" id="scrim"></div>
 <div class="pane">
@@ -229,7 +236,8 @@ button.send:disabled { cursor: default; transform: none; }
 <script type="module">
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
-const user = params.get("user") || "member-1";
+// Signed in, the door names the member and ignores any user the page sends; without sign-on, the page names one.
+const user = ${me ? JSON.stringify(me.id).replace(/</g, "\\u003c") : 'params.get("user") || "member-1"'};
 const channel = params.get("channel") || undefined;
 // The thread lives in this tab's sessionStorage, so a reload or a visit to a record and back keeps it.
 const KEY = "aliquot.thread." + (channel || "") + "." + user;
@@ -345,11 +353,23 @@ function refusal(title, text) {
   return b;
 }
 
-// The document the answer names on its Source line.
-function cite(source) {
+// The entry the answer names on its Source line. The door finds it in the snapshots the run's record says it read, and
+// says whether this person may open it; the chip then opens it, or says who can, or that no such entry was read.
+async function cite(source, runId) {
   if (!source) return null;
   const c = el("p", "cite");
-  c.append(el("span", "k", "Source"), el("span", "doc", source));
+  c.append(el("span", "k", "Source"));
+  const q = "/runs/" + runId + "/source";
+  const found = await fetchJson(q + ".json?path=" + encodeURIComponent(source)).catch(() => null);
+  if (found && found.found && found.open) {
+    const a = el("a", "doc", found.title); a.href = q + "?path=" + encodeURIComponent(source); a.title = found.kb + ", " + found.path;
+    c.append(a);
+  } else if (found && found.found) {
+    c.append(el("span", "doc", found.title), el("span", "who", found.cls + ": " + found.who.charAt(0).toUpperCase() + found.who.slice(1) + " can open this entry."));
+  } else {
+    c.append(el("span", "doc", source));
+    if (found) c.append(el("span", "who", "Not an entry in the knowledge bases this run read."));
+  }
   return c;
 }
 
@@ -528,7 +548,7 @@ async function watch(turn, steps, runId, scroll) {
         done(steps, answer(m ? raw.slice(0, m.index) : raw));
         if (withheld) turn.body.append(el("p", "withheld", withheld + (withheld === 1 ? " tool result was" : " tool results were") + " withheld from the model"));
       }
-      const c = cite(source);
+      const c = await cite(source, runId);
       if (c) turn.margin.append(c);
       turn.margin.append(witness(runId, events));
       turn.entry.dataset.entryDone = "";

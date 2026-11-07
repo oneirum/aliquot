@@ -37,11 +37,13 @@ services:
 
   web:
     <<: *app
-    command: ["node", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/web.ts", "--config", "/etc/aliquot/lab.toml", "--host", "0.0.0.0", "--port", "3000"]
+    command: ["node", "--permission", "--allow-fs-read=*", "--allow-net", "packages/core/bin/web.ts", "--config", "/etc/aliquot/lab.toml", "--host", "0.0.0.0", "--published", "${LABH_BIND:-127.0.0.1}", "--port", "3000"]   # --published: the door refuses an address beyond the machine unless lab.toml has [auth]
     environment:
       <<: *app-env
       ALIQUOT_STUDIO_TOKEN: ${ALIQUOT_STUDIO_TOKEN:-}
       ALIQUOT_SLACK_TOKEN: ${ALIQUOT_SLACK_TOKEN:-}    # the [surfaces.slack] token, so the door knows the Slack door
+      LABH_SESSION_SECRET: ${LABH_SESSION_SECRET:-}    # signs session cookies when lab.toml has [auth]
+      LABH_OIDC_CLIENT_SECRET: ${LABH_OIDC_CLIENT_SECRET:-}   # [auth] client_secret_env, when the provider gave the door a secret
     ports: ["${LABH_BIND:-127.0.0.1}:${LABH_WEB_PORT:-3000}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]

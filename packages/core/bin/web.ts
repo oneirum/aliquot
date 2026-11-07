@@ -1,10 +1,14 @@
 #!/usr/bin/env node
-// labh web: node --permission --allow-fs-read=* --allow-net packages/core/bin/web.ts --config lab.toml [--port 3000] [--host 127.0.0.1]
+// labh web: node --permission --allow-fs-read=* --allow-net packages/core/bin/web.ts --config lab.toml [--port 3000] [--host <[surfaces.web] bind>] [--published <address>]
+// --published is where members reach the door when that differs from where it listens: inside a container the door
+// listens on 0.0.0.0 and compose publishes it on LABH_BIND, so compose passes that address here.
 import { hostname } from "node:os";
 import { parseArgs } from "node:util";
 import { boot } from "../src/boot.ts";
-import { configProblem } from "../src/config.ts";
+import { bindRefusal, configProblem, loadConfig } from "../src/config.ts";
 import { requireProcessPermission, sealNetwork } from "../src/seal.ts";
+import { createSignOn, studioAccountsExist, type SignOn } from "../src/surfaces/signon.ts";
+import { providerWire } from "../src/surfaces/signon-wire.ts";
 import { studioRoute } from "../src/surfaces/studio-door.ts";
 import { createWebHandler, doorTokens, listenWeb, type DoorTokens } from "../src/surfaces/web.ts";
 
@@ -15,25 +19,42 @@ if (denied) {
 }
 sealNetwork();
 
-const { values } = parseArgs({ options: { config: { type: "string", default: "lab.toml" }, port: { type: "string" }, host: { type: "string", default: "127.0.0.1" } } });
+const { values } = parseArgs({ options: { config: { type: "string", default: "lab.toml" }, port: { type: "string" }, host: { type: "string" }, published: { type: "string" } } });
 
 const configRefused = await configProblem(values.config);
 if (configRefused) {
   process.stderr.write(`${configRefused}\n`);
   process.exit(2);
 }
+const config = await loadConfig(values.config);
+const host = values.host ?? config.web.bind;
+const reachRefused = bindRefusal(values.published ?? host, config.signOn !== null);
+if (reachRefused) {
+  process.stderr.write(`the web door refuses to start: ${reachRefused}\n`);
+  process.exit(2);
+}
+
 const core = await boot(values.config);
 const log = (line: string) => console.error(line);
 let tokens: DoorTokens;
+let signOn: SignOn | undefined;
 try {
   tokens = doorTokens(core.config.surfaces, process.env, log);
+  const s = core.config.signOn;
+  if (s) {
+    const secret = s.clientSecretEnv === null ? null : (process.env[s.clientSecretEnv] ?? "");
+    if (secret === "") throw new Error(`[auth] names client_secret_env ${s.clientSecretEnv}, which is not set`);
+    signOn = createSignOn({ config: s, wire: providerWire, db: core.db, sessionSecret: process.env[s.sessionSecretEnv] ?? "", clientSecret: secret, baseUrl: core.config.web.baseUrl });
+    if (!(await studioAccountsExist(core.db))) log("[web] sign-on is on, but the studio has no accounts yet, so nobody can sign in until the studio has started once and its PI has added members");
+  }
 } catch (err) {
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
   await core.close();
   process.exit(2);
 }
-const { server, port } = await listenWeb(createWebHandler(core.db, core.intake, log, core.config.web.channel, core.config.labName ?? hostname(), tokens, (surface, op, json) => studioRoute(core, surface, op, json)), values.port ? Number(values.port) : core.config.web.port, values.host);
-console.log(`[web] listening on http://${values.host}:${port}`);
+const handler = createWebHandler(core.db, core.intake, log, core.config.web.channel, core.config.labName ?? hostname(), tokens, (surface, op, json) => studioRoute(core, surface, op, json), { ...(signOn ? { signOn } : {}), kb: core.kb });
+const { server, port } = await listenWeb(handler, values.port ? Number(values.port) : core.config.web.port, host);
+console.log(`[web] listening on http://${host}:${port}${signOn ? `, members sign in at ${new URL(core.config.signOn!.issuer).host}` : ""}`);
 
 const shutdown = () => {
   server.close(() => void core.close().then(() => process.exit(0)));

@@ -61,7 +61,7 @@ test("lab.example.toml names the literature hosts and the contact env var, and i
 });
 
 const acp = '[surfaces.acp]\nkind = "acp"\nplacement = "zdr"\ntoken_env = "ALIQUOT_ACP_TOKEN"\n';
-const web = { id: "web", kind: "web", placement: "lab", port: 3000, baseUrl: "http://localhost:3000", channel: null };
+const web = { id: "web", kind: "web", placement: "lab", port: 3000, baseUrl: "http://localhost:3000", channel: null, bind: "127.0.0.1" };
 
 test("[surfaces.<id>] lists every surface, web included; without [surfaces.web] web is lab on port 3000", () => {
   assert.deepEqual(parseConfig(base, "/l/lab.toml").surfaces, [web]);
@@ -69,7 +69,7 @@ test("[surfaces.<id>] lists every surface, web included; without [surfaces.web] 
   assert.deepEqual(c.surfaces, [web, { id: "acp", kind: "acp", placement: "zdr", tokenEnv: "ALIQUOT_ACP_TOKEN" }]);
   assert.equal(c.surfaces[0], c.web);
   const own = parseConfig(`${base}[surfaces.web]\nplacement = "institution"\nport = 8080\nbase_url = "https://aliquot.lab.edu"\nchannel = "flow"\n`, "/l/lab.toml");
-  assert.deepEqual(own.web, { id: "web", kind: "web", placement: "institution", port: 8080, baseUrl: "https://aliquot.lab.edu", channel: "flow" });
+  assert.deepEqual(own.web, { id: "web", kind: "web", placement: "institution", port: 8080, baseUrl: "https://aliquot.lab.edu", channel: "flow", bind: "127.0.0.1" });
   assert.equal(parseConfig(`${base}[surfaces.web]\nkind = "web"\n`, "/l/lab.toml").web.kind, "web");
 });
 

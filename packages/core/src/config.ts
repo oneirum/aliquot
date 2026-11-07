@@ -64,6 +64,34 @@ export interface WebSurfaceConfig {
   readonly baseUrl: string;
   /** The one channel this web surface serves, or null when the page names it. */
   readonly channel: string | null;
+  /** The address the door listens on. Beyond loopback only with [auth], because without sign-on the door trusts the member id it is given. */
+  readonly bind: string;
+}
+
+/**
+ * [auth]: OpenID Connect sign-on for the web door. The member is the email the provider vouches for, matched to a studio
+ * account by email. Secrets are named by env var.
+ */
+export interface SignOnConfig {
+  readonly issuer: string;
+  readonly clientId: string;
+  /** Null for a public client, which PKCE alone protects. */
+  readonly clientSecretEnv: string | null;
+  /** Signs the session cookie. */
+  readonly sessionSecretEnv: string;
+  /** The ID token claim that holds the member's email: email for most providers, preferred_username for some Entra ID tenants. */
+  readonly emailClaim: string;
+}
+
+/** 127.0.0.0/8, ::1 and localhost: the addresses only this machine reaches. */
+export function isLoopback(address: string): boolean {
+  const a = address.replace(/^\[|\]$/g, "").toLowerCase();
+  return a === "localhost" || a === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a);
+}
+
+/** Null when the door may be reached at this address; otherwise why not. The binary and lab.toml both ask. */
+export function bindRefusal(address: string, signOn: boolean): string | null {
+  return signOn || isLoopback(address) ? null : `${address} reaches beyond this machine, which needs [auth]: without sign-on the door trusts the member id it is given`;
 }
 
 /** A surface that names itself to the door with a bearer token, read from tokenEnv and never from lab.toml. */
@@ -79,7 +107,7 @@ export type SurfaceConfig = WebSurfaceConfig | TokenSurfaceConfig;
 /** The id is a segment of every run key, surface:channel:thread:message. */
 const SURFACE_ID = /^[a-z][a-z0-9_-]*$/;
 const webSurface = z
-  .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional() })
+  .object({ kind: z.literal("web").optional(), placement: placement.default("lab"), port: z.number().int().default(3000), base_url: z.string().optional(), channel: z.string().regex(/^[^:]+$/).optional(), bind: z.string().min(1).default("127.0.0.1") })
   .strict();
 const tokenSurface = z.object({ kind: z.enum(["slack", "phone", "acp", "mcp", "studio"]), placement, token_env: z.string().min(1) }).strict();
 
@@ -110,7 +138,7 @@ function parseSurface(id: string, raw: unknown): SurfaceConfig {
     if (refused?.placements.includes(e.placement)) fail(`placement ${e.placement} is refused: ${refused.why}`);
     return { id: id as SurfaceId, kind: e.kind, placement: e.placement, tokenEnv: e.token_env };
   }
-  return { id: id as SurfaceId, kind: "web", placement: e.placement, port: e.port, baseUrl: e.base_url ?? `http://localhost:${e.port}`, channel: e.channel ?? null };
+  return { id: id as SurfaceId, kind: "web", placement: e.placement, port: e.port, baseUrl: e.base_url ?? `http://localhost:${e.port}`, channel: e.channel ?? null, bind: e.bind };
 }
 
 /** Web first, then every other surface in file order. Without [surfaces.web], web is lab on port 3000, as before surfaces had ids. */
@@ -174,6 +202,16 @@ const schema = z.object({
     .optional(),
   research: z.object({ contact_email_env: z.string().min(1).optional() }).strict().default({}),
   lab: z.object({ name: z.string().trim().min(1).optional() }).strict().default({}),
+  auth: z
+    .object({
+      issuer: z.string().url(),
+      client_id: z.string().min(1),
+      client_secret_env: z.string().min(1).optional(),
+      session_secret_env: z.string().min(1).default("LABH_SESSION_SECRET"),
+      email_claim: z.string().min(1).default("email"),
+    })
+    .strict()
+    .optional(),
 });
 
 export interface LabConfig {
@@ -199,6 +237,8 @@ export interface LabConfig {
   readonly contactEmailEnv: string | null;
   /** [lab] name: what the web pages show as the lab's name, or null to show the machine's hostname. */
   readonly labName: string | null;
+  /** [auth], or null: the door then trusts the member id it is given, and listens on loopback only. */
+  readonly signOn: SignOnConfig | null;
 }
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
@@ -229,6 +269,8 @@ export function parseConfig(text: string, path: string): LabConfig {
   const clash = Object.keys(c.agent_backends).filter((id) => id in c.endpoints);
   if (clash.length) throw new Error(`lab.toml: ${clash.join(", ")} is both an endpoint and an agent backend; ids share one namespace`);
   const surfaces = parseSurfaces(c.surfaces);
+  const refused = bindRefusal(surfaces[0].bind, c.auth !== undefined);
+  if (refused) throw new Error(`lab.toml: [surfaces.web] bind: ${refused}`);
   const bound = surfaces[0].channel;
   const lowered = Object.entries(c.channel_floors).filter(([key, cls]) => rank(cls) < rank("D1") && key !== `web:${bound}`);
   if (lowered.length)
@@ -273,6 +315,9 @@ export function parseConfig(text: string, path: string): LabConfig {
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
+    signOn: c.auth
+      ? { issuer: c.auth.issuer, clientId: c.auth.client_id, clientSecretEnv: c.auth.client_secret_env ?? null, sessionSecretEnv: c.auth.session_secret_env, emailClaim: c.auth.email_claim }
+      : null,
   };
 }
 

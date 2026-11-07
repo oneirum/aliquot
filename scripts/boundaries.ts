@@ -42,6 +42,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/gateway.ts": ["platform-fetch", "egress-decision"],
   "packages/core/src/tools.ts": ["platform-fetch", "egress-decision", "computed-specifier", "stamp"],
   "packages/core/src/surfaces/web.ts": ["module:http"],
+  // Sign-on: the web door's only reach to the lab's OIDC provider (discovery, keys, token endpoint), over https or loopback http.
+  "packages/core/src/surfaces/signon-wire.ts": ["module:http", "module:https"],
   // aliquot ask and acp: a client of the web door's routes, over http or https.
   "packages/core/src/door-client.ts": ["module:http", "module:https"],
   // aliquot slack: Slack's Web API and Socket Mode, over https (http and ws on loopback for a test).
