@@ -175,6 +175,7 @@ const schema = z.object({
     .optional(),
   research: z.object({ contact_email_env: z.string().min(1).optional() }).strict().default({}),
   lab: z.object({ name: z.string().trim().min(1).optional() }).strict().default({}),
+  anchor: z.object({ path: z.string().min(1), every_minutes: z.number().int().positive().default(15) }).strict().optional(),
 });
 
 export interface LabConfig {
@@ -200,6 +201,8 @@ export interface LabConfig {
   readonly contactEmailEnv: string | null;
   /** [lab] name: what the web pages show as the lab's name, or null to show the machine's hostname. */
   readonly labName: string | null;
+  /** [anchor]: the append-only log signed checkpoints of the hash chains go to (absolute), and how often the worker writes one. */
+  readonly anchor: { readonly path: string; readonly everyMinutes: number } | null;
 }
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
@@ -274,6 +277,7 @@ export function parseConfig(text: string, path: string): LabConfig {
     sandbox: c.sandbox ? { image: c.sandbox.image, digest: IMAGE_BY_DIGEST.exec(c.sandbox.image)![1]! as Sha256, cpus: c.sandbox.cpus, memoryMb: c.sandbox.memory_mb, timeoutMs: c.sandbox.timeout_ms, socket: c.sandbox.socket } : null,
     contactEmailEnv: c.research.contact_email_env ?? null,
     labName: c.lab.name ?? null,
+    anchor: c.anchor ? { path: resolve(dir, c.anchor.path), everyMinutes: c.anchor.every_minutes } : null,
   };
 }
 

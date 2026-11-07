@@ -32,7 +32,9 @@ import { startFakeModel } from "../test/fake-model.ts";
 import { startFakeSlack } from "../test/fake-slack.ts";
 import { APP_ID, APP_SECRET, startFakeTeams, TENANT } from "./fake-teams.ts";
 import { freshDatabase } from "../test/db.ts";
-import { checker, ensurePostgres, get, post, processes, runWithInput, waitFor } from "./procs.ts";
+import { checker, ensurePostgres, get, post, processes, runWithInput, waitFor, waitLine } from "./procs.ts";
+import { newAnchorKeyPem } from "../packages/core/src/anchor.ts";
+import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
 
 interface Prereg {
   readonly inDocument: readonly { readonly id: string; readonly question: string; readonly expected: string }[];
@@ -63,7 +65,7 @@ const mcpToken = randomBytes(32).toString("hex");
 const personalToken = randomBytes(32).toString("hex");
 const slackToken = randomBytes(32).toString("hex");
 const teamsToken = randomBytes(32).toString("hex");
-const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken, LAB0_SLACK_TOKEN: slackToken, LAB0_TEAMS_TOKEN: teamsToken };
+const childEnv: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_ACP_TOKEN: acpToken, LAB0_MCP_TOKEN: mcpToken, LAB0_PERSONAL_TOKEN: personalToken, LAB0_SLACK_TOKEN: slackToken, LAB0_TEAMS_TOKEN: teamsToken, LABH_ANCHOR_KEY_FILE: join(work, "anchor.key") };
 const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
@@ -591,6 +593,26 @@ try {
   await check("total: the hosted endpoint saw exactly the one control request", async () => {
     assert.equal(hosted.requests, 1);
     return "hosted requests over the whole script: 1";
+  });
+
+  await check("check Z: the worker signs an anchor of every chain into a log outside the database, and aliquot verify --anchors holds it", async () => {
+    const keyPath = childEnv.LABH_ANCHOR_KEY_FILE!;
+    const logPath = join(work, "anchors.log");
+    writeFileSync(keyPath, newAnchorKeyPem(), { mode: 0o600 });
+    const cfgAnchor = join(work, "lab-anchor.toml");
+    writeFileSync(cfgAnchor, `${readFileSync(cfgHandbook, "utf8")}[anchor]\npath = "anchors.log"\nevery_minutes = 15\n`);
+    const bin = (b: string) => join(root, "packages/core/bin", b);
+    const worker = ps.startGroup("worker-anchor", process.execPath, [...PERMISSION_FLAGS, `--allow-fs-write=${logPath}`, bin("worker.ts"), "--config", cfgAnchor, "--worker-id", "WZ"], root);
+    const line = await waitLine(worker, /anchor \{.*\}/, 15_000);
+    await ps.stop(worker);
+    const anchor = JSON.parse(line.slice(line.indexOf("{"))) as { n: number; audit: { seq: number } | null; runs: unknown[] };
+    assert.equal(anchor.n, 1);
+    assert.ok(anchor.runs.length >= runs.length, `${anchor.runs.length} runs anchored, ${runs.length} started by this script`);
+    const verify = await runWithInput(root, "aliquot.ts", ["--config", cfgAnchor, "verify", "--anchors"], childEnv, "");
+    assert.equal(verify.code, 0, verify.stdout);
+    const held = verify.stdout.trim().split("\n").at(-1)!;
+    assert.match(held, /^anchors: 1 line, every signature valid/);
+    return `anchor line 1: audit seq ${anchor.audit?.seq ?? "none"}, ${anchor.runs.length} closed runs; ${held}`;
   });
 } finally {
   await ps.stopAll();
