@@ -45,6 +45,7 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 - **For:** research IT and the data steward.
 - **After it:** key rotation, per-class keys, a retention sweep that redacts payloads past a lab's window while the chain still verifies, and university sign-on (SAML or OIDC) for the studio and the chat page.
 - **Done when:** a rotation test reads old and new payloads, a sweep test verifies the chain after redaction, and a sign-on test passes against a local OIDC provider.
+- **Shipped:** all three, with OpenID Connect sign-on on the web door and the chat page. The studio keeps its own accounts, and SAML goes through a campus OIDC bridge; studio sign-on moved to Later.
 
 ## 0.8: studies an IRB can cite (released)
 
@@ -54,6 +55,7 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 
 ## Later
 
+- Sign-on for the studio, and `ask` and `acp` tokens minted from a signed-in session.
 - Harness doors off the machine, after sign-on: an `acp` surface in the door with its own placement, so the server enforces the ceiling, and `ask` and `acp` against a signed-in remote door.
 - Agent CLI confinement on Linux, so Claude Code and Codex agents run on a campus VM.
 - Tools a lab adds itself, each behind an OS-level boundary (a separate user, a container or a VM).
