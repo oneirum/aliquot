@@ -55,6 +55,7 @@ import { citedVersions, recordView, recordViewOf, sourceStatus as versionStatus 
 import { currentProvenance } from "../kb.ts";
 import { EMPTY_DIRECTORY, runViewer, type MemberDirectory } from "../members.ts";
 import { seesAllRuns, type Role } from "../roles.ts";
+import { NO_PRICES, type PriceBook } from "../usage.ts";
 import type { LabConfig, SurfaceConfig, SurfaceKind, TokenSurfaceConfig } from "../config.ts";
 import { SignOnRefused, type SignOn } from "./signon.ts";
 import { chatPage } from "./web-chat.ts";
@@ -275,6 +276,7 @@ function redirect(res: ServerResponse, location: string, cookies: readonly strin
  * studio serves the /studio routes (studio-door.ts); without it, they answer 404.
  * access.signOn is [auth]'s sign-on (createSignOn); without it, the web surface trusts the body's user, as before sign-on.
  * access.kb reads the entries answers cite; without it, the source routes answer 404.
+ * prices is lab.toml's [prices]: the record page shows a run's cost when it has any.
  */
 export function createWebHandler(
   db: Db,
@@ -285,6 +287,7 @@ export function createWebHandler(
   tokens: DoorTokens = new Map(),
   studio: StudioHandler | null = null,
   access: { readonly signOn?: SignOn; readonly kb?: KbReader; readonly directory?: MemberDirectory } = {},
+  prices: PriceBook = NO_PRICES,
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const { signOn, kb, directory } = access;
   return async (req, res) => {
@@ -409,7 +412,7 @@ export function createWebHandler(
           if (runPath[2] === "source.json") return send(req, res, 200, sourceChip(cited, role), NO_STORE);
           return sendHtml(req, res, sourcePage(runId.data, cited, role, where), NO_STORE, sourceStatus(cited, role));
         }
-        const view = await recordViewOf(db, runId.data, events, deps.store.held);
+        const view = await recordViewOf(db, runId.data, events, deps.store.held, prices);
         return runPath[2] ? send(req, res, 200, view, NO_STORE) : sendHtml(req, res, recordPage(view, where), NO_STORE);
       }
       send(req, res, 404, { error: "not found" });

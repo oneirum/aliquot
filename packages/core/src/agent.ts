@@ -94,6 +94,8 @@ export interface AgentDocument {
   readonly irbProtocol?: string;
   /** The purpose stated against KB consent scopes. */
   readonly consentPurpose?: string;
+  /** The grant or cost center its model calls are charged to. Governance: stamped on each run.started, never hashed. */
+  readonly project?: string;
 }
 
 /**
@@ -199,6 +201,7 @@ export interface AgentListing {
   readonly ceiling: DataClass;
   readonly provenancePolicy: AgentDocument["provenancePolicy"];
   readonly irbProtocol: string | null;
+  readonly project: string | null;
   readonly status: "published" | "retired" | "read-only";
 }
 
@@ -350,6 +353,13 @@ export const agentDocumentSchema = z.object({
   sampleQuestions: z.array(z.string()).default([]).meta(says("Sample questions", "Questions this agent should win. The router uses them.")),
   irbProtocol: z.string().optional().meta(says("IRB protocol", "Required when the agent reads D3 data.")),
   consentPurpose: z.string().optional().meta(says("Consent purpose", "The purpose this agent serves, checked against knowledge base consent scopes.")),
+  project: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .optional()
+    .meta(says("Project", "Optional. The grant or cost center this agent's model calls are charged to, for example R01-MH123456. aliquot usage --by project totals cost by it.")),
 });
 
 /** Boundary: untyped JSON in, a typed document out. The branded ids are applied here and nowhere else. */
@@ -543,6 +553,7 @@ export function listingOf(doc: AgentDocument): AgentListing {
     ceiling: doc.ceiling,
     provenancePolicy: doc.provenancePolicy,
     irbProtocol: doc.irbProtocol ?? null,
+    project: doc.project ?? null,
     status: "published",
   };
 }

@@ -20,6 +20,7 @@ import { buildPolicy, ceilingOfStore, type Policy } from "./policy.ts";
 import { declaredClass, loadPreset, mergeClasses, type Preset } from "./preset.ts";
 import { parseDuas, type Dua } from "./dua.ts";
 import { MIN_CELL, type Table } from "./tables.ts";
+import type { Price, PriceBook } from "./usage.ts";
 
 const placement = z.enum(PLACEMENTS);
 const KEY_ID = /^[a-z0-9][a-z0-9_-]*$/;
@@ -217,6 +218,41 @@ const documentSource = z.discriminatedUnion("kind", [
   /** Named so a lab sees them in the docs; not built in this release. */
   z.object({ kind: z.enum(["labarchives", "benchling"]) }).passthrough(),
 ]);
+/** A rate per million tokens, in at most millionths of the currency, so every cost is exact. */
+const perMtok = z
+  .number()
+  .nonnegative()
+  .refine((n) => Math.abs(n * 1e6 - Math.round(n * 1e6)) < 1e-6, "has more than 6 decimal places");
+/** smol-toml reads a bare 2026-10-01 as a date; a quoted one is a string. Either is a UTC day. */
+const effectiveDay = z.union([z.string(), z.date()]).transform((d, ctx) => {
+  const s = typeof d === "string" ? d : d.toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) {
+    ctx.addIssue({ code: "custom", message: "must be a date, YYYY-MM-DD" });
+    return z.NEVER;
+  }
+  return s;
+});
+const priceEntry = z
+  .object({ input_per_mtok: perMtok, output_per_mtok: perMtok, currency: z.string().regex(/^[A-Z]{3}$/, "must be a three-letter code such as USD"), effective: effectiveDay })
+  .strict();
+
+function parsePrices(tables: Record<string, unknown>): PriceBook {
+  const book = new Map<string, Price[]>();
+  for (const [key, raw] of Object.entries(tables)) {
+    const parsed = z.union([priceEntry, z.array(priceEntry).min(1)]).safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]!;
+      throw new Error(`lab.toml: [prices.${key}] ${issue.path.length ? `${issue.path.join(".")}: ` : ""}${issue.message}; give input_per_mtok, output_per_mtok, currency and effective`);
+    }
+    const rates = (Array.isArray(parsed.data) ? parsed.data : [parsed.data])
+      .map((p) => ({ effective: p.effective, currency: p.currency, inputMicro: BigInt(Math.round(p.input_per_mtok * 1e6)), outputMicro: BigInt(Math.round(p.output_per_mtok * 1e6)) }))
+      .sort((a, b) => a.effective.localeCompare(b.effective));
+    for (let i = 1; i < rates.length; i++)
+      if (rates[i]!.effective === rates[i - 1]!.effective) throw new Error(`lab.toml: [prices.${key}] has two rates effective ${rates[i]!.effective}; one day has one rate`);
+    book.set(key, rates);
+  }
+  return book;
+}
 
 const schema = z.object({
   database: z.object({ url_env: z.string().default("DATABASE_URL") }).default({ url_env: "DATABASE_URL" }),
@@ -341,6 +377,8 @@ const schema = z.object({
       `email_claim names a claim nobody verified (preferred_username, upn, unique_name): a user or tenant admin can set it to any address, the PI's included. Use email, or set trust_unverified_email = true only for a provider that issues every address itself`,
     )
     .optional(),
+  /** [prices.<model id or endpoint id>]: one table, or [[prices.<id>]] for a schedule of rates. */
+  prices: z.record(z.string(), z.unknown()).default({}),
 });
 
 export interface LabConfig {
@@ -382,6 +420,8 @@ export interface LabConfig {
   readonly retention: Retention;
   /** [auth], or null: the door then trusts the member id it is given, and listens on loopback only. */
   readonly signOn: SignOnConfig | null;
+  /** The schedule of rates usage is charged at. Empty when lab.toml has no [prices]. */
+  readonly prices: PriceBook;
 }
 
 /**
@@ -577,6 +617,7 @@ export function parseConfig(text: string, path: string): LabConfig {
       throw new Error(`lab.toml: source ${id}: ${s.kind} is not a source kind in this release; sync its exports to a folder and register that folder (kind = "folder")`);
     }),
     directory: { groups: c.directory.groups, emails: c.directory.emails },
+    prices: parsePrices(c.prices),
   };
 }
 

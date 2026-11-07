@@ -9,6 +9,7 @@ import { describeRefusal } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { describeFailure, eventRefs, payloadStates, verifyChain, type CitedVersion, type PayloadState, type RedactionReason, type RunEvent, type StoredEvent } from "./record.ts";
 import type { PayloadHash, SnapshotId } from "./hash.ts";
+import { callsOf, costOf, formatAmount, NO_PRICES, type PriceBook } from "./usage.ts";
 
 /** Every document version a run's retrievals returned, once each, in the order first returned. */
 export function citedVersions(events: readonly { readonly event: RunEvent }[]): (CitedVersion & { readonly snapshot: SnapshotId })[] {
@@ -83,9 +84,9 @@ export function bodyRows(events: readonly StoredEvent[], states: ReadonlyMap<Pay
 }
 
 /** The record with each body's state, as a process holding `held` key ids sees it. */
-export async function recordViewOf(db: Db, runId: string, events: readonly StoredEvent[], held: ReadonlySet<string>): Promise<RecordView> {
+export async function recordViewOf(db: Db, runId: string, events: readonly StoredEvent[], held: ReadonlySet<string>, prices: PriceBook = NO_PRICES): Promise<RecordView> {
   const hashes = [...new Set(events.flatMap((e) => eventRefs(e.event).map((r) => r.ref.hash)))];
-  return recordView(runId, events, bodyRows(events, await payloadStates(db, hashes), held));
+  return recordView(runId, events, bodyRows(events, await payloadStates(db, hashes), held), prices);
 }
 
 /** One line for a terminal: what a reader of the record can learn about a body without reading it. */
@@ -112,9 +113,14 @@ export interface RunSummary {
   readonly entriesRetrieved: number;
   readonly refused: number;
   readonly withheld: number;
+  /** Null when lab.toml has no [prices]. Amounts per currency to four places; unpriced calls had no rate in force. */
+  readonly cost: { readonly amounts: readonly { readonly currency: string; readonly amount: string }[]; readonly unpricedCalls: number } | null;
 }
 
-export function summarize(events: readonly StoredEvent[]): RunSummary {
+/** A run's cost to four places, because one run is usually less than a cent. aliquot usage totals to the cent. */
+const RUN_COST_PLACES = 4;
+
+export function summarize(events: readonly StoredEvent[], prices: PriceBook = NO_PRICES): RunSummary {
   const tools = new Map<string, number>();
   const entries = new Set<string>();
   let modelCalls = 0, input = 0, output = 0, refused = 0, withheld = 0;
@@ -133,7 +139,21 @@ export function summarize(events: readonly StoredEvent[]): RunSummary {
     entriesRetrieved: entries.size,
     refused,
     withheld,
+    cost: prices.size ? runCost(events, prices) : null,
   };
+}
+
+function runCost(events: readonly StoredEvent[], prices: PriceBook): NonNullable<RunSummary["cost"]> {
+  const c = costOf(callsOf(events), prices);
+  return { amounts: [...c.priced].map(([currency, units]) => ({ currency, amount: formatAmount(units, RUN_COST_PLACES) })), unpricedCalls: c.unpriced.calls };
+}
+
+/** "USD 0.0042", "USD 0.0042, 1 call with no price", "no price", or null without [prices]. */
+export function describeCost(cost: RunSummary["cost"]): string | null {
+  if (!cost) return null;
+  const priced = cost.amounts.map((a) => `${a.currency} ${a.amount}`).join(" + ");
+  if (!cost.unpricedCalls) return priced || "no model calls to price";
+  return priced ? `${priced}, ${cost.unpricedCalls} ${cost.unpricedCalls === 1 ? "call" : "calls"} with no price` : "no price";
 }
 
 /** One line for a terminal: `2 model calls, 30 tokens in, 15 out; tools kb_search, kb_read; 3 entries retrieved; 0 refused`. */
@@ -142,6 +162,8 @@ export function formatSummary(s: RunSummary): string {
   const tools = s.toolCalls.length ? `tools ${s.toolCalls.map((t) => (t.calls > 1 ? `${t.tool} x${t.calls}` : t.tool)).join(", ")}` : "no tool calls";
   const parts = [`${s.ms} ms`, n(s.modelCalls, "model call"), `${s.tokens.input} tokens in, ${s.tokens.output} out`, tools, n(s.entriesRetrieved, "entry retrieved", "entries retrieved"), `${s.refused} refused`];
   if (s.withheld) parts.push(`${s.withheld} withheld`);
+  const cost = describeCost(s.cost);
+  if (cost) parts.push(`cost ${cost}`);
   return parts.join("; ");
 }
 
@@ -219,7 +241,7 @@ export function describeEvent(e: RunEvent): string {
   }
 }
 
-export function recordView(runId: string, events: readonly StoredEvent[], bodies: readonly BodyRow[] = []): RecordView {
+export function recordView(runId: string, events: readonly StoredEvent[], bodies: readonly BodyRow[] = [], prices: PriceBook = NO_PRICES): RecordView {
   const started = events.find((e) => e.event.t === "run.started")?.event;
   const finished = events.find((e) => e.event.t === "run.finished")?.event;
   const t0 = events.length ? Date.parse(events[0]!.at) : 0;
@@ -230,7 +252,7 @@ export function recordView(runId: string, events: readonly StoredEvent[], bodies
     route: started?.t === "run.started" ? describeRoute(started.route) : null,
     outcome: finished?.t === "run.finished" ? finished.outcome : "running",
     chain: { events: events.length, firstBad: verifyChain(events) },
-    summary: summarize(events),
+    summary: summarize(events, prices),
     rows: events.map((e) => ({ seq: e.seq, ms: Date.parse(e.at) - t0, t: e.event.t, cls: e.cls, detail: describeEvent(e.event), refused: e.event.t === "egress.refused" || e.event.t === "tool.withheld" })),
     bodies,
   };

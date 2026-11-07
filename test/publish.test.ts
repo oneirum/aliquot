@@ -173,3 +173,25 @@ test("intake runs the head bound to the channel; a studio test runs the unpublis
   assert.deepEqual(job.rows[0], { key: "test:studio:studio:studio-bound:x1", payload: { ...job.rows[0]!.payload, trigger: { t: "test", memberId: "ana" } } });
   assert.equal((await intake({ ...msg, channel: { surface: WEB_SURFACE, channelId: "unbound" } }, intakeDeps)).t, "refused");
 });
+
+test("a published agent's project rides the job to run.started, and changing it never changes the version hash", async () => {
+  const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
+  const intakeDeps: IntakeDeps = {
+    db,
+    store,
+    queue: createQueue(db),
+    catalog: async () => catalog,
+    gate: { members: async (id) => ({ id: id as MemberId, audiences: [{ t: "lab" }] }), channelFloor: async () => "D1", labPatterns: [], policy: DEFAULT_POLICY },
+    agentsFor: (channel) => publishedAgentsFor(db, channel),
+  };
+  const tagged = doc({ agentId: "granted", channels: ["web:granted"], project: "R01-MH123456" });
+  const plain = resolveAgent(doc({ agentId: "granted", channels: ["web:granted"] }), catalog);
+  const withProject = resolveAgent(tagged, catalog);
+  assert.ok(plain.ok && withProject.ok);
+  assert.equal(versionHash(withProject.agent), versionHash(plain.agent));
+  await confirmPublish(deps, tagged, draftHashOf(tagged), publisher, "charge to the R01");
+  const live = await intake({ channel: { surface: WEB_SURFACE, channelId: "granted" }, threadId: "t9", messageId: "m9", platformUserId: "ana", text: "Office hours?", attachments: [], addressed: true, at: new Date().toISOString() }, intakeDeps);
+  assert.ok(live.t === "enqueued");
+  const job = await db.query<{ payload: { project: string | null } }>("select payload from jobs where id = $1", [live.runId]);
+  assert.equal(job.rows[0]!.payload.project, "R01-MH123456");
+});

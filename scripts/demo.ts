@@ -75,6 +75,7 @@ writeFileSync(
       knowledgeBases: ["lab0-handbook"],
       ceiling: "D1",
       model: { endpointId: "hosted", modelId: "hosted-demo-1", params: { temperature: 0, maxOutputTokens: 256 } },
+      project: "R01-DEMO-0001",
     },
     null,
     2,
@@ -97,6 +98,11 @@ writeFileSync(
     "[endpoints.hosted]",
     `base_url = "${agentModel.url}"`,
     'placement = "zdr"',
+    "[prices.hosted]",
+    "input_per_mtok = 3.00",
+    "output_per_mtok = 15.00",
+    'currency = "USD"',
+    "effective = 2026-01-01",
     "[lab]",
     'name = "lab0"',
     "[surfaces.web]",
@@ -192,6 +198,8 @@ Then try:
      In a terminal, list the runs and print one record:
      DATABASE_URL=${dbUrl} pnpm aliquot --config .demo/lab.toml runs
      DATABASE_URL=${dbUrl} pnpm aliquot --config .demo/lab.toml record <run-id>
+  4. Total what the runs cost, charged to the agent's project:
+     DATABASE_URL=${dbUrl} pnpm aliquot --config .demo/lab.toml usage --by project
 
 Logs are in ${work}. Press Ctrl-C to stop.
 `);

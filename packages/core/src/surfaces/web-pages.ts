@@ -297,6 +297,11 @@ if (v.chain.events) {
   stat("Tokens", [String(s.tokens.input), tok]);
   stat("Tool calls", String(s.toolCalls.reduce((a, t) => a + t.calls, 0)), s.toolCalls.map((t) => t.calls > 1 ? t.tool + " \u00d7" + t.calls : t.tool).join(", ") || null);
   stat("Entries retrieved", String(s.entriesRetrieved));
+  if (s.cost) {
+    const amounts = s.cost.amounts.map((a) => a.currency + " " + a.amount).join(" + ");
+    const unpriced = s.cost.unpricedCalls ? plural(s.cost.unpricedCalls, "call") + " with no price in lab.toml" : null;
+    stat("Cost", amounts || (s.modelCalls ? "No price" : "None"), amounts ? unpriced : s.modelCalls ? "no rate in lab.toml for this model" : null);
+  }
   const blocked = s.refused + s.withheld;
   stat("Refused", String(blocked), s.withheld ? plural(s.withheld, "result") + " withheld" : null, blocked > 0);
   $("summary").hidden = false;

@@ -56,6 +56,7 @@ test("the summary counts model calls, tokens, tool calls, distinct entries retri
     entriesRetrieved: 2,
     refused: 0,
     withheld: 0,
+    cost: null,
   });
   assert.match(formatRecordView(v), /^summary  8000 ms; 2 model calls; 22 tokens in, 9 out; tools kb_search x2, kb_read; 2 entries retrieved; 0 refused$/m);
 });
