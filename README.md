@@ -18,6 +18,7 @@ Every answer leaves a record you can check. Open source, and it runs on a laptop
 <a href="#quickstart">Quickstart</a> ·
 <a href="#install-on-a-lab-machine">Install</a> ·
 <a href="#what-it-does-for-a-lab">What it does</a> ·
+<a href="#where-members-ask">Where members ask</a> ·
 <a href="#the-chat-page-and-the-record">Chat and record</a> ·
 <a href="#agents-on-claude-code-or-codex">Agent CLIs</a> ·
 <a href="#research-tools">Research tools</a> ·
@@ -114,6 +115,9 @@ A lab answers the same questions every week. Where the freezer log is, how a var
 - **Kept in step with Box, SharePoint, OneDrive and Drive.** A synced folder, a Drive folder or a SharePoint library feeds a knowledge base, an edited SOP reaches the next answer without anyone running a command, every answer's record names the document version it read, and an entry shared with one group is never retrieved for anyone else.
 - **Coverage before publish.** A knowledge base lists the questions it must answer. If the documents do not support one, publish is refused and names the gap, unless a publisher overrides it with a written note.
 - **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later: it opens with a summary of what the run read, called and refused, and downloads as JSON. Each run names the hash of the agent version that answered.
+- **Members sign in, and keys and records hold up.** Members sign in with the university's OpenID Connect provider and see only their own runs. A steward rotates payload keys, keeps restricted data under its own key and redacts bodies past the lab's retention window, and every record still verifies. Signed anchors outside the database show whether anyone rewrote it.
+- **The lab's own rules.** A lab declares its data classes in `lab.toml`, sees them in its campus's tier names, binds controlled data to the members a data use agreement names and the day it ends, and sends PHI only to a model endpoint under a BAA.
+- **Ready for a review.** `pnpm review-pack` answers HIPAA, NIST 800-171 and HECVAT control by control from the lab's `lab.toml`, `pnpm trust` measures unsupported claims, wrong citations and obeyed planted instructions, and a usage ledger charges model use to a grant.
 - **Studies an IRB can cite.** A PI freezes the agent version a study uses, an IRB reads its card and a sheet generated from the deployment, and a reviewer replays a run from an exported bundle without the lab's database.
 
 ## Data classes
@@ -222,6 +226,19 @@ Every knowledge base read and every dataset a run's tools see goes through the a
 - **A member it names reads the data at its class's level,** so it reaches only the models that class allows. Asking an agent on a hosted model whose knowledge base holds DUA data is refused at the door, before any model request: `Not sent. Knowledge base lab0-release holds entries bound by DUA sleep-release, data class restricted at D3, and this agent would read it on endpoint hosted at placement approved; ...`. A DUA in a class whose `model_tier` is `none` keeps its data from every model, for every member.
 
 `pnpm walk:dua` walks two members through it on the synthetic lab and prints what each reads and every request each model received: the member the DUAs do not name gets an answer with no DUA entry text in any request, the named member reads the live DUA's entry on the lab model and not the expired one's, and the hosted model receives no request that carries DUA data.
+
+## Where members ask
+
+Every place goes through the same web door, with the same data-class gate, refusals and record link.
+
+| Where | How |
+|---|---|
+| The chat page | Served by the web door. With `[auth]`, members sign in with the university's OpenID Connect provider and **Runs** lists only their own. |
+| Slack | `aliquot slack`, a mention in a channel or a direct message, answered in the thread ([docs/slack.md](docs/slack.md)). |
+| Microsoft Teams | `aliquot teams`, a mention in a channel or group chat or a personal chat ([docs/teams.md](docs/teams.md)). |
+| A terminal or another harness | `aliquot ask --json`, `aliquot acp` for T3 Code, Zed and JetBrains, and `aliquot mcp` for a member's own Claude Code, Codex or Cursor ([From other harnesses](#from-other-harnesses)). |
+
+When one channel holds several agents, the router in the door picks the one a question is for, without calling a model, and asks the member when it is not sure. A study channel always runs the version its study froze.
 
 ## The chat page and the record
 
@@ -565,6 +582,8 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm slice1` | The run loop: crash and resume exactly once, a zombie worker fenced off, idempotent intake, restricted data refused with zero hosted requests, limits, stop, and the network seal against planted routes. |
 | `pnpm unit3` | Knowledge bases: compile, coverage gaps blocking publish, a restart mid-compile, `kb_search` and `kb_read` in a run, snapshot diff, refused URL hosts, publish with an override note. |
 | `pnpm lab0` | The first-use check on a synthetic lab, described below. |
+| `pnpm walk:router`, `walk:signon`, `walk:keys`, `walk:study` | Each walks one loop on the synthetic lab with a PASS or FAIL line per step: the router on a shared channel; sign-on, sessions and scoped runs against a local OIDC provider; key rotation, a class key and a retention sweep; a study frozen, carded, exported and replayed. |
+| `pnpm walk:policy`, `walk:dua`, `walk:sources` | One question per declared data class (`--preset uw-madison` for a campus's tiers); two members under a DUA; a synced folder, a Drive folder and permissions kept in step. |
 | `pnpm walk:data` | Three members ask lab0's visits CSV and REDCap project; two get different counts to the same question under their own REDCap rights, three questions are refused, each record reruns to the same number, and no row value reaches the hosted model. Needs the sandbox image. |
 | `aliquot verify --anchors` | That nobody rewrote history in the database. The worker signs the head of the audit stream and of each closed run into an anchor log outside the database every few minutes, with a key the database never holds. This checks every line's signature and that the database still holds each signed hash, and names the first seq that changed. `test/anchor.test.ts` rewrites an audit row and a run event, recomputes every later hash so plain `aliquot verify` passes, and shows this check fail at that seq; it also catches a forged line, a line under another key, and a removed line. |
 | `pnpm trust` | The trust numbers in [`docs/trust.md`](docs/trust.md): unsupported claims, wrong citations, refusals both ways and planted instructions obeyed, on a larger synthetic lab. No Postgres and no key; CI runs it on every push. |
@@ -641,12 +660,15 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - One `docker compose up` on Linux with a production studio build and committed migrations, `aliquot init`, and backup and restore, checked end to end on a clean Ubuntu runner.
 - A summary at the top of every record, in the page, the terminal and `--json`, and a JSON download from the record page.
 - `aliquot ask --json` and `aliquot acp` (Agent Client Protocol) through the web door, and a tmux layout, so T3 Code, tmux and other harnesses reach the lab's agents.
+- 0.6: the Slack and Teams doors ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)) and the router across several agents on one channel.
+- 0.7: key rotation, per-class keys and the retention sweep (`aliquot keys`, `aliquot retention`), and OpenID Connect sign-on on the web door with server-side sessions and each member seeing only their own runs (`[auth]`).
+- 0.8: studies, freezes, agent cards, the deployment sheet, and reviewer bundles with PROV and replay ([Studies and replay](#studies-and-replay)).
+- Signed anchors, declared data classes with campus presets, DUAs, campus model endpoints (BAA, region, Azure OpenAI, Bedrock), the security review pack, trust numbers, document sources from sync folders, Drive and SharePoint, answers from CSV and REDCap data, a usage ledger, accessibility checks, and an audit export and health check for research IT.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
-- **0.6, ask where the lab already talks:** the Slack and Teams doors are built ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)), and so is the router across several agents on one channel.
-- **0.7, keys, retention and sign-on:** built: key rotation, per-class keys and the retention sweep (`aliquot keys`, `aliquot retention`), and OpenID Connect sign-on on the web door with each member seeing only their own runs (`[auth]`).
-- **0.8, studies an IRB can cite:** studies, freezes, agent cards, the deployment sheet, reviewer bundles with PROV and replay are built ([Studies and replay](#studies-and-replay)); left are a studio page for studies and the consent disclosure draft.
+- Left from 0.8: a studio page for studies and the consent disclosure draft.
+- Sign-on beyond the web door: the studio, a phone pairing, and `ask` and `acp` tokens minted from a signed-in session.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.
 
 **Known limits**
