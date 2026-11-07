@@ -18,6 +18,7 @@
     "walk:study": "node scripts/walk-study.ts",
     "trust": "node scripts/trust.ts",
     "walk:sources": "node scripts/walk-sources.ts",
+    "walk:data": "node scripts/walk-data.ts",
     "unit2": "node scripts/unit2.ts",
     "demo": "node scripts/demo.ts",
     "doctor": "node scripts/doctor.ts",

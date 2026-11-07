@@ -149,6 +149,26 @@ test("publish refuses a sandbox mount that lab.toml does not declare or that sit
   assert.deepEqual(r.ok && r.agent.sandbox, { imageDigest: "d".repeat(64), mountCeiling: "D1", mounts: ["visits"] });
 });
 
+test("an agent's tables must be in lab.toml, with aggregates at most its ceiling, read through data_query in a deployed sandbox, and only a grant moves the hash", () => {
+  const withTables: Catalog = {
+    ...catalog,
+    sandboxImage: () => "d".repeat(64) as Sha256,
+    tool: (name) => (name === "data_query" ? { hash: "q".repeat(64) as ToolHash, reads: "D0", effects: "read" } : catalog.tool(name)),
+    table: (id) => (id === "visits" ? { aggregateClass: "D1" } : id === "notes" ? { aggregateClass: "D3" } : undefined),
+  };
+  const granted = (tables: string[], tools = [{ name: "data_query" }]) => doc({ ceiling: "D2", tables, tools });
+  assert.deepEqual(validateAgentDraft(granted(["visits"]), withTables), []);
+  assert.deepEqual(validateAgentDraft(granted(["visits", "notes", "nonesuch"]), withTables).map((i) => i.message), ["table notes's aggregates are D3, above the agent ceiling D2", "table nonesuch is not in lab.toml"]);
+  assert.deepEqual(validateAgentDraft(granted([]), withTables).map((i) => i.message), ["data_query needs at least one table in tables"]);
+  assert.deepEqual(validateAgentDraft(granted(["visits"], []), withTables).map((i) => i.message), ["tables are read only through data_query; add it to tools"]);
+  assert.deepEqual(validateAgentDraft(granted(["visits"]), { ...withTables, sandboxImage: () => undefined }).map((i) => i.message), ["data_query runs in the sandbox, and no sandbox image is deployed"]);
+  const r = resolveAgent(granted(["visits"]), withTables);
+  assert.deepEqual(r.ok && r.agent.tables, ["visits"]);
+  const none = resolveAgent(doc(), catalog);
+  assert.ok(none.ok);
+  assert.equal("tables" in none.agent, false, "an agent with no tables keeps the hash it had before tables existed");
+});
+
 test("an agent that may mount D3 data needs an IRB protocol, as one that reads a D3 knowledge base does", () => {
   const withSandbox: Catalog = { ...catalog, sandboxImage: () => "d".repeat(64) as Sha256, dataset: (id) => (id === "ehr" ? { cls: "D3" } : id === "visits" ? { cls: "D1" } : undefined) };
   const sandbox = (mounts: string[], mountCeiling: string, irb?: string) => doc({ ceiling: "D3", sandbox: { enabled: true, mountCeiling, mounts }, ...(irb ? { irbProtocol: irb } : {}) });
