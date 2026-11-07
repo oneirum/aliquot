@@ -34,7 +34,8 @@ export interface Asked {
   readonly hosted: readonly string[];
 }
 
-export async function duaWalk(root: string, work: string, database: string): Promise<Asked[]> {
+/** hold runs after the questions, with the doors still up, for anything that needs a live page (walk-dua --stills). */
+export async function duaWalk(root: string, work: string, database: string, hold?: (doors: Readonly<Record<string, string>>) => Promise<void>): Promise<Asked[]> {
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
   const fx = join(work, "fixtures");
@@ -111,6 +112,7 @@ export async function duaWalk(root: string, work: string, database: string): Pro
     await ask("ana, named, hosted model", ANA, "release-hosted", Q);
     await ask("ana, named, whole-KB DUA on a hosted model", ANA, "cohort-hosted", "When are the cohort visits and what does each visit collect?");
     await ask("ben, not named, whole-KB DUA on a hosted model", BEN, "cohort-hosted", "When are the cohort visits and what does each visit collect?");
+    if (hold) await hold(Object.fromEntries(Object.entries(doors).map(([k, d]) => [k, d.base])));
   } finally {
     await ps.stopAll();
     await lab.close();
