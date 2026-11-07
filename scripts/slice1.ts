@@ -250,7 +250,7 @@ try {
     assert.equal(events.some((e) => e.event.t === "model.requested"), false, "no model.requested was journaled");
     assert.equal(hosted.requests, before, "the hosted endpoint's request counter did not move");
     const posted = await replies(runId);
-    assert.match(posted[0]?.text ?? "", /Data class restricted/);
+    assert.match(posted[0]?.text ?? "", /restricted data/);
     const control = await sendMessage(web.base, "t4b", "m4b", "What are the office hours?");
     const controlEvents = await waitForFinish(control.runId, 20000);
     assert.deepEqual(finishedOutcome(controlEvents), ["answered"]);
