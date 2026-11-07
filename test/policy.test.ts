@@ -42,15 +42,69 @@ const CORPUS = [
   "",
 ];
 
-test("the default policy classifies every message exactly as the gate did before classes", () => {
+/** Corpus lines holding a form the gate before classes missed, and what the default policy now adds. */
+const NEWLY_CAUGHT: Readonly<Record<string, { cls: DataClass; kinds: readonly string[] }>> = {
+  "Patient: John Smith was admitted 03/04/2026 to 12 Main Street, WI 53706": { cls: "D3", kinds: ["phi-date"] },
+};
+
+test("the default policy finds everything the gate found before classes, and only the trust harness's missed forms besides", () => {
   const policy = defaultPolicy(DEFAULT_POLICY, labPatterns);
   for (const text of CORPUS)
     for (const floor of ["D0", "D1", "D2", "D3"] as const) {
       const now = classifyText(text, floor, labPatterns);
       const was = before(text, floor);
-      assert.deepEqual({ cls: now.cls, kinds: now.detections.map((d) => d.kind).sort(), spans: now.detections.map((d) => d.span.join("-")).sort() }, was, `${floor} ${text}`);
-      assert.equal(classify(policy, { t: "message", text, floor }).level, was.cls);
+      const added = NEWLY_CAUGHT[text];
+      const kept = now.detections.filter((d) => !added?.kinds.includes(d.kind));
+      assert.deepEqual({ kinds: kept.map((d) => d.kind).sort(), spans: kept.map((d) => d.span.join("-")).sort() }, { kinds: was.kinds, spans: was.spans }, `${floor} ${text}`);
+      assert.equal(now.cls, added ? joinClasses(was.cls, added.cls) : was.cls, `${floor} ${text}`);
+      assert.equal(classify(policy, { t: "message", text, floor }).level, now.cls);
     }
+});
+
+test("the restricted class catches each form the trust harness found answered, and not the lab text beside them", () => {
+  const lab1 = [/\bLAB1-\d{4}\b/];
+  const level = (text: string) => classifyText(text, "D1", lab1).cls;
+  // Held out: none of these strings is in fixtures/lab1, so a pass is not the fixture learned by heart.
+  for (const text of [
+    "SSN: 123 45 6789",
+    "his social security no. 123456789",
+    "SS# 219093315 for the stipend",
+    "medical record no. 1234567",
+    "Birth date 1/2/1980",
+    "she was born on Feb 3, 1975",
+    "date of birth: 12 Dec 1950",
+    "Lab1-0042 and lab1 0043 and LAB1\u20140044 and LAB10045",
+    "Policy number Q7-1100299 covers the visit",
+    "Driver's license number: S530-4417-2201",
+    "discharged 4/1/2026 after the scan",
+    "the session ran from 192.168.0.20",
+    "a full-face photo of the participant is in the share",
+    "Ms. Alvarez's blood pressure was 150/95",
+    "Ana Ruiz lives at 22 Elm Street, Verona",
+    "mail it to her at 9 Birch Court",
+  ])
+    assert.equal(level(text), "D3", text);
+  for (const text of [
+    "Order 123-45-6789 arrived; where do I store it?",
+    "Serial no 412-55-8820 is the old freezer.",
+    "SKU 530217741 is the pipette tip box.",
+    "Wear a full-face respirator for the solvent transfer.",
+    "Dr. Okafor's office hours are on Tuesday.",
+    "Mr. Fix-It visits on Friday to service the fume hood.",
+    "Deliveries go to 1500 Highland Avenue, loading dock B.",
+    "Firmware 10.4.2 is on the plate reader.",
+    "The wiki is at http://10.0.4.12:8080/handbook and the worker on 127.0.0.1.",
+    "lab1 members meet in room 3120.",
+    "What does DOB stand for on the intake form?",
+    "Book the centrifuge 42 hours ahead.",
+  ])
+    assert.equal(level(text), "D1", text);
+  // An area the SSA never issues (000, 666, 9xx) is not an SSN even after a label.
+  assert.equal(level("SSN 900-12-3456"), "D1");
+  // A handbook that lists instrument addresses moves phi-ip out of restricted in lab.toml, as with any built-in detector.
+  const moved = buildPolicy({ internal: { detectors: ["phi-ip"] } }, DEFAULT_POLICY, lab1);
+  assert.equal(classify(moved, { t: "entry", text: "The plate reader PC is at 10.0.4.12.", declared: "D1" }).level, "D1");
+  assert.equal(classify(moved, { t: "entry", text: "LAB1-0042 used the plate reader PC.", declared: "D1" }).level, "D3");
 });
 
 test("a lab.toml with no [classes] gets the five built-in classes, and only review-confidential under refuse is refused", () => {
@@ -92,6 +146,9 @@ test("every Safe Harbor detector finds its identifier and leaves ordinary lab te
   const hits = (text: string) => [...new Set(classify(all, { t: "message", text, floor: "D1" }).spans.map((s) => s.detector))].sort();
   const POSITIVE: Record<string, string> = {
     "phi-name": "Patient name: Maria Lopez",
+    "phi-name-health": "Mr. Hassan's heart rate was 48",
+    "phi-name-address": "Daniel Reyes at 1420 Willow Lane",
+    "phi-photo": "full-face photograph in folder P042",
     "phi-address": "lives at 1210 West Dayton Street",
     "phi-zip": "zip code 53706",
     "phi-date": "discharged on Mar 4, 2026",
@@ -146,7 +203,7 @@ test("a policy the lattice would not enforce does not load, and each error names
 
 test("a detector a lab class names leaves the built-in class that held it", () => {
   const p = buildPolicy({ phi: { model_tier: "none", detectors: ["ssn", "mrn"] } }, DEFAULT_POLICY, labPatterns);
-  assert.deepEqual(p.classes.find((c) => c.id === "restricted")!.detectors, ["dob", "participant-id"]);
+  assert.deepEqual(p.classes.find((c) => c.id === "restricted")!.detectors, ["dob", "participant-id", "phi-name-health", "phi-name-address", "phi-date", "phi-health-plan", "phi-license", "phi-ip", "phi-photo"]);
   assert.equal(classify(p, { t: "message", text: "ssn 123-45-6789", floor: "D1" }).class, "phi");
 });
 

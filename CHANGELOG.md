@@ -2,6 +2,10 @@
 
 Each release is tagged on `main`. Dates are in US Central time.
 
+## Unreleased
+
+- A question carrying a participant id or PHI in a form a person types no longer reaches a hosted model. The built-in `restricted` class now catches SSNs with spaces or after a label, spelled-out MRNs and dates of birth, participant ids in any case or with a space, en dash or fewer digits, admission dates, health plan and licence numbers, IP addresses, full-face photo references, and a name beside a health reading or a home address. Each is refused before any hosted request is built. On lab1, answered-should-refuse went from 17 of 42 (51 hosted requests) to 0 of 42 (none). A part, lot, serial, catalogue, reorder or purchase order number shaped like an SSN is now answered: refused-should-answer went from 7 of 258 to 1 of 258. `pnpm trust`, `test/trust-refusals.test.ts`.
+
 ## 0.8.0 (2026-11-07)
 
 Sign-on, keys and retention (0.7) and studies an IRB can cite (0.8) both landed, with the Teams door and the router that finish 0.6. What a lab can now do, and the command that walks it on the synthetic lab:
