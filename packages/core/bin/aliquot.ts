@@ -10,7 +10,10 @@ import { parseArgs } from "node:util";
 import { configProblem, databaseUrlFromEnv, loadConfig } from "../src/config.ts";
 import { connect } from "../src/db.ts";
 import { askAnswers, defaultAnswers, InitAborted, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
-import { loadEvents, recentRunIds, type RunId } from "../src/record.ts";
+import { loadEvents, recentRunIds, verifyChain, type RunId } from "../src/record.ts";
+import { ANCHOR_KEY_ENV, AnchorRefused, newAnchorKeyPem, describeAnchorProblem, loadAnchorKey, loadAnchorVerifyKey, verifyAnchors, writeAnchor } from "../src/anchor.ts";
+import { loadAudit, verifyAudit } from "../src/audit.ts";
+import type { LabConfig } from "../src/config.ts";
 import { formatRecordView, formatRunList, recordView } from "../src/record-view.ts";
 import { DEFAULT_ALLOWANCE, PERMISSION_FLAGS, requireProcessPermission, sealNetwork } from "../src/seal.ts";
 import { acpAgent } from "../src/acp.ts";
@@ -35,6 +38,15 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
 
   record <run-id>     print one run's record and check its hash chain
   runs [--limit n]    list the newest runs (default 20), each with its outcome and chain check
+  verify [--anchors] [--public-key file]
+                      recompute the audit stream's chain and every run's chain. --anchors also checks each line
+                      of the [anchor] log: its signature, its place in the log, and that the database still holds
+                      the hash it signed at that seq, and names the first seq that changed. The key is the file
+                      $LABH_ANCHOR_KEY_FILE names, or --public-key, a PEM holding only the public half.
+  anchor              sign the audit stream's head and every run closed since the last anchor with the key in
+                      $LABH_ANCHOR_KEY_FILE, append one line to the [anchor] path, and print that line, for a
+                      shipper to forward to WORM storage or the SIEM. Needs --allow-fs-write=<that path>.
+                      The worker writes one every [anchor] every_minutes.
   ask [--door url] [--user id] [--thread id] [--ceiling D0..D3] [--timeout s] <question... | ->
                       ask a question through the web door, as the chat page does; - reads it from stdin.
                       --json prints one JSON line per event: started, tool, finished, refused
@@ -60,13 +72,17 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       $MICROSOFT_APP_TENANT_ID and $ALIQUOT_SURFACE_TOKEN set to the teams surface's token.
                       docs/teams.md has the app manifest and the tenant admin's steps.
   init [--config config/lab.toml] [--env .env] [--force] [--yes --sample <id>... [--pattern <regex>...]]
+       [--anchor-key <file> [--anchor-log <file>]]
                       write lab.toml from a few questions, testing the participant id patterns against
                       sample ids, and write .env with new secrets when it does not exist yet. --force
                       replaces lab.toml, never .env. --yes takes every default and needs --sample.
                       Run it as pnpm aliquot:init, which allows writes to config/lab.toml and .env only.
+                      --anchor-key also writes a new Ed25519 anchor key there (mode 600, never over an existing
+                      file) and an [anchor] table whose log is --anchor-log (default anchors.log beside lab.toml);
+                      it needs write access to the key file too. Keep the key off the database host if you can.
 
 Exit codes: 0 ok, 1 no such run, init found no pattern that passes, or ask was refused or got no answer,
-2 usage or setup problem (ask: the door could not be reached), 3 a hash chain is broken.
+2 usage or setup problem (ask: the door could not be reached), 3 a hash chain is broken or an anchor does not hold.
 `;
 
 function usage(): never {
@@ -93,6 +109,10 @@ try {
       thread: { type: "string" },
       ceiling: { type: "string" },
       timeout: { type: "string", default: "180" },
+      anchors: { type: "boolean", default: false },
+      "anchor-key": { type: "string" },
+      "anchor-log": { type: "string" },
+      "public-key": { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -107,18 +127,22 @@ if (values.help) {
 }
 const [command, runId, ...extra] = positionals;
 if (command === "init") {
-  if (runId !== undefined || values.json || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
+  if (runId !== undefined || values.json || (values["anchor-log"] !== undefined && values["anchor-key"] === undefined) || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
   process.exit(await init());
 }
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 if (command === "slack") process.exit(await slack(positionals.slice(1)));
 if (command === "teams") process.exit(await teams(positionals.slice(1)));
 const limit = Number(values.limit);
-const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0;
+const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0 || values["anchor-key"] !== undefined || values["anchor-log"] !== undefined;
+const verifyOnly = values.anchors || values["public-key"] !== undefined;
 const valid =
   extra.length === 0 &&
   !initOnly &&
-  ((command === "record" && !!runId && /^[0-9a-f-]{36}$/i.test(runId)) || (command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000));
+  (command === "verify" || !verifyOnly) &&
+  ((command === "record" && !!runId && /^[0-9a-f-]{36}$/i.test(runId)) ||
+    (command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000) ||
+    ((command === "verify" || command === "anchor") && !runId && !values.json));
 if (!valid) usage();
 
 async function slack(words: readonly string[]): Promise<number> {
@@ -284,9 +308,14 @@ async function init(): Promise<number> {
     return 2;
   }
   const writeEnv = !existsSync(envPath);
-  const targets = writeEnv ? [labPath, envPath] : [labPath];
+  const keyPath = values["anchor-key"] === undefined ? null : resolve(values["anchor-key"]);
+  if (keyPath && existsSync(keyPath)) {
+    fail(`${keyPath} already exists. init never replaces an anchor key: the anchors it signed verify only against it.`);
+    return 2;
+  }
+  const targets = [labPath, ...(writeEnv ? [envPath] : []), ...(keyPath ? [keyPath] : [])];
   if (!targets.every((t) => process.permission!.has("fs.write", t))) {
-    fail(`init writes ${targets.join(" and ")}, and this process may not. Run it with write access to exactly those paths:`);
+    fail(`init writes ${targets.slice(0, -1).join(", ")}${targets.length > 1 ? " and " : ""}${targets.at(-1)}, and this process may not. Run it with write access to exactly those paths:`);
     fail(`  node ${PERMISSION_FLAGS.join(" ")} ${targets.map((t) => `--allow-fs-write=${t}`).join(" ")} packages/core/bin/aliquot.ts init${process.argv.slice(2).filter((a) => a !== "init").map((a) => ` ${a}`).join("")}`);
     return 2;
   }
@@ -320,7 +349,11 @@ async function init(): Promise<number> {
     }
   }
 
-  writeFileSync(labPath, renderLabToml(answers), { flag: values.force ? "w" : "wx" });
+  if (keyPath) {
+    writeFileSync(keyPath, newAnchorKeyPem(), { flag: "wx", mode: 0o600 });
+    say(`Wrote ${keyPath}, the anchor key (mode 600). Set ${ANCHOR_KEY_ENV}=${keyPath} for the worker and aliquot anchor, and keep a copy offline.`);
+  }
+  writeFileSync(labPath, renderLabToml(answers, keyPath ? (values["anchor-log"] ?? "anchors.log") : null), { flag: values.force ? "w" : "wx" });
   say(`Wrote ${labPath}`);
   if (writeEnv) {
     writeFileSync(envPath, renderEnv(answers.sandboxImage !== null), { flag: "wx", mode: 0o600 });
@@ -354,11 +387,77 @@ function databaseProblem(err: unknown, url: string): string {
 }
 
 let url: string;
+let config: LabConfig;
 try {
-  url = databaseUrlFromEnv(await loadConfig(configPath));
+  config = await loadConfig(configPath);
+  url = databaseUrlFromEnv(config);
 } catch (err) {
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(2);
+}
+
+if (command === "anchor" || command === "verify") process.exit(await anchors(command, config));
+
+/** aliquot anchor and aliquot verify. Exit 0 ok, 2 setup, 3 a chain or an anchor does not hold. */
+async function anchors(command: "anchor" | "verify", config: LabConfig): Promise<number> {
+  const fail = (line: string) => (process.stderr.write(`${line}\n`), 2);
+  const say = (line: string) => void process.stdout.write(`${line}\n`);
+  const anchor = config.anchor;
+  if ((command === "anchor" || values.anchors) && !anchor) return fail(`${configPath} has no [anchor] table. Add [anchor] path = "anchors.log" to say where the anchor log lives.`);
+  const keyFile = process.env[ANCHOR_KEY_ENV];
+  if (command === "anchor" || (values.anchors && !values["public-key"])) {
+    if (!keyFile) return fail(`${ANCHOR_KEY_ENV} is not set. It names the file holding the anchor key, which aliquot init --anchor-key writes${command === "verify" ? "; or pass --public-key" : ""}.`);
+  }
+  if (command === "anchor" && !process.permission!.has("fs.write", anchor!.path)) {
+    fail(`aliquot anchor appends to ${anchor!.path}, and this process may not. Run it with write access to that file only:`);
+    return fail(`  node ${PERMISSION_FLAGS.join(" ")} --allow-fs-write=${anchor!.path} packages/core/bin/aliquot.ts${process.argv.slice(2).map((a) => ` ${a}`).join("")}`);
+  }
+  let key;
+  try {
+    key = command === "anchor" ? loadAnchorKey(keyFile!) : values.anchors ? loadAnchorVerifyKey(values["public-key"] ?? keyFile!) : null;
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+  const db = connect(url);
+  try {
+    if (command === "anchor") {
+      const out = await writeAnchor(db, { path: anchor!.path, key: key! });
+      say(out.line);
+      for (const s of out.skipped) process.stderr.write(`run ${s.run} left out: its chain does not verify at seq ${s.seq}\n`);
+      return out.skipped.length ? 3 : 0;
+    }
+    let broken = false;
+    const rows = await loadAudit(db);
+    const auditBad = verifyAudit(rows);
+    say(auditBad === null ? `audit: ${rows.length} rows, chain intact` : `audit: chain broken at seq ${auditBad}`);
+    broken ||= auditBad !== null;
+    const runIds = (await db.query<{ run_id: RunId }>("select distinct run_id from run_events order by run_id")).rows.map((r) => r.run_id);
+    const badRuns: string[] = [];
+    for (const id of runIds) {
+      const bad = verifyChain(await loadEvents(db, id));
+      if (bad !== null) badRuns.push(`run ${id}: chain broken at seq ${bad}`);
+    }
+    say(badRuns.length ? badRuns.join("\n") : `runs: ${runIds.length}, every chain intact`);
+    broken ||= badRuns.length > 0;
+    if (values.anchors) {
+      const text = existsSync(anchor!.path) ? readFileSync(anchor!.path, "utf8") : "";
+      if (!text.trim()) return fail(`${anchor!.path} holds no anchors yet. Run aliquot anchor, or start the worker with [anchor] set.`);
+      const report = await verifyAnchors(db, text, key!);
+      const n = `${report.lines} line${report.lines === 1 ? "" : "s"}`;
+      if (!report.problems.length) say(`anchors: ${n}, every signature valid, the database matches through audit seq ${report.auditThrough ?? "none"} and ${report.runsChecked} anchored runs`);
+      else {
+        say(`anchors: ${n}, ${report.problems.length} problem${report.problems.length === 1 ? "" : "s"}, oldest first:`);
+        for (const p of report.problems) say(`  ${describeAnchorProblem(p)}`);
+        broken = true;
+      }
+    }
+    return broken ? 3 : 0;
+  } catch (err) {
+    if (err instanceof AnchorRefused) return (process.stderr.write(`${err.message}\n`), 3);
+    return fail(databaseProblem(err, url));
+  } finally {
+    await db.end().catch(() => {});
+  }
 }
 
 const db = connect(url);

@@ -204,10 +204,37 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Does participant data leave our hardware? | Not unless the lab declares a destination as lab or institution placement. A D3 item is refused for every other destination, and the refusal is recorded. |
 | Which third parties receive data? | Only the endpoints and hosts listed in `lab.toml`, each at most at its ceiling. The quickstart lists none. |
 | Is data encrypted at rest? | Payloads are encrypted with AES-256-GCM under a key held outside the database. Run records hold references, not text. |
-| Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. |
+| Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. With `[anchor]` set, the worker also signs the head of the audit stream and of each closed run every few minutes, with a key the database never holds, into an append-only log; `aliquot verify --anchors` then shows whether anyone with database access rewrote a row after it was anchored, and names the seq. Keep the log, and the key, off the database host: see [Anchors](#anchors). |
 | Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
 | Single sign-on? | Not yet. The web door has no member sign-in and listens on 127.0.0.1 only. A bearer token says which surface a request comes from, not which member sent it. |
 | Key rotation and retention? | Not yet. |
+
+## Anchors
+
+The hash chains show a row that changed, unless whoever changed it also recomputed every later hash, which anyone
+with write access to Postgres can do. Anchors move the proof out of the database.
+
+1. `aliquot init --anchor-key /secure/aliquot/anchor.key` writes the key (mode 600) and an `[anchor]` table. It needs
+   write access to that file too, and prints the exact `node --permission ...` command when it lacks it. An existing
+   lab can instead add `[anchor]` from `lab.example.toml` and any Ed25519 PKCS#8 PEM key
+   (`openssl genpkey -algorithm ed25519 -out anchor.key`). Set `LABH_ANCHOR_KEY_FILE` to the key's path for the
+   worker, and start the worker with `--allow-fs-write=<the [anchor] path>`; without either it refuses to start.
+2. The worker appends one signed line every `every_minutes` (default 15) and logs it as `anchor {...}`. `aliquot anchor`
+   appends one by hand and prints it on stdout.
+3. `aliquot verify --anchors` checks every line. Research IT can run it with only the public half of the key
+   (`--public-key`), so the private key need never leave the worker's host.
+
+Where to keep the log: somewhere the database administrator cannot rewrite. The best is write-once storage (an S3
+bucket with Object Lock, a WORM volume) or the institution's SIEM, fed by forwarding each line from the worker's log
+or from `aliquot anchor` on a timer. A copy on another host also works, because every line names the one before it,
+so a line removed from any copy shows. Keep an offline copy of the key, and of its public half with the IRB file: an
+anchor verifies only against the key that signed it. Aliquot makes no network call for any of this, and uses no
+public timestamping service.
+
+What anchors do not cover: a change made before the next anchor is written (at most `every_minutes`), a run that is
+still open, and lines cut from the end of the only copy of the log, which leaves an older log that still verifies. That
+last one is why the lines belong somewhere the database administrator cannot write as well. Redaction and retention delete payload bodies but keep their hashes, so anchored runs still verify
+after either.
 
 ## Not covered yet
 
