@@ -37,6 +37,13 @@ with open("/in/table.csv", newline="", encoding="utf-8-sig") as f:
     header = set(reader.fieldnames or [])
     rows = list(reader)
 
+# A REDCap user in a Data Access Group sees only its records, so every other row is dropped before anything is counted.
+scope = envelope.get("scope")
+if scope is not None:
+    if scope["column"] not in header:
+        refuse("missing-scope")
+    rows = [r for r in rows if (r.get(scope["column"]) or "") == scope["value"]]
+
 for column in [w["column"] for w in where] + group_by + [m["column"] for m in measures if m.get("column") is not None]:
     if column not in free:
         refuse("restricted-column", column)

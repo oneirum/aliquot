@@ -337,6 +337,8 @@ const schema = z.object({
           csv: z.string().min(1).optional(),
           redcap_url: z.string().url().optional(),
           redcap_token_env: z.string().min(1).optional(),
+          /** Member id to REDCap username: whose export rights and Data Access Group a member's query runs under. */
+          redcap_users: z.record(z.string().min(1), z.string().min(1)).optional(),
           columns: z.record(z.string().min(1), z.enum(["free", "restricted"])),
           aggregate_class: z.enum(DATA_CLASSES),
           min_cell: z.number().int().min(MIN_CELL, `may not be below ${MIN_CELL}`).default(MIN_CELL),
@@ -626,12 +628,13 @@ function parseTable(id: string, t: z.infer<typeof schema>["tables"][string], dir
     throw new Error(`lab.toml: [tables.${id}] ${why}`);
   };
   const base = { id, description: t.description, columns: t.columns, aggregateClass: t.aggregate_class, minCell: t.min_cell };
+  if (t.csv !== undefined && t.redcap_users !== undefined) return fail("names redcap_users, which only a REDCap table takes");
   if (t.csv !== undefined && t.redcap_url === undefined && t.redcap_token_env === undefined) return { ...base, source: { kind: "csv", path: resolve(dir, t.csv) } };
   if (t.csv !== undefined || t.redcap_url === undefined || t.redcap_token_env === undefined) return fail("needs csv, or redcap_url with redcap_token_env, and not both");
   const host = new URL(t.redcap_url).hostname.toLowerCase();
   const placed = Object.entries(hosts).find(([h]) => h.toLowerCase() === host)?.[1];
   if (placed !== "lab" && placed !== "institution") fail(`names REDCap at ${host}, which [hosts] does not place as lab or institution; the export request carries the token there`);
-  return { ...base, source: { kind: "redcap", url: t.redcap_url, tokenEnv: t.redcap_token_env } };
+  return { ...base, source: { kind: "redcap", url: t.redcap_url, tokenEnv: t.redcap_token_env, users: t.redcap_users ?? {} } };
 }
 
 export async function loadConfig(path: string): Promise<LabConfig> {

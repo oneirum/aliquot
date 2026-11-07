@@ -4,48 +4,63 @@
   "form_name": "enrollment",
   "field_type": "text",
   "field_label": "Record ID",
-  "identifier": ""
+  "identifier": "",
+  "text_validation_type_or_show_slider_number": ""
  },
  {
   "field_name": "first_name",
   "form_name": "enrollment",
   "field_type": "text",
   "field_label": "First name",
-  "identifier": "y"
+  "identifier": "y",
+  "text_validation_type_or_show_slider_number": ""
  },
  {
   "field_name": "last_name",
   "form_name": "enrollment",
   "field_type": "text",
   "field_label": "Last name",
-  "identifier": "y"
+  "identifier": "y",
+  "text_validation_type_or_show_slider_number": ""
  },
  {
   "field_name": "mrn",
   "form_name": "enrollment",
   "field_type": "text",
   "field_label": "Medical record number",
-  "identifier": "y"
+  "identifier": "y",
+  "text_validation_type_or_show_slider_number": ""
  },
  {
   "field_name": "arm",
   "form_name": "enrollment",
   "field_type": "radio",
   "field_label": "Arm",
-  "identifier": ""
+  "identifier": "",
+  "text_validation_type_or_show_slider_number": ""
  },
  {
   "field_name": "weight_kg",
   "form_name": "dosing",
   "field_type": "text",
   "field_label": "Weight (kg)",
-  "identifier": ""
+  "identifier": "",
+  "text_validation_type_or_show_slider_number": "number"
  },
  {
   "field_name": "ae_grade",
   "form_name": "dosing",
   "field_type": "radio",
   "field_label": "Worst adverse event grade",
-  "identifier": ""
+  "identifier": "",
+  "text_validation_type_or_show_slider_number": ""
+ },
+ {
+  "field_name": "consent_date",
+  "form_name": "enrollment",
+  "field_type": "text",
+  "field_label": "Consent date",
+  "identifier": "",
+  "text_validation_type_or_show_slider_number": "date_ymd"
  }
 ]
