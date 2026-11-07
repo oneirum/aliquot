@@ -795,7 +795,7 @@ try {
     assert.equal(new RegExp(prereg.restricted.pattern).test(stdout), false, "no roster id is in the export");
 
     const web = await ps.startWeb(cfgHandbook);
-    const status = async () => (await fetch(`${web.base}/healthz`)).status;
+    const status = async () => (await get(`${web.base}/healthz`)).status;
     const before = await status();
     const worker = ps.startWorker(cfgHandbook, "WO");
     await waitFor("/healthz 200 once the worker beats", async () => ((await status()) === 200 ? true : null), 15_000);

@@ -11,14 +11,14 @@ import { exportEvents, exportPage, parseSince, type ExportLine } from "../packag
 import { DEFAULT_POLICY, Labelled } from "../packages/core/src/dataclass.ts";
 import { applySchema, connect } from "../packages/core/src/db.ts";
 import type { AgentVersionHash, Sha256, SnapshotId } from "../packages/core/src/hash.ts";
-import { createPayloadStore, openJournal, type RunId } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, openJournal, type RunId } from "../packages/core/src/record.ts";
 import type { AgentId } from "../packages/core/src/agent.ts";
 import { ADMIN_URL, databaseUrl, freshDatabase, testDatabase } from "./db.ts";
 import { TARGET, started } from "./events.ts";
 
 const { db, url } = await freshDatabase("labh_test_audit_export");
 after(() => db.end());
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
 
 /** Text that must never reach an export line, planted in every free-text field an event has and in a stored payload. */
 const SECRET = "P-24680 told the RA about the relapse";
