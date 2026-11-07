@@ -6,6 +6,8 @@ import { hostname } from "node:os";
 import { parseArgs } from "node:util";
 import { boot } from "../src/boot.ts";
 import { bindRefusal, configProblem, loadConfig } from "../src/config.ts";
+
+import { setStudioPassword, STUDIO_DB_PASSWORD_ENV, STUDIO_ROLE } from "../src/db.ts";
 import { requireProcessPermission, sealNetwork } from "../src/seal.ts";
 import { createSignOn, studioAccountsExist, type SignOn } from "../src/surfaces/signon.ts";
 import { providerWire } from "../src/surfaces/signon-wire.ts";
@@ -36,6 +38,18 @@ if (reachRefused) {
 
 const core = await boot(values.config);
 const log = (line: string) => console.error(line);
+// The studio signs in to Postgres as its own role; the door, which starts before it, sets that role's password.
+const studioPassword = process.env[STUDIO_DB_PASSWORD_ENV];
+if (core.config.surfaces.some((s) => s.kind === "studio")) {
+  try {
+    if (!studioPassword) log(`[web] ${STUDIO_DB_PASSWORD_ENV} is not set, so the studio cannot sign in to Postgres as ${STUDIO_ROLE}. Add one: echo "${STUDIO_DB_PASSWORD_ENV}=$(openssl rand -hex 24)" >> .env`);
+    else if (!(await setStudioPassword(core.db, studioPassword))) log(`[web] Postgres has no ${STUDIO_ROLE} role (the migrator was not a superuser): docs/install.md, "Least privilege"`);
+  } catch (err) {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    await core.close();
+    process.exit(2);
+  }
+}
 let tokens: DoorTokens;
 let signOn: SignOn | undefined;
 try {
