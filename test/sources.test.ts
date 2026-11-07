@@ -253,3 +253,15 @@ test("on the wire: a member outside a scope never has the entry's path or text r
   }
 });
 
+
+test("lab.toml: sources and the directory parse; a bad scope, a relative folder and a LabArchives source are refused with a reason", async () => {
+  const { parseConfig } = await import("../packages/core/src/config.ts");
+  const base = '[endpoints.local]\nbase_url = "http://127.0.0.1:1/v1"\nplacement = "lab"\n';
+  const c = parseConfig(`${base}[sources.box]\nkind = "folder"\npath = "/srv/box"\nkb = "docs"\nclass = "D1"\nscope = ["lab", "group:cryo"]\n[sources.drive]\nkind = "gdrive"\nfolder_id = "f1"\ntoken_env = "T"\nkb = "docs"\nclass = "D2"\n[directory.groups]\ncryo = ["ana"]\n[directory.emails]\n"cryo@lab.example" = "group:cryo"\n`, "/etc/lab.toml");
+  assert.deepEqual(c.sources.map((s) => [s.id, s.kind, s.kb, s.cls]), [["box", "folder", "docs", "D1"], ["drive", "gdrive", "docs", "D2"]]);
+  assert.equal(c.sources[1]!.kind === "gdrive" && c.sources[1]!.baseUrl, "https://www.googleapis.com");
+  assert.deepEqual(directoryFromConfig(c.directory).groupsOf("ana"), ["cryo"]);
+  assert.throws(() => parseConfig(`${base}[sources.x]\nkind = "folder"\npath = "/srv/x"\nkb = "d"\nclass = "D1"\nscope = ["everyone"]\n`, "/etc/lab.toml"), /a scope is \\"lab\\", \\"member:<id>\\" or \\"group:<name>\\"/);
+  assert.throws(() => parseConfig(`${base}[sources.x]\nkind = "folder"\npath = "box"\nkb = "d"\nclass = "D1"\nscope = ["lab"]\n`, "/etc/lab.toml"), /absolute path/);
+  assert.throws(() => parseConfig(`${base}[sources.x]\nkind = "labarchives"\n`, "/etc/lab.toml"), /labarchives is not a source kind in this release; sync its exports to a folder/);
+});

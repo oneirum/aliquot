@@ -15,6 +15,9 @@
  * protective checks added after two static reviews, still before any run,
  * are in fixtures/lab0/prereg-v2.json. Neither changes the other.
  *
+ * Check K, added with document sources, is not pre-registered: a Box sync folder and a fake Drive feed one KB with
+ * scoped entries, and it checks change detection, the version in the record and scope at retrieval.
+ *
  *   node scripts/lab0.ts
  */
 
@@ -37,6 +40,8 @@ import { checker, ensurePostgres, get, post, processes, runWithInput, waitFor, w
 import { askShared, publishRoutedAgents, SHARED, type Sent } from "./routed-lab.ts";
 import { newAnchorKeyPem } from "../packages/core/src/anchor.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
+import { GOOGLE_DOC, startFakeDrive } from "./fake-drive.ts";
+import type { SourceStatus } from "../packages/core/src/record-view.ts";
 
 interface Prereg {
   readonly inDocument: readonly { readonly id: string; readonly question: string; readonly expected: string }[];
@@ -670,6 +675,77 @@ try {
     assert.deepEqual(card.knowledgeBases.map((k) => [k.kbId, k.snapshot, k.cls]), [["lab0-handbook", published!.id, published!.cls]]);
     assert.match(card.prompt.systemTextSha256 ?? "", /^[0-9a-f]{64}$/);
     return `sheet: 6 surfaces, 3 endpoints, 3 agents (two published by check R); card ${card.hash.slice(0, 12)} validates`;
+  await check("check K: a synced folder and a fake Drive feed one KB with scoped entries; an edit reaches the next answer, the record cites the version, and an out-of-scope member's run never reads the scoped entry", async () => {
+    // The earlier checks' workers would claim this check's runs on configs without its endpoint, so they stop first.
+    await ps.stopAll();
+    const box = join(work, "Box", "Lab SOPs");
+    mkdirSync(box, { recursive: true });
+    const sop = readFileSync(join(kbDir, "sop-freezer.md"), "utf8");
+    writeFileSync(join(box, "sop-freezer.md"), sop);
+    const cite = await startFakeModel("scripted-1", "cite");
+    const drive = await startFakeDrive();
+    try {
+      drive.put({ id: "d-onboarding", name: "Onboarding", mimeType: GOOGLE_DOC, parent: "lab0-folder", content: readFileSync(join(kbDir, "onboarding-ra.md"), "utf8"), permissions: [{ type: "domain", role: "reader", domain: "lab0.example" }] });
+      drive.put({ id: "d-cryo", name: "Cryostat protocol", mimeType: GOOGLE_DOC, parent: "lab0-folder", content: "# Cryostat protocol\n\nThe cryostat zephyrine wash runs every Friday at 4 pm, cryo group only.\n", permissions: [{ type: "group", role: "reader", emailAddress: "cryo@lab0.example" }] });
+      const agentPath = agentFile("sources", { agentId: "lab0-sources", name: "Lab0 synced documents", knowledgeBases: ["lab0-docs"], instructions: "Answer from the lab's documents and end with a Source: line." });
+      const cfg = join(work, "lab-sources.toml");
+      writeFileSync(cfg, [
+        "[endpoints.local]", `base_url = "${cite.url}"`, 'placement = "lab"',
+        "[surfaces.web]", 'placement = "lab"', "port = 0",
+        "[hosts]", '"127.0.0.1" = "lab"',
+        "[policy]", `participant_id_patterns = ['${prereg.restricted.pattern}']`,
+        "[agents]", `fixtures = ["${agentPath}"]`,
+        "[sources.box-sops]", 'kind = "folder"', `path = "${box}"`, 'kb = "lab0-docs"', 'class = "D1"', 'scope = ["lab"]',
+        "[sources.lab0-drive]", 'kind = "gdrive"', 'folder_id = "lab0-folder"', 'token_env = "LAB0_DRIVE_TOKEN"', `base_url = "${drive.url}"`, 'kb = "lab0-docs"', 'class = "D1"', "poll_seconds = 5",
+        "[directory.groups]", 'cryo = ["member-cryo"]',
+        "[directory.emails]", '"cryo@lab0.example" = "group:cryo"', "",
+      ].join("\n"));
+      const ks = processes(root, work, { ...childEnv, LAB0_DRIVE_TOKEN: drive.token });
+      try {
+        const sync = ks.start("sources-sync", "kb.ts", ["sync", "--watch", "--config", cfg]);
+        await waitLine(sync, /watching 2 sources/, 20_000);
+        const { base } = await ks.startWeb(cfg);
+        ks.startWorker(cfg, "K1");
+        let k = 0;
+        const askAs = async (user: string, text: string) => {
+          const sent = await post(base, "/message", { thread: `t-K-${k}`, message: `m-K-${k++}`, text, user });
+          assert.equal(sent.status, 202, JSON.stringify(sent.json));
+          const runId = sent.json.runId as RunId;
+          const events = await waitFor(`run.finished for K ${text}`, async () => {
+            const es = await loadEvents(db, runId);
+            return es.some((e) => e.event.t === "run.finished") ? es : null;
+          }, 20_000);
+          const sources = JSON.parse((await get(`${base}/runs/${runId}/sources`)).text) as SourceStatus[];
+          return { runId, events, answer: await answerText(events), sources };
+        };
+        const q = "Who answers the freezer alarm?";
+        const first = await askAs("member-1", q);
+        const v1 = first.sources.find((v) => v.location === "sop-freezer.md");
+        assert.ok(v1 && v1.state === "current", `the first answer cites the SOP's version: ${JSON.stringify(first.sources)}`);
+        const marker = "Edited by lab0 check K.";
+        const before = sync.out.join("").length;
+        writeFileSync(join(box, "sop-freezer.md"), sop.replace(/^(# .*\n)/, `$1\n${marker}\n`));
+        await waitFor("the watcher to publish the edit", async () => (/published .*changed box-sops\/sop-freezer\.md/.test(sync.out.join("").slice(before)) ? true : null), 15_000);
+        const recheck = JSON.parse((await get(`${base}/runs/${first.runId}/sources`)).text) as SourceStatus[];
+        assert.equal(recheck.find((v) => v.location === "sop-freezer.md")?.state, "changed", "the first answer now says its source changed");
+        const second = await askAs("member-1", q);
+        assert.ok(second.answer.includes(marker), `the next answer reads the edit: ${second.answer}`);
+        const v2s = second.sources.find((v) => v.location === "sop-freezer.md");
+        assert.ok(v2s && v2s.state === "current" && v2s.version !== v1.version, "the record cites the new version");
+        const outside = await askAs("member-1", "zephyrine wash cryostat");
+        const leaked = JSON.stringify(outside.events).includes("cryostat-protocol") || /zephyrine wash runs|Friday/.test(outside.answer) || outside.sources.some((v) => v.location === "Cryostat protocol");
+        assert.equal(leaked, false, "member-1 is not in cryo, so the cryostat entry is never retrieved, cited or answered from");
+        const inside = await askAs("member-cryo", "zephyrine wash cryostat");
+        assert.match(inside.answer, /zephyrine wash runs every Friday/);
+        assert.ok(inside.sources.some((v) => v.location === "Cryostat protocol" && v.source === "lab0-drive"));
+        return `box folder + fake Drive -> lab0-docs; edit reached the next answer (version ${v1.version.slice(0, 8)} -> ${v2s.version.slice(0, 8)}), first answer marked changed; cryo entry: 0 retrievals for member-1, cited for member-cryo`;
+      } finally {
+        await ks.stopAll();
+      }
+    } finally {
+      await cite.close();
+      await drive.close();
+    }
   });
 
   await check("total: the hosted endpoint saw exactly the one control request", async () => {

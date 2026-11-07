@@ -266,6 +266,26 @@ to a tool's code alone moves no agent version.
 The five roles are member, author, publisher, data steward and PI (`packages/core/src/roles.ts`). Members ask
 questions. Authors write drafts. Publishers publish. Anything at D3 needs the data steward or the PI to publish it.
 
+## Document sources and who sees what
+
+A knowledge base can be fed from Box, OneDrive or Google Drive desktop sync folders, or from a Google Drive folder
+through the Drive API ([`docs/sources.md`](sources.md)). Each entry carries a **scope**: `lab`, `member:<id>` or
+`group:<name>`. A folder source's scope is set in `lab.toml`; a Drive file's comes from its permissions (anyone or the
+domain is the lab; a user or group maps through the lab's directory; an address the directory does not know grants
+nothing, and a file nobody in the lab may see is not ingested).
+
+- **Enforced at retrieval, in one place.** `packages/core/src/kb.ts` filters the outline the model sees, search
+  (whose ranking is built over the visible entries only, so a hidden document cannot change a score) and reads (a
+  hidden path reads as missing). Tools receive a reader bound to the run's member and cannot ask for more.
+- **Class still rules egress.** Scope decides which member may see a document; its data class decides where it may go.
+  A document's class is its source's declared class raised by the participant-id patterns over its name and text.
+- **Versions.** Each entry records the HMAC of its document's text and its modified time. The run record names the
+  version each answer read, and the chat page says when a cited document has changed since.
+- **The Drive request** carries folder and file ids (D1) and the OAuth access token; place `www.googleapis.com` in
+  `[hosts]` at a placement your agreement with Google covers, or the request is refused and recorded.
+- **Not yet:** member sign-on (until it lands, the member a message names is trusted, so keep the door on the machine),
+  a live OAuth flow, LabArchives, Benchling and SharePoint through Graph.
+
 ## Answers to the usual security review questions
 
 | Question | Answer |

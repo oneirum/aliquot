@@ -108,6 +108,7 @@ A lab answers the same questions every week. Where the freezer log is, how a var
 - **Claude Code or Codex as the agent.** An agent can run on one of these CLIs instead of a model endpoint. The CLI is confined: it has no tools of its own, and it reaches only Aliquot and its vendor's API.
 - **Restricted data does not leave.** Every piece of content carries a data class. Participant identifiers are restricted, and restricted content never reaches a hosted model or a hosted agent CLI: the harness refuses the call and records the refusal. One agent can send public questions to a hosted model (Anthropic, OpenAI) and restricted ones to a lab model (Ollama or any OpenAI-compatible server).
 - **Built by the people who know the work.** Agents and knowledge bases are forms in a web studio, with revisions, diff, restore, a test thread and a publish button. No git, no deploy.
+- **Kept in step with Box, OneDrive and Drive.** A synced folder or a Drive folder feeds a knowledge base, an edited SOP reaches the next answer without anyone running a command, every answer's record names the document version it read, and an entry shared with one group is never retrieved for anyone else.
 - **Coverage before publish.** A knowledge base lists the questions it must answer. If the documents do not support one, publish is refused and names the gap, unless a publisher overrides it with a written note.
 - **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later: it opens with a summary of what the run read, called and refused, and downloads as JSON. Each run names the hash of the agent version that answered.
 - **Studies an IRB can cite.** A PI freezes the agent version a study uses, an IRB reads its card and a sheet generated from the deployment, and a reviewer replays a run from an exported bundle without the lab's database.
@@ -267,6 +268,27 @@ A channel bound to a study runs its frozen version and is never routed or re-res
 A reviewer gets a bundle, not database access. `pnpm aliquot:export --study sleep-2026 --clearance D1 --out bundles/sleep-2026` writes the study's runs as JSON lines, the agent cards and resolved agents, the snapshot manifests and the entries the runs read, the tool hashes, the payload bodies at or below the clearance (each one an egress decision; the rest appear as hash and class only), the deviations, and `prov.json` in W3C PROV-JSON. Anyone with the bundle and Aliquot runs `aliquot replay <dir>`, with no lab.toml, database or key: it verifies every hash chain and every included body against the sha256 the bundle commits to, and prints what each run did. That shows the bundle is internally consistent; it shows the bundle is the lab's record only when each run's head matches the lab's anchor or a hash the lab gave out of band. `aliquot replay <dir> --reexecute --endpoint <url> --endpoint-placement lab` runs each run again against a model endpoint, with every tool answered from the recording, and reports whether the tool calls, the answer and the outcome agree or where they first diverge. The placement is the reviewer's statement of where that endpoint runs (default `public`), and a run whose bodies that placement may not receive is skipped before any request. Each export is in the lab's audit stream as `export.created`.
 
 `pnpm walk:study` runs all of this on the synthetic lab with fake models: a PI freezes the handbook agent, a publish leaves the study channel alone, the IRB reads the card, an unfreeze shows as a deviation, and a reviewer in an empty directory replays the exported run and gets exact agreement.
+## Sources
+
+Register where the lab's documents already live, and Aliquot keeps a knowledge base in step with them.
+
+```toml
+[sources.box-sops]
+kind = "folder"                      # a Box, OneDrive or Google Drive desktop sync folder
+path = "/Users/labadmin/Library/CloudStorage/Box-Box/Lab SOPs"
+kb = "lab-docs"
+class = "D1"
+scope = ["lab"]                      # or ["group:cryo"], ["member:ana"]
+
+[sources.lab-drive]
+kind = "gdrive"                      # a Drive folder through the API; scope from each file's permissions
+folder_id = "1AbC..."
+token_env = "LAB_DRIVE_TOKEN"
+kb = "lab-docs"
+class = "D1"
+```
+
+`pnpm sources --watch` (`kb sync --watch`) ingests every source and keeps watching: a folder on change, Drive on its poll. When the freezer SOP is edited in Box, the next question about the freezer gets the new text, and the record says which version it read. An answer given before the edit says, under the answer, **Changed since this answer** with when the document was edited. A document shared with the cryo group is never retrieved, listed or ranked for a member outside it. `pnpm walk:sources` runs that whole loop on a synthetic lab in about ten seconds. [`docs/sources.md`](docs/sources.md) covers scope, Drive permissions and what is not built yet.
 
 ## The studio
 
