@@ -19,8 +19,8 @@ import type { Dataset } from "./config.ts";
 import { checkMount, listFiles, mountable, type MountPolicy } from "./datasets.ts";
 import type { Sandbox } from "./sandbox.ts";
 import type { ToolSpec } from "./gateway.ts";
-import type { KbReader } from "./kb.ts";
-import type { CallFailure, PayloadRef, RunEvent, RunJournal } from "./record.ts";
+import type { EntryProvenance, KbReader, Outline, ReadResult, SearchHit, Viewer } from "./kb.ts";
+import type { CallFailure, CitedVersion, PayloadRef, Retrieved, RunEvent, RunJournal } from "./record.ts";
 import { parseAtom } from "./atom.ts";
 import { platformFetch } from "./seal.ts";
 import { citationWalk, doiLookup, europepmcFulltext, europepmcSearch } from "./literature.ts";
@@ -66,7 +66,7 @@ export interface ToolContext {
   /** The run's knowledge bases, for the retrieval built-ins. */
   readonly knowledgeBases: readonly AttachedKb[];
   readonly retrieval: RetrievalSettings;
-  readonly kb: KbReader;
+  readonly kb: RunKbReader;
   /** The lab's polite-pool contact email from lab.toml [research], or null. Lab config, not run content. */
   readonly contact: string | null;
   /**
@@ -78,10 +78,18 @@ export interface ToolContext {
   /** Raises the output class: a tool that read a D2 snapshot returns D2 even for a D0 question. */
   touched(cls: DataClass): void;
   /** Journals every entry a retrieval returned, cited or not. Only for a snapshot attached to the agent. */
-  retrieved(snapshot: SnapshotId, entries: readonly EntryHash[], truncated: boolean): void;
+  retrieved(snapshot: SnapshotId, entries: readonly EntryHash[], truncated: boolean, versions?: readonly CitedVersion[]): void;
   /** Lab storage under the data steward's allowlist. Absent unless effects is lab-write. */
   readonly labStorage?: { write(path: string, bytes: Uint8Array): Promise<void> };
   readonly signal: AbortSignal;
+}
+
+/** A KbReader bound to the run's viewer: a tool reads what the member may see, and has no way to ask for more. */
+export interface RunKbReader {
+  has(snapshot: SnapshotId): Promise<boolean>;
+  outline(snapshot: SnapshotId): Promise<Labelled<Outline>>;
+  read(snapshot: SnapshotId, paths: readonly string[], capTokens: number): Promise<Labelled<ReadResult>>;
+  search(snapshot: SnapshotId, query: string, k: number): Promise<Labelled<readonly SearchHit[]>>;
 }
 
 export class EgressRefused extends Error {
@@ -161,6 +169,8 @@ export interface ToolEnv {
   readonly knowledgeBases: readonly AttachedKb[];
   readonly retrieval: RetrievalSettings;
   readonly sandbox: MountPolicy | null;
+  /** Who the run answers. Retrieval returns only the entries their scope lets them see. */
+  readonly viewer: Viewer;
 }
 
 /** What the loop calls. Validates input with the zod schema, builds ToolContext, journals requested/completed/failed, classifies output. */
@@ -309,7 +319,7 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
       const parsed = tool.manifest.input.safeParse(body.value);
       if (!parsed.success) return fail("invalid-input", parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; "), false, body.cls);
       const touched: DataClass[] = [tool.manifest.reads, body.cls];
-      const retrieved: { snapshot: SnapshotId; entries: readonly EntryHash[]; truncated: boolean }[] = [];
+      const retrieved: Retrieved[] = [];
       // A tool sees only its agent's snapshots, and whatever it reads counts toward its output and its requests without the tool saying so.
       const attached = new Set(env.knowledgeBases.map((b) => b.snapshot));
       const own = (snapshot: SnapshotId): void => {
@@ -320,14 +330,15 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
         touched.push(r.cls);
         return r;
       };
-      // Every read goes through the member's DUA scope first, so no tool, core or not, can read past it.
+      // Every read goes through the member's DUA scope first, then the document scope of the run's viewer, so no tool,
+      // core or not, can read past either.
       const withheld: Withheld[] = [];
       const { access, kb: member } = scoped(journal, env.knowledgeBases, withheld);
-      const kb: KbReader = {
+      const kb: RunKbReader = {
         has: async (snapshot) => attached.has(snapshot) && deps.kb.has(snapshot),
-        outline: (snapshot) => (own(snapshot), seen(member.outline(snapshot))),
-        read: (snapshot, paths, cap) => (own(snapshot), seen(member.read(snapshot, paths, cap))),
-        search: (snapshot, query, k) => (own(snapshot), seen(member.search(snapshot, query, k))),
+        outline: (snapshot) => (own(snapshot), seen(member.outline(snapshot, env.viewer))),
+        read: (snapshot, paths, cap) => (own(snapshot), seen(member.read(snapshot, paths, cap, env.viewer))),
+        search: (snapshot, query, k) => (own(snapshot), seen(member.search(snapshot, query, k, env.viewer))),
       };
       const ctx: ToolContext = {
         runId: journal.runId,
@@ -339,7 +350,7 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
         contact: deps.contact ?? null,
         signal,
         touched: (cls) => touched.push(cls),
-        retrieved: (snapshot, entries, truncated) => (own(snapshot), retrieved.push({ snapshot, entries, truncated })),
+        retrieved: (snapshot, entries, truncated, versions) => (own(snapshot), retrieved.push({ snapshot, entries, truncated, ...(versions?.length ? { versions } : {}) })),
         fetch: async (url, init) => {
           // A request can carry anything the tool has read so far, not only its input.
           const payload = Labelled.derive(body.value, [body], `tool:${tool.manifest.name}`, join(...touched));
@@ -364,6 +375,15 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
       await journal.record({ t: "tool.completed", callId: call.callId, attempt: call.attempt, output: ref, ...(retrieved.length ? { retrieved } : {}), ms: Date.now() - startedAt });
     },
   };
+}
+
+/** What the model sees of a synced entry's version: enough to cite it, "version 3f2a91c04b7e, modified 2026-11-06T21:40:00Z". */
+function versionOf(source: EntryProvenance | undefined): { version?: string; modified?: string } {
+  return source ? { version: source.version.slice(0, 12), modified: source.modifiedAt } : {};
+}
+
+function citedVersions(entries: readonly { readonly path: string; readonly source?: EntryProvenance }[]): CitedVersion[] {
+  return entries.flatMap((e) => (e.source ? [{ path: e.path, source: e.source.source, location: e.source.location, version: e.source.version, modifiedAt: e.source.modifiedAt }] : []));
 }
 
 function attachedFor(ctx: ToolContext, kb: string | undefined): AttachedKb[] {
@@ -398,12 +418,12 @@ export const kbSearch = defineTool({
   egress: [],
   idempotent: true,
   async run({ query, k, kb }, ctx) {
-    const results: { kb: string; path: string; title: string; score: number }[] = [];
+    const results: { kb: string; path: string; title: string; score: number; version?: string; modified?: string }[] = [];
     for (const b of attachedFor(ctx, kb)) {
       const hits = await ctx.kb.search(b.snapshot, query, k);
       ctx.touched(hits.cls);
-      ctx.retrieved(b.snapshot, hits.value.map((h) => h.hash), false);
-      for (const h of hits.value) results.push({ kb: b.kbId, path: h.path, title: h.title, score: h.score });
+      ctx.retrieved(b.snapshot, hits.value.map((h) => h.hash), false, citedVersions(hits.value));
+      for (const h of hits.value) results.push({ kb: b.kbId, path: h.path, title: h.title, score: h.score, ...versionOf(h.source) });
     }
     results.sort((a, b) => b.score - a.score || (a.kb < b.kb ? -1 : a.kb > b.kb ? 1 : 0));
     return { results: results.slice(0, k), ...withheldNote(ctx, false) };
@@ -427,10 +447,10 @@ export const kbRead = defineTool({
     const b = attached[0]!;
     const read = await ctx.kb.read(b.snapshot, paths, ctx.retrieval.readCapTokens);
     ctx.touched(read.cls);
-    ctx.retrieved(b.snapshot, read.value.entries.map((e) => e.hash), read.value.truncated);
+    ctx.retrieved(b.snapshot, read.value.entries.map((e) => e.hash), read.value.truncated, citedVersions(read.value.entries));
     return {
       kb: b.kbId,
-      entries: read.value.entries.map((e) => ({ path: e.path, title: e.title, body: e.body, facts: e.facts })),
+      entries: read.value.entries.map((e) => ({ path: e.path, title: e.title, body: e.body, facts: e.facts, ...versionOf(e.source) })),
       ...(read.value.truncated ? { omitted: read.value.omitted, note: `The read cap is ${ctx.retrieval.readCapTokens} tokens. The omitted paths were not read; read them in a separate call.` } : {}),
       ...(read.value.missing.length ? { missing: read.value.missing } : {}),
       ...withheldNote(ctx, true),

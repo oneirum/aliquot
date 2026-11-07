@@ -12,6 +12,8 @@ import { coveredModelRefusal, DATA_CLASSES, describeRefusal, PLACEMENTS, rank, t
 import { AUTH_HEADERS, regionOf, type ModelEndpoint } from "./gateway.ts";
 import { PROTOCOLS } from "./gateway-wire.ts";
 import type { Sha256 } from "./hash.ts";
+import { LICENCES } from "./kb.ts";
+import type { DirectoryConfig } from "./members.ts";
 import { HOSTED_PLACEMENTS, type AgentBackend } from "./agents/backends.ts";
 import { ROLES, type Role } from "./roles.ts";
 import { buildPolicy, ceilingOfStore, type Policy } from "./policy.ts";
@@ -189,6 +191,32 @@ function parseSurfaces(tables: Record<string, unknown>): readonly [WebSurfaceCon
   return [web, ...others];
 }
 
+const GROUP_NAME = /^[a-z0-9][a-z0-9_.@-]*$/;
+/** "lab", "member:<id>" or "group:<name>": who may see what a source holds. */
+const scopeItem = z.string().regex(/^(lab|member:[^\s:]+|group:[a-z0-9][a-z0-9_.@-]*)$/, 'a scope is "lab", "member:<id>" or "group:<name>"');
+const sourceCommon = {
+  kb: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  class: z.enum(DATA_CLASSES),
+  licence: z.enum(LICENCES).default("internal-only"),
+};
+const documentSource = z.discriminatedUnion("kind", [
+  /** A Box, OneDrive or Google Drive desktop sync folder: the vendor's client keeps it current, and Aliquot watches it. */
+  z.object({ kind: z.literal("folder"), path: z.string().refine(isAbsolute, "must be an absolute path"), scope: z.array(scopeItem).min(1), ...sourceCommon }).strict(),
+  /** A Google Drive folder through the Drive API. Scope comes from each file's permissions. */
+  z
+    .object({
+      kind: z.literal("gdrive"),
+      folder_id: z.string().min(1),
+      token_env: z.string().min(1),
+      base_url: z.string().url().default("https://www.googleapis.com"),
+      poll_seconds: z.number().int().min(5).default(60),
+      ...sourceCommon,
+    })
+    .strict(),
+  /** Named so a lab sees them in the docs; not built in this release. */
+  z.object({ kind: z.enum(["labarchives", "benchling"]) }).passthrough(),
+]);
+
 const schema = z.object({
   database: z.object({ url_env: z.string().default("DATABASE_URL") }).default({ url_env: "DATABASE_URL" }),
   store: z
@@ -263,6 +291,14 @@ const schema = z.object({
     .strict()
     .optional(),
   research: z.object({ contact_email_env: z.string().min(1).optional() }).strict().default({}),
+  sources: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "a source id is lowercase letters, digits and -, because it starts each entry's path"), documentSource).default({}),
+  directory: z
+    .object({
+      groups: z.record(z.string().regex(GROUP_NAME), z.array(z.string().min(1))).default({}),
+      emails: z.record(z.string().email(), z.string().min(1)).default({}),
+    })
+    .strict()
+    .default({ groups: {}, emails: {} }),
   lab: z.object({ name: z.string().trim().min(1).optional() }).strict().default({}),
   anchor: z.object({ path: z.string().min(1), every_minutes: z.number().int().positive().default(15) }).strict().optional(),
   auth: z
@@ -318,6 +354,10 @@ export interface LabConfig {
   readonly contactEmailEnv: string | null;
   /** [lab] name: what the web pages show as the lab's name, or null to show the machine's hostname. */
   readonly labName: string | null;
+  /** [sources.<id>]: where synced knowledge bases come from (sources.ts). */
+  readonly sources: readonly DocumentSourceConfig[];
+  /** [directory]: the stand-in member directory (members.ts) until the identity unit lands. */
+  readonly directory: DirectoryConfig;
   /** [anchor]: the append-only log signed checkpoints of the hash chains go to (absolute), and how often the worker writes one. */
   readonly anchor: { readonly path: string; readonly everyMinutes: number } | null;
   readonly retention: Retention;
@@ -381,6 +421,10 @@ function storeKeys(s: { key_env?: string | undefined; keys?: Record<string, stri
   }
   return { keyEnvs, current, classKeys: s.class_keys };
 }
+
+export type DocumentSourceConfig =
+  | { readonly id: string; readonly kind: "folder"; readonly kb: string; readonly cls: DataClass; readonly licence: (typeof LICENCES)[number]; readonly path: string; readonly scope: readonly string[] }
+  | { readonly id: string; readonly kind: "gdrive"; readonly kb: string; readonly cls: DataClass; readonly licence: (typeof LICENCES)[number]; readonly folderId: string; readonly tokenEnv: string; readonly baseUrl: string; readonly pollSeconds: number };
 
 /** What loadConfig throws, and every binary prints, for a lab.toml with a [tools] table. */
 const TOOL_FOLDERS_REFUSED = "lab.toml has a [tools] table, but Aliquot does not load contributed tools yet. Remove [tools]: Aliquot runs only its built-in tools.";
@@ -507,6 +551,12 @@ export function parseConfig(text: string, path: string): LabConfig {
           scopes: c.auth.scopes,
         }
       : null,
+    sources: Object.entries(c.sources).map(([id, s]): DocumentSourceConfig => {
+      if (s.kind === "folder") return { id, kind: "folder", kb: s.kb, cls: s.class, licence: s.licence, path: resolve(s.path), scope: s.scope };
+      if (s.kind === "gdrive") return { id, kind: "gdrive", kb: s.kb, cls: s.class, licence: s.licence, folderId: s.folder_id, tokenEnv: s.token_env, baseUrl: s.base_url.replace(/\/+$/, ""), pollSeconds: s.poll_seconds };
+      throw new Error(`lab.toml: source ${id}: ${s.kind} is not a source kind in this release; sync its exports to a folder and register that folder (kind = "folder")`);
+    }),
+    directory: { groups: c.directory.groups, emails: c.directory.emails },
   };
 }
 

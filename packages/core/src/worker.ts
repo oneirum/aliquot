@@ -189,6 +189,7 @@ export async function workOn(core: Core, opts: WorkerOptions): Promise<void> {
           return { signal: AbortSignal.any([ctl.signal, lease.lost]), release: () => listeners.delete(onStop) };
         },
         log: opts.log,
+        directory: core.directory,
         ...(opts.agentSession ? { agentSession: opts.agentSession } : {}),
       };
       const result = await drive(job, journal, deps);

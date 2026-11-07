@@ -16,6 +16,10 @@
  *   jsonb (which reorders keys) behaves exactly like the one that was written.
  * - The KB module does not write run events. The built-in tools in tools.ts
  *   call it and journal the returned entry hashes.
+ * - Scope is enforced here, at retrieval. An entry with provenance carries a
+ *   scope; outline, search and read take a Viewer and never return, rank by,
+ *   or report as hidden an entry outside the viewer's scope. Search builds its
+ *   index over the visible entries only, so a hidden entry cannot move a score.
  */
 
 import { z } from "zod";
@@ -54,6 +58,36 @@ export interface KbEntry {
 
 export type HashedEntry = KbEntry & { readonly hash: EntryHash };
 
+/** Where a synced entry came from (sources.ts) and who may see it. Kept in the manifest, so a new version is a new snapshot. */
+export interface EntryProvenance {
+  /** The [sources.<id>] that produced it. */
+  readonly source: string;
+  readonly kind: "folder" | "gdrive";
+  /** The file's path inside the synced folder, or its Drive file id and name. */
+  readonly location: string;
+  /** Keyed address of the document text as ingested: the entry's version. */
+  readonly version: Sha256;
+  /** When the document last changed, from the file's mtime or Drive's modifiedTime. */
+  readonly modifiedAt: string;
+  /** "lab", "member:<id>" or "group:<name>". Visible to a viewer any one of them names. */
+  readonly scope: readonly string[];
+}
+
+/**
+ * Who is asking. memberId is the run trigger's member; groups come from the member directory (sources.ts,
+ * MemberDirectory). "all" is the steward's view in the kb command, never a run's.
+ */
+export type Viewer = { readonly memberId: string | null; readonly groups: readonly string[] } | "all";
+
+/** A run with no member (a schedule, an eval) sees lab-wide entries only. */
+export const NO_MEMBER: Viewer = { memberId: null, groups: [] };
+
+/** An entry with no provenance (a compiled or fixture KB) is lab-wide, as before scopes existed. */
+export function canSee(scope: readonly string[] | undefined, viewer: Viewer): boolean {
+  if (viewer === "all" || scope === undefined) return true;
+  return scope.some((s) => s === "lab" || (viewer.memberId !== null && s === `member:${viewer.memberId}`) || viewer.groups.some((g) => s === `group:${g}`));
+}
+
 export interface CoverageResult {
   readonly question: string;
   readonly answerable: boolean;
@@ -74,6 +108,8 @@ export interface KbSnapshot {
   readonly irbProtocol: string | null;
   readonly consentScope: string | null;
   readonly createdAt: string;
+  /** Path -> provenance, for entries a source sync produced. Absent on compiled KBs, so their ids do not move. */
+  readonly provenance?: Readonly<Record<string, EntryProvenance>>;
 }
 
 export interface Outline {
@@ -82,13 +118,15 @@ export interface Outline {
   readonly paths: readonly string[];
 }
 
+export type SourcedEntry = HashedEntry & { readonly source?: EntryProvenance };
+
 export interface ReadResult {
-  readonly entries: readonly HashedEntry[];
+  readonly entries: readonly SourcedEntry[];
   /** True when the cap cut entries. The agent is told, so it can read fewer paths. */
   readonly truncated: boolean;
   /** Paths that exist but did not fit under the cap. */
   readonly omitted: readonly string[];
-  /** Paths the snapshot does not have. */
+  /** Paths the snapshot does not have, or that the viewer may not see: the two read the same. */
   readonly missing: readonly string[];
 }
 
@@ -97,6 +135,7 @@ export interface SearchHit {
   readonly hash: EntryHash;
   readonly title: string;
   readonly score: number;
+  readonly source?: EntryProvenance;
 }
 
 /** Characters per token used for the read cap. Fixed so the cap is deterministic across models. */
@@ -257,17 +296,43 @@ export async function publishedSnapshots(db: Db, address: Addresser): Promise<Kb
   return out;
 }
 
-export interface KbReader {
-  has(snapshot: SnapshotId): Promise<boolean>;
-  outline(snapshot: SnapshotId): Promise<Labelled<Outline>>;
-  read(snapshot: SnapshotId, paths: readonly string[], capTokens: number): Promise<Labelled<ReadResult>>;
-  search(snapshot: SnapshotId, query: string, k: number): Promise<Labelled<readonly SearchHit[]>>;
+/**
+ * For each snapshot id: its KB and the provenance its KB's published head holds now, or null when the KB has no head
+ * or its head has no provenance. What "has this changed since the answer" compares against.
+ */
+export async function currentProvenance(db: Db, snapshots: readonly SnapshotId[]): Promise<Map<SnapshotId, { readonly kbId: string; readonly head: SnapshotId | null; readonly provenance: Readonly<Record<string, EntryProvenance>> | null }>> {
+  const rows = await db.query<{ id: SnapshotId; kb_id: string; head: SnapshotId | null; provenance: Record<string, EntryProvenance> | null }>(
+    "select s.id, s.kb_id, h.snapshot as head, hs.manifest->'provenance' as provenance from kb_snapshots s left join kb_heads h on h.kb_id = s.kb_id left join kb_snapshots hs on hs.id = h.snapshot where s.id = any($1)",
+    [snapshots],
+  );
+  return new Map(rows.rows.map((r) => [r.id, { kbId: r.kb_id, head: r.head, provenance: r.provenance }]));
 }
 
-/** One loaded snapshot and one bm25 index per snapshot id, built on first use. No invalidation needed: snapshots are immutable. */
+export interface KbReader {
+  has(snapshot: SnapshotId): Promise<boolean>;
+  outline(snapshot: SnapshotId, viewer: Viewer): Promise<Labelled<Outline>>;
+  read(snapshot: SnapshotId, paths: readonly string[], capTokens: number, viewer: Viewer): Promise<Labelled<ReadResult>>;
+  search(snapshot: SnapshotId, query: string, k: number, viewer: Viewer): Promise<Labelled<readonly SearchHit[]>>;
+}
+
+/** The entries of a snapshot this viewer may see, each with its provenance. */
+export function visibleEntries(l: LoadedSnapshot, viewer: Viewer): SourcedEntry[] {
+  const prov = l.snapshot.provenance;
+  if (!prov) return [...l.entries];
+  return l.entries.filter((e) => canSee(prov[e.path]?.scope, viewer)).map((e) => (prov[e.path] ? { ...e, source: prov[e.path] } : e));
+}
+
+function viewerKey(viewer: Viewer): string {
+  return viewer === "all" ? "all" : JSON.stringify([viewer.memberId, [...viewer.groups].sort()]);
+}
+
+/**
+ * One loaded snapshot per id, and one bm25 index per snapshot and viewer, built on first use. No invalidation needed:
+ * snapshots are immutable. A snapshot with no provenance has one index for every viewer.
+ */
 export function createKbReader(source: SnapshotSource): KbReader {
   const loaded = new Map<SnapshotId, Promise<LoadedSnapshot>>();
-  const indexes = new Map<SnapshotId, Bm25Index>();
+  const indexes = new Map<string, Bm25Index>();
   const get = (id: SnapshotId): Promise<LoadedSnapshot> => {
     let l = loaded.get(id);
     if (!l) {
@@ -292,29 +357,31 @@ export function createKbReader(source: SnapshotSource): KbReader {
   const stamp = <T>(l: LoadedSnapshot, value: T) => Labelled.stamp(value, l.snapshot.cls, `kb:${l.snapshot.id}`, marksOfSnapshot(l));
   return {
     has: (id) => source.has(id),
-    async outline(id) {
+    async outline(id, viewer) {
       const l = await get(id);
-      return stamp(l, { title: l.snapshot.title, purpose: l.snapshot.purpose, paths: l.entries.map((e) => e.path) });
+      return stamp(l, { title: l.snapshot.title, purpose: l.snapshot.purpose, paths: visibleEntries(l, viewer).map((e) => e.path) });
     },
-    async read(id, paths, capTokens) {
+    async read(id, paths, capTokens, viewer) {
       const l = await get(id);
-      return stamp(l, readCapped(l.entries, paths, capTokens));
+      return stamp(l, readCapped(visibleEntries(l, viewer), paths, capTokens));
     },
-    async search(id, query, k) {
+    async search(id, query, k, viewer) {
       const l = await get(id);
-      let index = indexes.get(id);
+      const key = l.snapshot.provenance ? `${id}|${viewerKey(viewer)}` : id;
+      let index = indexes.get(key);
       if (!index) {
-        index = buildBm25(l.entries);
-        indexes.set(id, index);
+        index = buildBm25(visibleEntries(l, viewer));
+        indexes.set(key, index);
       }
-      return stamp(l, searchBm25(index, query, k));
+      const prov = l.snapshot.provenance;
+      return stamp(l, searchBm25(index, query, k).map((h) => (prov?.[h.path] ? { ...h, source: prov[h.path] } : h)));
     },
   };
 }
 
 /** Whole entries in the order asked, until the next one would pass the cap. Duplicate paths are read once. */
-export function readCapped(entries: readonly HashedEntry[], paths: readonly string[], capTokens: number): ReadResult {
-  const out: HashedEntry[] = [];
+export function readCapped(entries: readonly SourcedEntry[], paths: readonly string[], capTokens: number): ReadResult {
+  const out: SourcedEntry[] = [];
   const omitted: string[] = [];
   const missing: string[] = [];
   let used = 0;

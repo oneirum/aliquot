@@ -103,8 +103,8 @@ body[data-side="closed"] .pane { padding-left: 0; --safe-l: env(safe-area-inset-
 .meta .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .q { margin: 0 0 16px; font-size: 18px; line-height: 26px; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; }
 .a { font-size: 16px; line-height: 26px; overflow-wrap: anywhere; text-wrap: pretty; }
-.a, .refusal, .cite, .witness, .withheld { transition: opacity 200ms var(--ease-out); }
-@starting-style { .a, .refusal, .cite, .witness, .withheld { opacity: 0; } }
+.a, .refusal, .cite, .changed, .witness, .withheld { transition: opacity 200ms var(--ease-out); }
+@starting-style { .a, .refusal, .cite, .changed, .witness, .withheld { opacity: 0; } }
 .a > * { margin: 0 0 16px; }
 .a > :last-child { margin-bottom: 0; }
 .a p { white-space: pre-line; }
@@ -148,6 +148,10 @@ button.choice:active { transform: scale(0.98); }
 a.doc { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 @media (hover: hover) and (pointer: fine) { a.doc:hover { text-decoration-thickness: 2px; } }
 .cite .who { flex-basis: 100%; }
+.ver { font-variant-numeric: tabular-nums; }
+/* A cited document edited since the answer: said in words, with its own glyph, never by colour alone. */
+.changed { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 20px; color: var(--ink-2); }
+.changed svg { flex: none; width: 16px; height: 16px; margin-top: 2px; }
 /* Two 32 px rows: the status and Check, then the hash and Open record. 6 px above and below each 20 px line centres it
    on Check's pill, so the rows step 32 px baseline to baseline; a status that wraps grows downward with Check on its
    first line. */
@@ -370,8 +374,8 @@ function refusal(title, text) {
 }
 
 // The entry the answer names on its Source line. The door finds it in the snapshots the run's record says it read, and
-// says whether this person may open it; the chip then opens it, or says who can, or that no such entry was read.
-async function cite(source, runId) {
+// says whether this person may open it; a synced document also shows the version the answer read; the chip then opens it, or says who can, or that no such entry was read.
+async function cite(source, runId, version) {
   if (!source) return null;
   const c = el("p", "cite");
   c.append(el("span", "k", "Source"));
@@ -386,7 +390,19 @@ async function cite(source, runId) {
     c.append(el("span", "doc", source));
     if (found) c.append(el("span", "who", "Not an entry this run retrieved."));
   }
+  if (version) c.append(el("span", "ver", "version " + version.version.slice(0, 8) + ", edited " + when(version.modifiedAt)));
   return c;
+}
+const when = (iso) => (new Date(iso).toDateString() === new Date().toDateString() ? clock(iso) : new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " " + clock(iso));
+// Said when the document the answer cites has been edited or removed since: the answer is from the old text.
+const EDITED = '<path d="M13.25 8A5.25 5.25 0 1 1 11.7 4.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12.25 1.75v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>';
+function changedNote(v) {
+  if (!v || v.state === "current") return null;
+  const p = el("p", "changed"); p.setAttribute("role", "status");
+  p.append(svg(EDITED), el("span", "", v.state === "removed"
+    ? "Removed since this answer: " + v.location + " is no longer in the lab's documents."
+    : "Changed since this answer: " + v.location + " was edited " + when(v.now.modifiedAt) + ". Ask again to get an answer from the current version."));
+  return p;
 }
 
 // The record: its state in a word and a shape with Check beside it, then the record's hash and the link to the full
@@ -608,8 +624,14 @@ async function watch(turn, steps, runId, scroll) {
         done(steps, answer(m ? raw.slice(0, m.index) : raw));
         if (withheld) turn.body.append(el("p", "withheld", withheld + (withheld === 1 ? " tool result was" : " tool results were") + " withheld from the model"));
       }
-      const c = await cite(source, runId);
+      // Asked again on every reload, so an answer kept in the thread says when its document has changed since.
+      let sources = [];
+      if (source) { try { sources = await fetchJson("/runs/" + runId + "/sources"); } catch {} }
+      const version = sources.find((v) => v.path === source) || null;
+      const c = await cite(source, runId, version);
       if (c) turn.margin.append(c);
+      const note = changedNote(version);
+      if (note) turn.margin.append(note);
       turn.margin.append(witness(runId, events));
       turn.entry.dataset.entryDone = "";
       if (scroll) turn.entry.scrollIntoView({ block: "end", behavior: reduce.matches ? "auto" : "smooth" });

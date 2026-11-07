@@ -7,8 +7,33 @@
 
 import { describeRefusal } from "./dataclass.ts";
 import type { Db } from "./db.ts";
-import { describeFailure, eventRefs, payloadStates, verifyChain, type PayloadState, type RedactionReason, type RunEvent, type StoredEvent } from "./record.ts";
-import type { PayloadHash } from "./hash.ts";
+import { describeFailure, eventRefs, payloadStates, verifyChain, type CitedVersion, type PayloadState, type RedactionReason, type RunEvent, type StoredEvent } from "./record.ts";
+import type { PayloadHash, SnapshotId } from "./hash.ts";
+
+/** Every document version a run's retrievals returned, once each, in the order first returned. */
+export function citedVersions(events: readonly { readonly event: RunEvent }[]): (CitedVersion & { readonly snapshot: SnapshotId })[] {
+  const out = new Map<string, CitedVersion & { readonly snapshot: SnapshotId }>();
+  for (const { event: e } of events) {
+    if (e.t !== "tool.completed") continue;
+    for (const r of e.retrieved ?? []) for (const v of r.versions ?? []) if (!out.has(`${r.snapshot} ${v.path}`)) out.set(`${r.snapshot} ${v.path}`, { ...v, snapshot: r.snapshot });
+  }
+  return [...out.values()];
+}
+
+/** A cited version against what its KB's head holds now: the same, changed (a newer version), or gone. */
+export interface SourceStatus extends CitedVersion {
+  readonly kbId: string | null;
+  readonly now: { readonly version: string; readonly modifiedAt: string } | null;
+  readonly state: "current" | "changed" | "removed";
+}
+
+export function sourceStatus(cited: ReturnType<typeof citedVersions>, heads: ReadonlyMap<SnapshotId, { readonly kbId: string; readonly provenance: Readonly<Record<string, { readonly version: string; readonly modifiedAt: string }>> | null }>): SourceStatus[] {
+  return cited.map(({ snapshot, ...v }) => {
+    const h = heads.get(snapshot);
+    const now = h?.provenance?.[v.path] ?? null;
+    return { ...v, kbId: h?.kbId ?? null, now: now && { version: now.version, modifiedAt: now.modifiedAt }, state: !now ? "removed" : now.version === v.version ? "current" : "changed" };
+  });
+}
 
 export interface RecordView {
   readonly runId: string;
@@ -160,7 +185,11 @@ export function describeEvent(e: RunEvent): string {
     case "tool.requested":
       return e.hash ? `${e.tool}, version ${e.hash.slice(0, 12)}` : `${e.tool}, not deployed`;
     case "tool.completed":
-      return e.retrieved?.length ? e.retrieved.map((r) => `${r.entries.length} ${r.entries.length === 1 ? "entry" : "entries"} from snapshot ${r.snapshot.slice(0, 12)}${r.truncated ? " (truncated)" : ""}`).join("; ") : `${e.ms} ms`;
+      return e.retrieved?.length
+        ? e.retrieved
+            .map((r) => `${r.entries.length} ${r.entries.length === 1 ? "entry" : "entries"} from snapshot ${r.snapshot.slice(0, 12)}${r.truncated ? " (truncated)" : ""}${r.versions?.length ? `, citing ${r.versions.map((v) => `${v.source}:${v.location} version ${v.version.slice(0, 12)} of ${v.modifiedAt}`).join(", ")}` : ""}`)
+            .join("; ")
+        : `${e.ms} ms`;
     case "tool.outcome-unknown":
       return `call ${e.callId}: the worker stopped before the outcome was written`;
     case "egress.refused":

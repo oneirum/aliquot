@@ -25,6 +25,7 @@ import { runRefusalText, type Policy } from "./policy.ts";
 import { Prompt, type ChatPart, type ModelGateway } from "./gateway.ts";
 import type { AgentVersionHash } from "./hash.ts";
 import type { KbReader, Outline } from "./kb.ts";
+import { EMPTY_DIRECTORY, runViewer, type MemberDirectory } from "./members.ts";
 import { describeFailure, fold, LeaseLost, MAX_ATTEMPTS, PayloadUnavailable, StoreRefused, type FailureReason, type InboxItem, type PayloadRef, type RunJournal, type RunOutcome, type RunState, type StopNotice } from "./record.ts";
 import type { ToolRunner } from "./tools.ts";
 import { JOB_RETRY, type LeasedJob } from "./queue.ts";
@@ -172,6 +173,8 @@ export interface LoopDeps {
    */
   readonly callSignal: (abortsOn: (stop: StopNotice) => boolean) => { readonly signal: AbortSignal; release(): void };
   readonly log: (line: string) => void;
+  /** Groups by member, for entry scopes. Absent means no groups: a member sees lab-wide entries and their own. */
+  readonly directory?: MemberDirectory;
   /**
    * Runs an agent CLI version's session until it has an answer, a confirmed stop, a fault or a refused prompt,
    * so that what is left (the stop record, the reply and the finish) is the chat loop's tail. Only the agent
@@ -273,7 +276,7 @@ export async function drive(job: LeasedJob, journal: RunJournal, deps: LoopDeps)
         case "call-tool": {
           if (agent.agentCli) throw new Error("an agent CLI run left its session with a tool call open");
           const call = state.toolCalls.find((c) => c.callId === action.callId)!;
-          await deps.tools.invoke(journal, { callId: call.callId, tool: call.tool, attempt: action.attempt, input: call.input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox }, signal);
+          await deps.tools.invoke(journal, { callId: call.callId, tool: call.tool, attempt: action.attempt, input: call.input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox, viewer: runViewer(journal.events(), deps.directory ?? EMPTY_DIRECTORY) }, signal);
           return null;
         }
         case "mark-unknown":
@@ -435,11 +438,12 @@ export function systemPrompt(agent: ResolvedAgent, outlines: readonly Outline[])
  * instructions and each knowledge base's outline, as Sanity does, so an agent
  * with a D3 knowledge base is D3 on every call.
  */
-export async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJournal, deps: Pick<LoopDeps, "kb" | "tools">, final: boolean): Promise<Prompt> {
+export async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJournal, deps: Pick<LoopDeps, "kb" | "tools" | "directory">, final: boolean): Promise<Prompt> {
   const instructions = instructionsOf(agent);
-  // The outline as the run's member may see it: an entry a DUA refuses them is not even listed.
+  // The outline as the run's member may see it: an entry a DUA refuses them, or a document outside their scope, is not even listed.
+  const viewer = runViewer(journal.events(), deps.directory ?? EMPTY_DIRECTORY);
   const visible = deps.tools.kbFor(journal, agent.knowledgeBases);
-  const outlines = await Promise.all(agent.knowledgeBases.map((kb) => visible.outline(kb.snapshot)));
+  const outlines = await Promise.all(agent.knowledgeBases.map((kb) => visible.outline(kb.snapshot, viewer)));
   const systemText = systemPrompt(agent, outlines.map((o) => o.value));
   const system: ChatPart = { role: "system", content: Labelled.derive(systemText, [instructions, ...outlines], "loop:system") };
   const parts: ChatPart[] = [];

@@ -9,6 +9,7 @@
  *   GET  /replies?runId=                                     -> the run's reply and notices
  *   GET  /runs/:id/events                                    -> the run record (events, no bodies)
  *   GET  /runs/:id/view                                      -> the record as the record page shows it, chain recomputed
+ *   GET  /runs/:id/sources                                   -> each document version the run read, and whether it has changed since
  *   GET  /                                                   -> the member chat page
  *   GET  /manifest.webmanifest, /sw.js, /icons/:name, /fonts/:name -> what installs the chat page as an app, and its typefaces (web-app.ts)
  *   GET  /runs?show=refusals|failed                          -> the newest runs, optionally only those with a refusal or that failed
@@ -50,7 +51,8 @@ import type { Db } from "../db.ts";
 import { intake, type IntakeDeps, type Surface } from "../frontdoor.ts";
 import type { KbReader } from "../kb.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
-import { recordView, recordViewOf } from "../record-view.ts";
+import { citedVersions, recordView, recordViewOf, sourceStatus as versionStatus } from "../record-view.ts";
+import { currentProvenance } from "../kb.ts";
 import { seesAllRuns, type Role } from "../roles.ts";
 import type { LabConfig, SurfaceConfig, SurfaceKind, TokenSurfaceConfig } from "../config.ts";
 import { SignOnRefused, type SignOn } from "./signon.ts";
@@ -381,13 +383,18 @@ export function createWebHandler(
         const scope: RunScope | null = mine ? { surface: WEB_SURFACE, member: mine } : viewer.t === "surface" ? { surface: viewer.id, member: null } : null;
         return sendHtml(req, res, runsPage(await listRuns(db, RUNS_LISTED, scope), filter, RUNS_LISTED, where, mine), NO_STORE);
       }
-      const runPath = /^\/runs\/([^/]+)(?:\/(events|view|source|source\.json))?$/.exec(url.pathname);
+      const runPath = /^\/runs\/([^/]+)(?:\/(events|view|source|source\.json|sources))?$/.exec(url.pathname);
       if (req.method === "GET" && runPath) {
         const runId = uuid.safeParse(runPath[1]);
         if (!runId.success) throw new HttpError(404, "not found");
         await requireVisible(db, runId.data, viewer);
         const events = await loadEvents(db, runId.data as RunId);
         if (runPath[2] === "events") return send(req, res, 200, events, NO_STORE);
+        if (runPath[2] === "sources") {
+          // Only what the run's own record already names: its cited paths, now compared with the published heads.
+          const cited = citedVersions(events);
+          return send(req, res, 200, versionStatus(cited, await currentProvenance(db, [...new Set(cited.map((c) => c.snapshot))])), NO_STORE);
+        }
         if (runPath[2] === "source" || runPath[2] === "source.json") {
           const path = url.searchParams.get("path");
           if (!kb || !path) throw new HttpError(404, "not found");

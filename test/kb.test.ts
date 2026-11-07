@@ -46,23 +46,23 @@ test("bm25-v1 ranks the office hours entry first for an office hours question, w
 
 test("the reader stamps results with the snapshot class and caps reads", async () => {
   const reader = createKbReader(memorySnapshots([loaded]));
-  const outline = await reader.outline(loaded.snapshot.id);
+  const outline = await reader.outline(loaded.snapshot.id, "all");
   assert.equal(outline.cls, "D1");
   assert.equal(outline.origin, `kb:${loaded.snapshot.id}`);
   assert.equal(outline.value.title, "handbook", "a fixture without a title is titled by its id");
   assert.deepEqual(outline.value.paths, ["data-classes.md", "equipment.md", "office-hours.md", "onboarding.md"]);
-  const hits = await reader.search(loaded.snapshot.id, "participant id data class", 2);
+  const hits = await reader.search(loaded.snapshot.id, "participant id data class", 2, "all");
   assert.equal(hits.value[0]?.path, "data-classes.md");
-  const capped = await reader.read(loaded.snapshot.id, ["office-hours.md", "data-classes.md", "nope.md", "onboarding.md"], 50);
+  const capped = await reader.read(loaded.snapshot.id, ["office-hours.md", "data-classes.md", "nope.md", "onboarding.md"], 50, "all");
   assert.deepEqual(
     { paths: capped.value.entries.map((e) => e.path), truncated: capped.value.truncated, omitted: capped.value.omitted, missing: capped.value.missing },
     { paths: ["office-hours.md"], truncated: true, omitted: ["data-classes.md", "onboarding.md"], missing: ["nope.md"] },
     "office-hours.md is 41 estimated tokens, data-classes.md would pass the 50 cap, and nothing after a cut is read",
   );
-  const full = await reader.read(loaded.snapshot.id, ["office-hours.md", "data-classes.md"], 15_000);
+  const full = await reader.read(loaded.snapshot.id, ["office-hours.md", "data-classes.md"], 15_000, "all");
   assert.equal(full.value.entries.length, 2);
   assert.equal(full.value.truncated, false);
-  await assert.rejects(reader.search("0".repeat(64) as never, "x", 1), /is not loaded/);
+  await assert.rejects(reader.search("0".repeat(64) as never, "x", 1, "all"), /is not loaded/);
 });
 
 test("renderDiff names the changed entry and only its changed lines", () => {

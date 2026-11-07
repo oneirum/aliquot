@@ -6,6 +6,8 @@
 //                                               move kb_heads; a snapshot with coverage gaps needs the override
 //   diff     --from <id> --to <id>              what changed between two snapshots
 //   search   --snapshot <id> --query <q> [--k 5]  bm25-v1 hits as JSON
+//   sync     [--watch]                          ingest every [sources.<id>] and publish each synced KB that changed;
+//                                               with --watch, keep going: folders on change, Drive on its poll
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -15,7 +17,9 @@ import { configProblem } from "../src/config.ts";
 import type { SnapshotId } from "../src/hash.ts";
 import { createKbReader, loadManifest, renderDiff, storedSnapshots } from "../src/kb.ts";
 import { compileResult, filesIn, loadOverrides, parseKbDefinition, publishSnapshot, readSources, renderCoverage, requestCompile } from "../src/kb-compile.ts";
+import { directoryFromConfig } from "../src/members.ts";
 import { requireProcessPermission, sealNetwork } from "../src/seal.ts";
+import { describeSync, sourcesFromConfig, syncKb, watchSources, type DocumentSource } from "../src/sources.ts";
 
 const denied = requireProcessPermission();
 if (denied) {
@@ -38,6 +42,7 @@ const { values, positionals } = parseArgs({
     k: { type: "string", default: "5" },
     actor: { type: "string" },
     "override-gaps": { type: "string" },
+    watch: { type: "boolean", default: false },
   },
 });
 
@@ -98,12 +103,36 @@ try {
     }
     case "search": {
       const reader = createKbReader(storedSnapshots(core.db, core.store));
-      const hits = await reader.search(need("snapshot") as SnapshotId, need("query"), Number(values.k));
+      const hits = await reader.search(need("snapshot") as SnapshotId, need("query"), Number(values.k), "all");
       console.log(JSON.stringify(hits.value));
       break;
     }
+    case "sync": {
+      const configs = core.config.sources;
+      if (!configs.length) throw new Error("lab.toml has no [sources.<id>]; add a synced folder or a Drive folder (docs/sources.md)");
+      const labPatterns = core.config.participantIdPatterns;
+      const sources = sourcesFromConfig(configs, { http: core.http, db: core.db, directory: directoryFromConfig(core.config.directory), labPatterns, ...(core.sandbox ? { pdf: core.sandbox.readPdf } : {}) }, process.env);
+      const deps = { db: core.db, store: core.store, labPatterns, actor: values.actor ?? "source-sync" };
+      if (!values.watch) {
+        const byKb = new Map<string, DocumentSource[]>();
+        for (const s of sources) byKb.set(s.kb, [...(byKb.get(s.kb) ?? []), s]);
+        for (const [kb, list] of byKb) console.log(describeSync(kb, await syncKb(deps, kb, list)));
+        break;
+      }
+      const folders = new Map(configs.flatMap((c) => (c.kind === "folder" ? [[c.id, c.path] as const] : [])));
+      const polls = new Map(configs.flatMap((c) => (c.kind === "gdrive" ? [[c.id, c.pollSeconds] as const] : [])));
+      const w = watchSources(deps, sources, folders, polls, (line) => console.log(line));
+      await w.ready;
+      console.log(`watching ${sources.length} ${sources.length === 1 ? "source" : "sources"}: ${configs.map((c) => `${c.id} (${c.kind === "folder" ? "on change" : `every ${c.pollSeconds} s`})`).join(", ")}`);
+      await new Promise<void>((resolve) => {
+        process.once("SIGINT", () => resolve());
+        process.once("SIGTERM", () => resolve());
+      });
+      w.close();
+      break;
+    }
     default:
-      throw new Error(`unknown command ${command ?? "(none)"}: compile, coverage, publish, diff or search`);
+      throw new Error(`unknown command ${command ?? "(none)"}: compile, coverage, publish, diff, search or sync`);
   }
 } catch (err) {
   // A source that cannot be read (a scanned PDF, a missing file) is the operator's to fix: the message, not a stack.

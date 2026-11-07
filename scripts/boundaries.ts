@@ -69,6 +69,7 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/gate.ts": ["stamp"],
   "packages/core/src/kb.ts": ["stamp"],
   "packages/core/src/kb-compile.ts": ["stamp"],
+  "packages/core/src/sources.ts": ["stamp"],
   "packages/core/src/agent.ts": ["stamp"],
   "packages/core/src/loop.ts": ["stamp"],
   // The slice harness spawns the binaries and drives them over HTTP. It is not deployed.
@@ -82,6 +83,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/unit3.ts": ["module:http"],
   // The sign-on walk drives the door over HTTP like a browser, picks a free port, and starts the door once without [auth]. It is not deployed.
   "scripts/walk-signon.ts": ["network-globals", "module:child_process", "module:net"],
+  // The fake Drive API the sources test and the sources walk serve. It is not deployed.
+  "scripts/fake-drive.ts": ["module:http"],
   "scripts/record-demo.ts": ["module:child_process"],
   // The study walk runs the aliquot binary as a PI and a reviewer would, with the write flag export needs. It is not deployed.
   "scripts/walk-study.ts": ["module:child_process"],
