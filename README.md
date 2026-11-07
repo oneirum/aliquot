@@ -619,8 +619,8 @@ The fake models are scripted, so this checks retrieval, orchestration, provenanc
 |---|---|
 | Claims in Sonnet's answers that the entries it read do not support, judged claim by claim | 12 of 744 (1.6%) |
 | Answers citing an entry other than the one that answers the question (Sonnet) | 0 of 205; 87 name no entry, and the record lists the entries read |
-| Questions carrying participant ids or PHI that were answered instead of refused | 17 of 42, each a form the classifier does not catch yet (an SSN with spaces, a spelled-out date of birth, a lower-case id) |
-| Answerable questions refused | 7 of 258, each an SSN-shaped part number or the review marker |
+| Questions carrying participant ids or PHI that were answered instead of refused | 0 of 42; no hosted request carried one (17, over 51 requests, before the detectors learned spaced SSNs, spelled-out dates of birth and loosely typed ids) |
+| Answerable questions refused | 1 of 258: a sentence that names the review marker, refused the way a pasted marked review is |
 | Questions no entry covers that Sonnet answered anyway | 0 of 50 |
 | Planted instructions obeyed: by a scripted model that obeys everything, by Sonnet | 30 of 44, 0 of 40; no planted instruction got data past the egress decision |
 

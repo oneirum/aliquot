@@ -82,11 +82,47 @@ interface Detector {
   readonly patterns: readonly RegExp[];
   /** Which HIPAA Safe Harbor identifier (45 CFR 164.514(b)(2)(i)) it covers, for the docs and the studio. */
   readonly safeHarbor?: string;
-  readonly keep?: (match: string) => boolean;
+  /** Whether a match counts, given the text around it (index is where the match starts). */
+  readonly keep?: (match: string, text: string, index: number) => boolean;
 }
 
 const PHONE = String.raw`(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}`;
-const DATE = String.raw`(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})`;
+const MONTH = String.raw`(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?`;
+/** 04/12/1958, 7-3-1961, 1958-04-12, April 12, 1958, 3 March 1961. */
+const DATE = String.raw`(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|${MONTH}\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+${MONTH},?\s+\d{4})`;
+
+let endsOf: { readonly text: string; readonly ends: readonly number[] } = { text: "", ends: [] };
+/** Where sentences end in a text, kept for the last text scanned: classify() asks once per match of the same text. */
+function sentenceEnds(text: string): readonly number[] {
+  // A full stop ends a sentence unless it closes an honorific: "Mrs. Lin, admitted 05/02/2026" is one sentence.
+  if (endsOf.text !== text) endsOf = { text, ends: [...text.matchAll(/(?<!\b(?:Mr|Mrs|Ms|Mx|Dr|St))[.?!](?=\s)|\n/g)].map((m) => m.index) };
+  return endsOf.ends;
+}
+
+/** The sentence a match sits in, up to the match and from it on: detectors that need a second identifier look here. */
+function sentenceAround(text: string, index: number, length: number): { readonly before: string; readonly after: string } {
+  const ends = sentenceEnds(text);
+  const start = (ends.findLast((e) => e < index) ?? -1) + 1;
+  const end = ends.find((e) => e >= index + length) ?? text.length;
+  return { before: text.slice(start, index), after: text.slice(index + length, end) };
+}
+
+/** Words that make a 3-2-4 digit group a part, lot or order number rather than an SSN, unless an SSN label is also near. */
+const NOT_SSN_CONTEXT = /\b(?:part|lot|batch|serial|s\/n|catalog(?:ue)?|cat\.?|reorder|order|PO|SKU|item|invoice|ticket|model|ref(?:erence)?|code|asset|tracking|confirmation|kit)\b[^\d]{0,24}$/i;
+const SSN_LABEL = /\b(?:SSN|SS#|social(?:\s+security)?)\b/i;
+
+/** An SSN the Social Security Administration could issue: no area 000, 666 or 9xx, no group 00, no serial 0000. */
+function ssnShaped(match: string, text: string, index: number): boolean {
+  const d = match.replace(/\D/g, "");
+  if (d.length !== 9 || /^(?:000|666|9)/.test(d) || d.slice(3, 5) === "00" || d.slice(5) === "0000") return false;
+  const before = text.slice(Math.max(0, index - 40), index);
+  return SSN_LABEL.test(before) || !NOT_SSN_CONTEXT.test(before);
+}
+
+/** Readings and findings about a person's body: a name in the same sentence makes the sentence PHI. */
+const HEALTH_MEASURE = /\b(?:heart\s+rate|pulse|blood\s+pressure|BP|weight|weighed|BMI|glucose|A1c|cholesterol|temperature|SpO2|oxygen|diagnos(?:is|ed)|medication|dose|lab\s+results?|blood\s+(?:test|draw|work)|scored|score)\b/i;
+/** What precedes a street address that makes it a person's: their name, or a word that says where someone lives. */
+const PERSON_BEFORE_ADDRESS = /(?:\b[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+(?:at|of|on)|,)?|\b(?:home|lives|living|resides|residing|his|her|their|mail(?:ed|ing)?\s+to|address(?:\s+is)?)\b[^.\n]{0,20})\s*$/;
 /** A card network's number prefix (Visa, Mastercard, Amex, Discover, JCB, Diners), which an epoch timestamp (17..., 18...) never has. */
 const CARD_PREFIX = /^(?:4|5[1-5]|2[2-7]|3[47]|3[0689]|35|6011|64[4-9]|65)/;
 
@@ -108,20 +144,42 @@ const PUBLIC_LINK_HOSTS = /^(?:[a-z0-9-]+\.)*(?:doi\.org|ncbi\.nlm\.nih\.gov|eur
 
 /**
  * Every detector a class may name. The first seven are the gate's detectors
- * before classes existed, with the same patterns. The phi-* set and the four
- * shared with it cover the Safe Harbor identifiers a pattern can find in text;
- * photographs are not text, and "any other unique identifying number" is the
- * lab's own participant-id patterns.
+ * before classes existed; ssn, mrn, dob and participant-id have since learned
+ * the spelled-out and loosely typed forms the trust harness found them missing.
+ * The phi-* set and the four shared with it cover the Safe Harbor identifiers a
+ * pattern can find in text; a photograph is found only where the text refers
+ * to one, and "any other unique identifying number" is the lab's own
+ * participant-id patterns.
  */
-export const DETECTORS: Readonly<Record<string, Detector>> = {
-  ssn: { patterns: [/\b\d{3}-\d{2}-\d{4}\b/g], safeHarbor: "(G) Social Security numbers" },
-  mrn: { patterns: [/\bMRN[:#\s]*\d{5,}\b/gi], safeHarbor: "(H) Medical record numbers" },
-  dob: { patterns: [/\bDOB\b[:\s]*\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/gi], safeHarbor: "(C) Dates related to an individual" },
+const BASE_DETECTORS: Readonly<Record<string, Detector>> = {
+  ssn: {
+    patterns: [/\b\d{3}[- ]\d{2}[- ]\d{4}\b/g, /\b(?:SSN|SS#|social(?:\s+security)?(?:\s+(?:number|no\.?|#))?)(?:\s+(?:is|was))?[:#\s]*\d{9}\b/gi],
+    safeHarbor: "(G) Social Security numbers",
+    keep: ssnShaped,
+  },
+  mrn: { patterns: [/\b(?:MRN|medical\s+record\s*(?:number|no\.?|#)?)(?:\s+(?:is|was))?[:#\s]*\d{5,}\b/gi], safeHarbor: "(H) Medical record numbers" },
+  dob: {
+    patterns: [new RegExp(String.raw`\b(?:DOB|D\.O\.B\.?|date\s+of\s+birth|birth\s*date|birthday|born)\b(?:\s+(?:is|was|on|of))*[:,\s]*${DATE}`, "gi")],
+    safeHarbor: "(C) Dates related to an individual",
+  },
   phone: { patterns: [new RegExp(String.raw`\b${PHONE}\b`, "g")], safeHarbor: "(D) Telephone numbers" },
   email: { patterns: [/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g], safeHarbor: "(F) Email addresses" },
   "participant-id": { patterns: [], safeHarbor: "(R) Any other unique identifying number" },
   "review-marker": { patterns: [/\bREVIEW[- ]CONFIDENTIAL\b/gi] },
   "phi-name": { patterns: [/\b(?:[Pp]atient|[Pp]t\.?|[Nn]ame)(?:'s)?(?:\s+[Nn]ame)?\s*[:-]?\s*[A-Z][a-z]+(?:\s+[A-Z]\.)?\s+[A-Z][a-z]+(?:-[A-Z][a-z]+)?\b/g], safeHarbor: "(A) Names" },
+  "phi-name-health": {
+    patterns: [/\b(?:Mr|Mrs|Ms|Mx|Miss)\.?\s+[A-Z][a-z]+(?:-[A-Z][a-z]+)?(?:'s)?/g],
+    safeHarbor: "(A) Names",
+    keep: (m, text, i) => {
+      const s = sentenceAround(text, i, m.length);
+      return HEALTH_MEASURE.test(s.before) || HEALTH_MEASURE.test(s.after);
+    },
+  },
+  "phi-name-address": {
+    patterns: [/\b\d{1,6}\s+(?:[A-Z][a-z]+\s+){1,3}(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Ln|Lane|Dr|Drive|Ct|Court|Way|Pl|Place|Terrace|Pkwy|Parkway)\b\.?/g],
+    safeHarbor: "(B) Geographic subdivisions smaller than a state",
+    keep: (m, text, i) => PERSON_BEFORE_ADDRESS.test(sentenceAround(text, i, m.length).before),
+  },
   "phi-address": {
     patterns: [/\b\d{1,6}\s+(?:[A-Z][a-z]+\s+){1,3}(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Ln|Lane|Dr|Drive|Ct|Court|Way|Pl|Place|Terrace|Pkwy|Parkway)\b\.?/g],
     safeHarbor: "(B) Geographic subdivisions smaller than a state",
@@ -133,9 +191,15 @@ export const DETECTORS: Readonly<Record<string, Detector>> = {
   },
   "phi-age": { patterns: [/\b(?:aged?\s*)?(?:9\d|1[0-4]\d)\s*-?\s*(?:years?|yrs?|yo|y\/o)(?:[\s-]*old)?\b/gi], safeHarbor: "(C) Ages over 89" },
   "phi-fax": { patterns: [new RegExp(String.raw`\bfax[:#\s]*${PHONE}\b`, "gi")], safeHarbor: "(E) Fax numbers" },
-  "phi-health-plan": { patterns: [/\b(?:health\s+plan|member|subscriber|beneficiary|insurance|policy)\s*(?:id|no\.?|number|#)[:#\s]*[A-Z0-9-]{5,}\b/gi], safeHarbor: "(I) Health plan beneficiary numbers" },
+  "phi-health-plan": {
+    patterns: [/\b(?:health\s+plan|member|subscriber|beneficiary|insurance|policy)(?:\s+(?:beneficiary|member|subscriber))?\s*(?:id|no\.?|number|#)(?:\s+(?:is|was))?[:#\s]*(?=[A-Z0-9-]*\d)[A-Z0-9-]{5,}\b/gi],
+    safeHarbor: "(I) Health plan beneficiary numbers",
+  },
   "phi-account": { patterns: [/\b(?:account|acct)\s*(?:no\.?|number|#)?[:#\s]*\d{6,}\b/gi], safeHarbor: "(J) Account numbers" },
-  "phi-license": { patterns: [/\b(?:(?:licen[cs]e|certificate)\s*(?:no\.?|number|#)|NPI|DEA)[:#\s]*[A-Z]{0,2}\d{5,}\b/gi], safeHarbor: "(K) Certificate and license numbers" },
+  "phi-license": {
+    patterns: [/\b(?:(?:licen[cs]e|certificate)\s*(?:no\.?|number|#)|NPI|DEA)[:#\s]*[A-Z]{0,2}\d{5,}\b/gi, /\bdriver'?s?\s+licen[cs]e(?:\s+(?:no\.?|number|#))?(?:\s+(?:is|was))?[:#\s]*[A-Z]{0,2}\d[\dA-Z-]{4,}\b/gi],
+    safeHarbor: "(K) Certificate and license numbers",
+  },
   "phi-vehicle": { patterns: [/\b(?=[A-HJ-NPR-Z]*\d)(?=\d*[A-HJ-NPR-Z])[A-HJ-NPR-Z0-9]{17}\b/g, /\blicense\s+plate\s*(?:no\.?|number|#)?[:#\s]*[A-Z0-9-]{2,8}\b/gi], safeHarbor: "(L) Vehicle identifiers and serial numbers" },
   "phi-device": { patterns: [/\b(?:serial|device\s+id|UDI|implant)\s*(?:no\.?|number|#|id)?[:#\s]*[A-Z0-9-]*\d[A-Z0-9-]{5,}\b/gi], safeHarbor: "(M) Device identifiers and serial numbers" },
   "phi-url": {
@@ -149,11 +213,46 @@ export const DETECTORS: Readonly<Record<string, Detector>> = {
       }
     },
   },
-  "phi-ip": { patterns: [/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g], safeHarbor: "(O) IP addresses" },
+  "phi-ip": {
+    patterns: [/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g],
+    safeHarbor: "(O) IP addresses",
+    // A URL's host is where a request goes, not a person's device (phi-url covers the URL), and loopback is no one's.
+    keep: (m, text, i) => !/^(?:127|0)\./.test(m) && !/(?:\/\/|@)$/.test(text.slice(Math.max(0, i - 3), i)),
+  },
+  "phi-photo": {
+    patterns: [/\b(?:photo(?:graph)?|picture|image|headshot)s?\b[^.\n]{0,40}?\bfull[- ]face\b/gi, /\bfull[- ]face\s+(?:photo(?:graph)?|picture|image|headshot)s?\b/gi],
+    safeHarbor: "(Q) Full-face photographs",
+  },
   "phi-biometric": { patterns: [/\b(?:fingerprint|voiceprint|retinal?\s+scan|iris\s+scan|face\s?print)\s*(?:id|template|no\.?|#)[:#\s]*[A-Z0-9-]{4,}\b/gi], safeHarbor: "(P) Biometric identifiers" },
   "dua-marker": { patterns: [/^[ \t]*(?:DUA|Data\s+Use\s+Agreement|dbGaP)[ \t]*[:#][ \t]*\S+/gim, /\bphs\d{6}(?:\.v\d+(?:\.p\d+)?)?\b/g, /\bEGA[SD]\d{11}\b/g] },
   "card-number": { patterns: [/\b\d(?:[ -]?\d){12,18}\b/g], keep: luhn },
   "export-marker": { patterns: [/\b(?:ITAR|EAR99|export[- ]controlled)\b/gi, /\bECCN[:#\s]*\d[A-E]\d{3}\b/gi, /\bUSML\s+Category\s+[IVXL]+\b/g] },
+};
+
+/** Someone named or pointed at in the sentence: a pronoun, an honorific, a role, a participant id shape or a first and last name. */
+const PERSON_WORD = /\b(?:he|she|him|his|her|hers|they|them|their|participant|patient|subject|pt|mr|mrs|ms|mx|miss)\b/i;
+const PERSON_NAME = /\b[A-Z]{2,}\d*[-\s]?\d{2,}\b|\b(?!(?:The|A|An|Our|This|That|My|Your|Each|Every)\b)[A-Z][a-z]+\s+[A-Z][a-z]+\b/;
+const PERSON = { test: (s: string) => PERSON_WORD.test(s) || PERSON_NAME.test(s) };
+
+/**
+ * A detector that counts only in a sentence about a person: an admission date or an IP is an identifier when it is
+ * someone's, while "the freezer died on 3/4/2026" and "the LIMS server is 192.168.1.10" are handbook text.
+ */
+function aboutPerson(d: Detector): Detector {
+  return {
+    ...d,
+    keep: (m, text, i) => {
+      if (d.keep && !d.keep(m, text, i)) return false;
+      const s = sentenceAround(text, i, m.length);
+      return PERSON.test(s.before) || PERSON.test(s.after);
+    },
+  };
+}
+
+export const DETECTORS: Readonly<Record<string, Detector>> = {
+  ...BASE_DETECTORS,
+  "phi-date-person": aboutPerson(BASE_DETECTORS["phi-date"]!),
+  "phi-ip-person": aboutPerson(BASE_DETECTORS["phi-ip"]!),
 };
 
 /** Names that expand to several detectors in a class's detectors list. */
@@ -162,6 +261,13 @@ export const DETECTOR_GROUPS: Readonly<Record<string, readonly string[]>> = {
     .filter(([id, d]) => d.safeHarbor && id !== "participant-id")
     .map(([id]) => id),
 };
+
+/**
+ * The built-in restricted class's detectors: the four it always had, and the Safe Harbor identifiers whose shapes
+ * do not occur in a lab handbook (a person's address, not a building's; a name beside a reading of their body; a date
+ * or an IP in a sentence about someone).
+ */
+const RESTRICTED_DETECTORS = ["ssn", "mrn", "dob", "participant-id", "phi-name-health", "phi-name-address", "phi-date-person", "phi-health-plan", "phi-license", "phi-ip-person", "phi-photo"] as const;
 
 const REVIEW_REFUSED = "This message carries review-confidential content, which this lab does not let agents read.";
 
@@ -172,7 +278,7 @@ export function defaultClasses(egress: EgressPolicy): ClassRule[] {
     c("public", "D0", "hosted", [], "This message is public."),
     c("internal", "D1", "hosted", [], "This message is internal to the lab."),
     c("confidential", "D2", "hosted", ["phone", "email"], "This message carries contact details, which only an approved model may read."),
-    c("restricted", "D3", "local", ["ssn", "mrn", "dob", "participant-id"], "This message carries restricted data, such as a participant id, which only a model on lab or institution hardware may read."),
+    c("restricted", "D3", "local", RESTRICTED_DETECTORS, "This message carries restricted data, such as a participant id, which only a model on lab or institution hardware may read."),
     // Under "refuse" no model reads it and the record keeps a hash; under "lab-only" a lab model reads it from the store.
     egress.reviewConfidential === "refuse" ? c("review-confidential", "R", "none", ["review-marker"], REVIEW_REFUSED, "hash") : c("review-confidential", "R", "local", ["review-marker"], REVIEW_REFUSED),
   ];
@@ -340,6 +446,19 @@ export function strictestClass(policy: Policy, ids: readonly string[]): ClassRul
   return top;
 }
 
+/**
+ * A lab's participant-id patterns, and for each one that opens with a literal prefix of two or more characters
+ * (`\bLAB1-\d{4}\b`), the same id as a person types it: any case, a space, en dash or no separator, any number of
+ * digits (lab1-0042, LAB1 0107, LAB1–0311, LAB1-42). The exact pattern still runs, so nothing it found is lost.
+ */
+function participantIdPatterns(labPatterns: readonly RegExp[]): readonly RegExp[] {
+  return labPatterns.flatMap((re) => {
+    const prefix = /^(?:\\b)?((?:[A-Za-z0-9]|\\-)+?)(?:-|\\-|_|\[[^\]]*\]|\\s|\\d|\()/.exec(re.source)?.[1]?.replace(/\\-/g, "-").replace(/-$/, "");
+    if (!prefix || prefix.length < 2 || !/[A-Za-z]/.test(prefix)) return [re];
+    return [re, new RegExp(String.raw`\b${prefix.replace(/-/g, "[-\u2010-\u2015]")}[\s_\u2010-\u2015-]?\d+\b`, "gi")];
+  });
+}
+
 /** Pure and local. The level is the join of the floor and every span's class level; the class is the strictest among them. */
 export function classify(policy: Policy, input: Classifiable): Classification {
   const base = input.t === "message" ? input.floor : input.declared;
@@ -347,16 +466,19 @@ export function classify(policy: Policy, input: Classifiable): Classification {
   for (const c of policy.classes) {
     for (const id of c.detectors) {
       const d = DETECTORS[id]!;
-      const patterns = id === "participant-id" ? policy.labPatterns : d.patterns;
+      const patterns = id === "participant-id" ? participantIdPatterns(policy.labPatterns) : d.patterns;
       for (const pattern of patterns) {
         // A fresh RegExp per scan: a shared global regex keeps lastIndex between calls.
         const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
-        for (const m of input.text.matchAll(re)) if (!d.keep || d.keep(m[0])) spans.push({ detector: id, class: c.id, span: [m.index, m.index + m[0].length] });
+        for (const m of input.text.matchAll(re)) if (!d.keep || d.keep(m[0], input.text, m.index)) spans.push({ detector: id, class: c.id, span: [m.index, m.index + m[0].length] });
       }
     }
     for (const p of c.patterns) for (const m of input.text.matchAll(new RegExp(p, "g"))) spans.push({ detector: "class-pattern", class: c.id, span: [m.index, m.index + m[0].length] });
   }
-  spans.sort((a, b) => a.span[0] - b.span[0]);
+  spans.sort((a, b) => a.span[0] - b.span[0] || b.span[1] - a.span[1]);
+  // A loose participant-id pattern finds what the exact one found: keep one span per place per detector.
+  const unique = spans.filter((s, i) => !spans.slice(0, i).some((t) => t.detector === s.detector && t.class === s.class && t.span[0] <= s.span[0] && t.span[1] >= s.span[1]));
+  spans.splice(0, spans.length, ...unique);
   let top = classOfLevel(policy, base);
   let rule = `${input.t === "message" ? "floor" : "declared"}:${base}`;
   let level = base;

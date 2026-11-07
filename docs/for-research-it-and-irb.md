@@ -37,14 +37,15 @@ declared by its steward. The compile step raises that class when its source text
 The five levels above are what every egress decision reads. On top of them a lab declares data classes in `lab.toml`
 (`[classes.<id>]`, `packages/core/src/policy.ts`). Each class sits at one level, and `lab.toml` fails to load when a
 class asks for less protection than its level enforces, so a class can only add rules. The five built-in classes are
-always there and, with no `[classes]` table, behave exactly as Aliquot did before classes existed.
+always there. With no `[classes]` table they find everything the gate found before classes existed, and the
+`restricted` class also catches the identifier forms the trust harness found answered (`docs/trust.md`).
 
 | Class | Level | Model tier | Record of a refused message | Detectors | Where it comes from |
 |---|---|---|---|---|---|
 | `public` | D0 | hosted | text | none (a channel's floor) | built in |
 | `internal` | D1 | hosted | text | none (the default floor) | built in |
 | `confidential` | D2 | hosted (approved placement) | text | phone, email | built in |
-| `restricted` | D3 | local (lab or institution) | text | SSN, MRN, date of birth, the lab's participant ids | built in |
+| `restricted` | D3 | local (lab or institution) | text | SSN (dashes, spaces, or nine digits after a label; not a part, lot or order number), MRN, date of birth (numeric or spelled out, after DOB, "date of birth" or "born"), the lab's participant ids (also in any case, with a space, en dash or no separator, and fewer digits), admission and discharge dates and IP addresses in a sentence about a person, health plan and licence numbers, a full-face photo reference, a name beside a health reading (Mr., Mrs., Ms.), a person's home address | built in |
 | `review-confidential` | R | none under `refuse`, local under `lab-only` | keyed hash | REVIEW-CONFIDENTIAL marker | built in |
 | `phi` | D3 | none | keyed hash, 30 days | HIPAA Safe Harbor identifiers (45 CFR 164.514(b)(2)) | example in `fixtures/policy/classes.toml` |
 | `controlled_access` | D3 | none | keyed hash, 365 days | DUA marker: `DUA:` lines, dbGaP `phs` accessions, EGA ids | example; NIH NOT-OD-25-081 |
@@ -380,7 +381,12 @@ after either.
   thread is planned.
 
 - **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A name without a
-  label ("John Smith was admitted") is not found by `phi-name`; a lab with free-text PHI should set its PHI channels'
+  label or a date ("John Smith was admitted"), or a reading with no honorific ("Hassan's heart rate was 48"), is not
+  found. The built-in detectors also run over knowledge base sources. A dated incident or an instrument's IP address
+  counts only in a sentence that names or points at a person (a pronoun, an honorific, "participant", a first and last
+  name); a handbook that trips one anyway moves the detector in `lab.toml` (`[classes.internal] detectors =
+  ["phi-ip-person"]`). A lab with
+  free-text PHI should set its PHI channels'
   floor to D3 rather than rely on detectors. Detector accuracy at scale is measured by the trust harness, not here. A lab must add its
   own participant id formats to `lab.toml`. `pnpm aliquot:init` asks for them and tests them against sample ids,
   and refuses a pattern that matches ordinary text or no sample id.
