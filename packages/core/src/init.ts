@@ -93,7 +93,19 @@ const SURFACE_TOKENS = [
   { env: STUDIO_TOKEN_ENV, without: "the studio cannot reach the door" },
 ] as const;
 
-export function renderLabToml(a: InitAnswers): string {
+/** lab.toml's [anchor] table, for an init that wrote an anchor key. The log path is relative to lab.toml unless absolute. */
+export function anchorTable(logPath: string): string {
+  return `
+# Signed checkpoints of the audit stream and every run record, kept outside the database. The worker appends one line
+# every every_minutes, signed with the key in the file LABH_ANCHOR_KEY_FILE names, and aliquot verify --anchors checks
+# each line against the database. Ship this file to write-once storage or the SIEM as it grows.
+[anchor]
+path = ${s(logPath)}
+every_minutes = 15
+`;
+}
+
+export function renderLabToml(a: InitAnswers, anchorLog: string | null = null): string {
   // The default name is a placeholder, so it stays a comment and the pages show the hostname.
   const [labTable, labName] = a.lab === DEFAULTS.lab ? ["# [lab]", '# name = "Your Lab"'] : ["[lab]", `name = ${s(a.lab)}`];
   const text = `# lab.toml for ${a.lab.replace(/[\r\n]/g, " ")}, written by aliquot init.
@@ -163,7 +175,7 @@ image = ${s(a.sandboxImage)}
 # [sandbox]
 # image = "sha256:<64 hex>"
 `
-}`;
+}${anchorLog === null ? "" : anchorTable(anchorLog)}`;
   parseConfig(text, "/lab.toml");
   return text;
 }

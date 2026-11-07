@@ -149,3 +149,10 @@ fixtures = ["fixtures/agent.json"]
 
 [knowledge_bases]
 fixtures = ["fixtures/kb.json"]
+
+# Signed checkpoints of the audit stream and every run record, outside the database (docs/for-research-it-and-irb.md,
+# Anchors). The worker appends one line every every_minutes, signed with the Ed25519 key in the file LABH_ANCHOR_KEY_FILE
+# names, and needs --allow-fs-write for this path. aliquot init --anchor-key writes a key and this table.
+# [anchor]
+# path = "anchors.log"                 # relative to this file unless absolute; ship it to write-once storage
+# every_minutes = 15

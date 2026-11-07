@@ -59,7 +59,7 @@ To run the checks:
 	pnpm test
 	pnpm lab0
 
-`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `9/9 checks passed`.
+`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `13/13 checks passed`.
 
 If port 5432 is taken, set `LABH_PG_PORT` for every command, for example `export LABH_PG_PORT=55433` before `docker compose up -d postgres`.
 
@@ -295,6 +295,7 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm slice1` | The run loop: crash and resume exactly once, a zombie worker fenced off, idempotent intake, restricted data refused with zero hosted requests, limits, stop, and the network seal against planted routes. |
 | `pnpm unit3` | Knowledge bases: compile, coverage gaps blocking publish, a restart mid-compile, `kb_search` and `kb_read` in a run, snapshot diff, refused URL hosts, publish with an override note. |
 | `pnpm lab0` | The first-use check on a synthetic lab, described below. |
+| `aliquot verify --anchors` | That nobody rewrote history in the database. The worker signs the head of the audit stream and of each closed run into an anchor log outside the database every few minutes, with a key the database never holds. This checks every line's signature and that the database still holds each signed hash, and names the first seq that changed. `test/anchor.test.ts` rewrites an audit row and a run event, recomputes every later hash so plain `aliquot verify` passes, and shows this check fail at that seq; it also catches a forged line, a line under another key, and a removed line. |
 | `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. |
 
 The tests that need macOS or the sandbox image skip elsewhere, each with its reason; CI runs on Linux.
@@ -314,6 +315,7 @@ The tests that need macOS or the sandbox image skip elsewhere, each with its rea
 | A restricted knowledge base attached to an agent on a hosted model | Refused at intake |
 | Every run | 26 of 26 run records verify, each naming its agent version |
 | The hosted endpoint over the whole check | 1 request, the planned control message |
+| A worker with `[anchor]` set signs every chain into a log outside the database | 1 anchor line over 38 audit rows and 31 closed runs; `aliquot verify --anchors` holds |
 
 The fake models are scripted, so this checks retrieval, orchestration, provenance and egress control. It does not measure answer quality, and it does not show that a real lab wants this. That needs a pilot.
 

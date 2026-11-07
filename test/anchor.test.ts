@@ -216,3 +216,14 @@ test("aliquot verify --anchors exits 3 and names the seq after a recomputed rewr
   appendFileSync(cliLog, "{}\n");
   assert.match(aliquot(["verify", "--anchors"]).stdout, /line 2: not an anchor line/);
 });
+
+test("a worker whose lab.toml sets [anchor] refuses to start without the key or the grant to append, naming the fix", () => {
+  const worker = (env: Record<string, string>) =>
+    spawnSync(process.execPath, [...PERMISSION_FLAGS, "packages/core/bin/worker.ts", "--config", cfg], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH ?? "", NODE_NO_WARNINGS: "1", DATABASE_URL: url, ...env }, timeout: 30_000 });
+  const noKey = worker({});
+  assert.equal(noKey.status, 2);
+  assert.match(noKey.stderr, /^lab\.toml \[anchor\] is set, but LABH_ANCHOR_KEY_FILE is not set/);
+  const noGrant = worker({ LABH_ANCHOR_KEY_FILE: keyPath });
+  assert.equal(noGrant.status, 2);
+  assert.ok(noGrant.stderr.includes(`this worker may not append to ${cliLog}. Start it with: node ${PERMISSION_FLAGS.join(" ")} --allow-fs-write=${cliLog}`), noGrant.stderr);
+});
