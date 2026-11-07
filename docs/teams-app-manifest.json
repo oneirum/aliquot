@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "REPLACE-WITH-MICROSOFT_APP_ID",
+  "developer": {
+    "name": "Your lab",
+    "websiteUrl": "https://aliquot.your-lab.example.edu",
+    "privacyUrl": "https://aliquot.your-lab.example.edu",
+    "termsOfUseUrl": "https://aliquot.your-lab.example.edu"
+  },
+  "name": { "short": "Aliquot", "full": "Aliquot, the lab's handbook and protocols" },
+  "description": {
+    "short": "Ask the lab's handbook, protocols and literature.",
+    "full": "Mention Aliquot in a channel or group chat, or message it directly, with a question about the lab's handbook, protocols or literature. It answers from the lab's own sources with a link to the run's record. It reads only messages that mention it."
+  },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "accentColor": "#FFFFFF",
+  "bots": [
+    {
+      "botId": "REPLACE-WITH-MICROSOFT_APP_ID",
+      "scopes": ["team", "groupChat", "personal"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["team", "groupChat", "personal"],
+          "commands": [
+            { "title": "stop", "description": "Stop the answer in progress in this thread" }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}

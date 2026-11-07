@@ -37,7 +37,7 @@ Aliquot has been tested on a synthetic lab, not used by a real one. The releases
 ## 0.6: ask where the lab already talks
 
 - **For:** the members who will ask questions every day.
-- **After it:** a Slack door with the same intake, data-class gate and record link in the thread (Teams after a lab asks for it), and a router across several agents, so one channel reaches both the handbook agent and the methods agent.
+- **After it:** a Slack door and a Teams door with the same intake, data-class gate and record link in the thread (both built), and a router across several agents, so one channel reaches both the handbook agent and the methods agent.
 - **Done when:** a check through a fake Slack API gets a cited answer, refuses a participant id with zero hosted requests, and resolves the record link.
 
 ## 0.7: keys, retention and sign-on
