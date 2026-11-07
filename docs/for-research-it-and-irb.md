@@ -160,7 +160,7 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Which third parties receive data? | Only the endpoints and hosts listed in `lab.toml`, each at most at its ceiling. The quickstart lists none. |
 | Is data encrypted at rest? | Payloads are encrypted with AES-256-GCM under a key held outside the database. Run records hold references, not text. |
 | Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. |
-| Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
+| Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. The text the core adds around the instructions in the system prompt is part of the version too (`PromptFrame` in `packages/core/src/agent.ts`), so a release that rewords it gives every agent a new version, and a version frozen before keeps its old text. One change does not move the hash: a built-in tool's code. It ships only with a new Aliquot release. |
 | Single sign-on? | Not yet. The web door has no member sign-in and listens on 127.0.0.1 only. A bearer token says which surface a request comes from, not which member sent it. |
 | Key rotation and retention? | Not yet. |
 
@@ -171,7 +171,6 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
   and refuses a pattern that matches ordinary text or no sample id.
 - **No sign-on.** Keep the web door on the machine until sign-on lands.
 - **No key rotation, no per-class keys, no retention sweep.**
-- **The version hash does not yet cover the system prompt text that the core builds around an agent's instructions.**
 - **The studio runs outside the network seal and still holds the database password.** It holds no payload key, so it
   cannot read a stored payload. But it connects to Postgres as the same user as the worker, for its own tables, and
   the web door's reply table (`web_messages`) holds answers as text. A separate database user for the studio is planned.

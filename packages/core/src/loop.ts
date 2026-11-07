@@ -18,12 +18,12 @@
  * - limits checked between steps; on a hit, one final no-tools call so the agent answers
  */
 
-import { AgentUnavailable, instructionsOf, modelFor, UnrunnableAgent, verifyRunnable, type Deployed, type ResolvedAgent } from "./agent.ts";
+import { AgentUnavailable, instructionsOf, modelFor, promptFrameOf, UnrunnableAgent, verifyRunnable, type Deployed, type ResolvedAgent } from "./agent.ts";
 import { Labelled, type EgressPolicy } from "./dataclass.ts";
 import { MalformedJob, parseRunJobPayload, postReply, SurfaceUnknown, type Surface } from "./frontdoor.ts";
 import { Prompt, type ChatPart, type ModelGateway } from "./gateway.ts";
 import type { AgentVersionHash } from "./hash.ts";
-import type { KbReader } from "./kb.ts";
+import type { KbReader, Outline } from "./kb.ts";
 import { describeFailure, fold, LeaseLost, MAX_ATTEMPTS, PayloadUnavailable, StoreRefused, type FailureReason, type InboxItem, type PayloadRef, type RunJournal, type RunOutcome, type RunState, type StopNotice } from "./record.ts";
 import type { ToolRunner } from "./tools.ts";
 import { JOB_RETRY, type LeasedJob } from "./queue.ts";
@@ -189,9 +189,6 @@ export type DriveResult =
   /** The job cannot start a run at all (malformed payload), so there is no record to finish. The worker fails the job. */
   | { readonly t: "unstartable"; readonly error: string };
 
-/** Sanity's retrieval contract, told to every agent with a knowledge base. */
-const RETRIEVAL_INSTRUCTIONS =
-  "Use kb_search to find entries and kb_read to read whole entries by path. Answer only from entries you have read. If they do not contain the answer, say that you could not find it in the knowledge base.";
 
 const NOTICES: Record<Notice, string> = {
   stopped: "Stopped.",
@@ -406,6 +403,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** Pure. The exact system prompt of a version, given its pinned snapshots' outlines in knowledgeBases order. */
+export function systemPrompt(agent: ResolvedAgent, outlines: readonly Outline[]): string {
+  const frame = promptFrameOf(agent);
+  const block = (o: Outline, kbId: string) =>
+    frame.knowledgeBase.replace(/\{(title|kbId|purpose|entries)\}/g, (_, k: string) => (k === "title" ? o.title : k === "kbId" ? kbId : k === "purpose" ? o.purpose : o.paths.map((p) => `- ${p}`).join("\n")));
+  return [agent.instructions, ...outlines.map((o, i) => block(o, agent.knowledgeBases[i]!.kbId)), outlines.length ? frame.retrieval : ""].filter(Boolean).join("\n\n");
+}
+
 /**
  * The prompt is built from refs: every body is fetched from the store with
  * its class, and Prompt.of joins them. The system part carries the
@@ -415,13 +420,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 export async function buildPrompt(state: RunState, agent: ResolvedAgent, journal: RunJournal, deps: Pick<LoopDeps, "kb" | "tools">, final: boolean): Promise<Prompt> {
   const instructions = instructionsOf(agent);
   const outlines = await Promise.all(agent.knowledgeBases.map((kb) => deps.kb.outline(kb.snapshot)));
-  const systemText = [
-    instructions.value,
-    ...outlines.map((o, i) => `Knowledge base "${o.value.title}" (id ${agent.knowledgeBases[i]!.kbId}): ${o.value.purpose}\nEntries:\n${o.value.paths.map((p) => `- ${p}`).join("\n")}`),
-    outlines.length ? RETRIEVAL_INSTRUCTIONS : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const systemText = systemPrompt(agent, outlines.map((o) => o.value));
   const system: ChatPart = { role: "system", content: Labelled.derive(systemText, [instructions, ...outlines], "loop:system") };
   const parts: ChatPart[] = [];
   // journal.get labels the body with the ref's class, which its address commits to, so nothing here can understate it.

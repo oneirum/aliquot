@@ -79,11 +79,13 @@ test("the parser refuses lab and institution placements for an agent backend, a 
   assert.throws(() => parseConfig(toml(`[agent_backends.local]\nkind = "codex"\nplacement = "public"\nauth_file = "a.json"\n`), "/l/lab.toml"), /local is both an endpoint and an agent backend/);
 });
 
-test("an existing agent version keeps the hash it had before agent backends existed", () => {
+test("an agent off a CLI backend has no agentCli, so a version stored before backends existed keeps its hash", () => {
   const r = resolveAgent(doc(), catalog());
   assert.ok(r.ok);
   assert.equal("agentCli" in r.agent, false);
-  assert.equal(versionHash(r.agent), "782a9a0ed9cb43c6bb14a1027dd70873ee402f2d2d8dfc9f8634318df24d6d1e");
+  const { prompt: _frame, ...beforeTheFrame } = r.agent;
+  assert.equal(versionHash(beforeTheFrame), "782a9a0ed9cb43c6bb14a1027dd70873ee402f2d2d8dfc9f8634318df24d6d1e", "the stored row, which has no prompt frame");
+  assert.equal(versionHash(r.agent), "a860144f4d7ed2defd024d2a33a254f6097c46c0de9e48eef3f59748d4ff26ae", "resolved now, with the prompt frame in the hash");
 });
 
 test("an agent on a CLI backend pins the kind and the CLI version the agent worker reported", () => {

@@ -136,6 +136,36 @@ export interface ResolvedAgent {
    * Never present together with agentCli.
    */
   readonly modelsByClass?: readonly ModelBand[];
+  /**
+   * The text the core puts around the instructions in the system prompt. resolveAgent writes the build's
+   * PROMPT_FRAME, so a release that changes the text moves the hash of every version resolved under it.
+   * Absent only in versions hashed before the frame joined the hash: those ran under PROMPT_FRAME_V1 and still do.
+   */
+  readonly prompt?: PromptFrame;
+}
+
+/**
+ * The system prompt is the instructions, then one knowledgeBase block per knowledge base, then retrieval when there
+ * is a knowledge base, joined by blank lines (loop.ts systemPrompt). In a block, {title}, {kbId}, {purpose} and
+ * {entries} come from the pinned snapshot, so the version hash fixes every byte of the system prompt.
+ */
+export interface PromptFrame {
+  readonly knowledgeBase: string;
+  readonly retrieval: string;
+}
+
+/** The text every version hashed before the frame joined the hash ran under. Never edit it: write a new frame. */
+export const PROMPT_FRAME_V1: PromptFrame = {
+  knowledgeBase: 'Knowledge base "{title}" (id {kbId}): {purpose}\nEntries:\n{entries}',
+  retrieval:
+    "Use kb_search to find entries and kb_read to read whole entries by path. Answer only from entries you have read. If they do not contain the answer, say that you could not find it in the knowledge base.",
+};
+
+/** The frame this build writes into every version it resolves. */
+export const PROMPT_FRAME: PromptFrame = PROMPT_FRAME_V1;
+
+export function promptFrameOf(agent: ResolvedAgent): PromptFrame {
+  return agent.prompt ?? PROMPT_FRAME_V1;
 }
 
 export interface ModelBand {
@@ -453,6 +483,7 @@ export function resolveAgent(doc: AgentDocument, catalog: Catalog): Resolution {
     sandbox: doc.sandbox.enabled && image ? { imageDigest: image, mountCeiling: doc.sandbox.mountCeiling, mounts: doc.sandbox.mounts } : null,
     retrieval: { algorithm: RETRIEVAL_ALGORITHM, readCapTokens: doc.readCapTokens ?? DEFAULT_READ_CAP_TOKENS },
     limits: withDefaults(defaults, doc.limits ?? {}),
+    prompt: PROMPT_FRAME,
   };
   const cli = catalog.endpoint(doc.model.endpointId)?.agentCli;
   if (cli?.cliVersion) return { ok: true, agent: { ...agent, agentCli: { kind: cli.kind, cliVersion: cli.cliVersion } } };

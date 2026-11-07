@@ -360,7 +360,6 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 **Known limits**
 
-- The version hash covers what the run loop reads, but not yet the system prompt text the core builds around it.
 - Detection of restricted text is pattern-based. A lab must give its own patterns in `lab.toml`, and text no pattern matches keeps its declared class.
 - The studio runs unsealed, as described above.
 - A lab cannot add its own tools. Aliquot runs only its eleven built-in tools. Contributed tools are planned, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
