@@ -161,6 +161,7 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Is data encrypted at rest? | Payloads are encrypted with AES-256-GCM under a key held outside the database. Run records hold references, not text. |
 | Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. |
 | Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
+| Which agent answers in a channel with several? | The router in the door picks from the agents open to the member whose ceiling admits the message's class. It is local word matching over each agent's description and sample questions, with no model, so the message goes nowhere to be routed. When it is unsure the member picks. The decision and every agent's score are in the run record. |
 | Single sign-on? | Not yet. The web door has no member sign-in and listens on 127.0.0.1 only. A bearer token says which surface a request comes from, not which member sent it. |
 | Key rotation and retention? | Not yet. |
 

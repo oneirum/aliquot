@@ -120,6 +120,8 @@ Members ask on the chat page. An answer names the entry it came from and says wh
 </picture>
 </p>
 
+A channel can hold more than one agent, say the handbook agent and a methods agent. Each question goes to the agent it fits, and the answer names that agent beside the time. When a question fits more than one, the page lists them by name with one line each and the member picks one with a click, a tap or its number; the same question goes to that agent, and the rest of the thread stays with it. The router runs in the door and calls no model, so a restricted question is routed without leaving the machine. Its decision and every agent's score are in the record. `pnpm walk:router` walks through it on the synthetic lab.
+
 **Record** under an answer opens the run's record. It starts with a summary: the outcome, the time, model calls, tokens, tool calls by name, knowledge base entries retrieved and refusals. Below it, every event in order, each marked by shape as well as name (run, model call, tool call, refused), with its data class and whether the hash chain holds. **Download JSON** saves the record, so a PI or an IRB reader can keep it without running anything. `pnpm aliquot record <run-id>` prints the same record and summary in a terminal.
 
 **Runs** at the top of every page lists the newest runs with their outcome and refusal count, and narrows to the runs that had a refusal or failed, so a PI can go straight to what was refused. On a record that refused something, **Only refusals** hides the other events. The chat thread stays put when you open a record and come back.
@@ -311,6 +313,7 @@ The tests that need macOS or the sandbox image skip elsewhere, each with its rea
 | A roster of participant ids compiled on a hosted model, and a message with a roster id | Both refused, 0 requests reach the hosted endpoint |
 | A roster id hidden in a document declared as lab documents, or in the purpose | The class is raised to restricted, and the compile is refused |
 | A restricted knowledge base attached to an agent on a hosted model | Refused at intake |
+| One channel with the handbook agent and a methods agent | A handbook question and a statistics question each reach their agent and cite its entry; a question that fits both asks the member, the pick answers, and a follow-up stays with it |
 | Every run | 26 of 26 run records verify, each naming its agent version |
 | The hosted endpoint over the whole check | 1 request, the planned control message |
 
@@ -353,7 +356,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
-- **0.6, ask where the lab already talks:** the Slack door is built ([docs/slack.md](docs/slack.md)); left are a router across several agents (today a channel is bound to one agent) and Teams after a lab asks.
+- **0.6, ask where the lab already talks:** the Slack door is built ([docs/slack.md](docs/slack.md)), and so is the router across several agents on one channel; left is Teams after a lab asks.
 - **0.7, keys, retention and sign-on:** key rotation, per-class keys, a retention sweep and university sign-on.
 - **0.8, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.

@@ -35,8 +35,8 @@ export interface AgentChoice {
 }
 
 export type DoorEvent =
-  /** routedTo is the agent's name when the router chose it among several; null when the channel has one agent. */
-  | { readonly t: "started"; readonly runId: string; readonly recordUrl: string; readonly routedTo: string | null }
+  /** routedTo is the agent's name when the router chose it among several; absent when the channel has one agent, so the --json contract is unchanged there. */
+  | { readonly t: "started"; readonly runId: string; readonly recordUrl: string; readonly routedTo?: string }
   | { readonly t: "tool"; readonly runId: string; readonly tool: string }
   | {
       readonly t: "finished";
@@ -150,7 +150,8 @@ export async function* ask(door: Door, input: AskInput, opts: AskOptions = {}): 
   if (sent.status !== 202 || body?.t !== "enqueued" || !body.runId) throw new DoorError(`the door did not take the message (${sent.status}): ${body?.error ?? JSON.stringify(body)}`);
   const runId = body.runId;
   const recordUrl = new URL(`runs/${runId}`, base(door)).href;
-  yield { t: "started", runId, recordUrl, routedTo: body.route?.t === "agent" ? (body.answeredBy?.name ?? null) : null };
+  const routedTo = body.route?.t === "agent" ? body.answeredBy?.name : undefined;
+  yield { t: "started", runId, recordUrl, ...(routedTo ? { routedTo } : {}) };
 
   const seen = new Set<number>();
   const deadline = Date.now() + timeoutMs;

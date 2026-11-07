@@ -69,7 +69,8 @@ To try the app on the synthetic lab0 lab, `pnpm demo --slack` adds `[surfaces.sl
 
 ## In a thread
 
-- A reply in the thread that mentions Aliquot is a new question in that thread. Each question is answered on its own; the earlier answers in the thread are not sent with it.
+- A reply in the thread that mentions Aliquot is a new question in that thread. Each question is answered on its own; the earlier answers in the thread are not sent with it. In a channel with several agents, the thread stays with the agent that answered first.
+- When the router cannot tell which agent a question is for, the thread gets the agents as a numbered list. Mention Aliquot in the thread with the number or the name, and that agent answers the question; its answer says which agent answered.
 - `@Aliquot stop` in a thread with a run in progress stops that run at its next step.
 - Messages from bots, edits, and messages from another workspace in a Slack Connect channel are ignored.
 
@@ -77,9 +78,8 @@ To try the app on the synthetic lab0 lab, `pnpm demo --slack` adds `[surfaces.sl
 
 - Direct messages from people outside the workspace, and file uploads from Slack.
 - Sign-on: anyone in the workspace who can reach the app is a member. A lab that needs a narrower list invites Aliquot to fewer channels until sign-on (0.7).
-- A router across several agents. One Slack surface reaches the agent bound to its channel, else the deployment's agent.
 
 ## Checks
 
-- `test/slack.test.ts` runs the real `aliquot slack` binary against a fake Slack (Web API and Socket Mode) and a fake door: the answer and its link, the link-only answer, the gate's refusal, stop, follow-ups in a thread, DMs, ignored bots, edits and other workspaces, a resent envelope, a reconnect, and the manifest's scopes.
+- `test/slack.test.ts` runs the real `aliquot slack` binary against a fake Slack (Web API and Socket Mode) and a fake door: the answer and its link, the link-only answer, the gate's refusal, the router's numbered choices and a pick by number, stop, follow-ups in a thread, DMs, ignored bots, edits and other workspaces, a resent envelope, a reconnect, and the manifest's scopes.
 - `pnpm lab0` check S runs it against the real door, worker and Postgres: a mention gets the cited answer in its thread with a record link that opens, and a question with a participant id is refused with zero requests to the hosted model.

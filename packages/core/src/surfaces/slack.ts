@@ -115,7 +115,7 @@ export function slackDoor(deps: SlackDoorDeps): (msg: unknown, ack: (obj: object
       for await (const ev of deps.ask(input, {})) {
         if (ev.t === "started") {
           running.set(threadKey, ev.runId);
-          routedTo = ev.routedTo;
+          routedTo = ev.routedTo ?? null;
         } else if (ev.t === "refused") return void (await update(replyFor(ev, "")));
         else if (ev.t === "choose") {
           choosing.set(threadKey, { input, choices: ev.choices });
