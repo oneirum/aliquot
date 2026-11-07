@@ -14,6 +14,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { LAB1_DIR } from "../test/trust/lab1.ts";
 import { headline, renderDoc, score, type LiveNumbers, type TrustNumbers } from "../test/trust/report.ts";
+import { measuredCommit } from "../test/trust/meta.ts";
 import { loadLab1, runDeterministic } from "../test/trust/run.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -64,7 +65,8 @@ if (args.has("--check")) {
   const date = new Date().toISOString().slice(0, 10);
   const fixFile = `${root}docs/trust-fix.md`;
   const fix = existsSync(fixFile) ? readFileSync(fixFile, "utf8").trim() : null;
-  writeFileSync(`${root}docs/trust.md`, renderDoc(numbers, live, { date, fix }));
-  writeFileSync(docJson, `${JSON.stringify({ date, ...numbers }, null, 2)}\n`);
+  const commit = measuredCommit(root);
+  writeFileSync(`${root}docs/trust.md`, renderDoc(numbers, live, { date, commit, fix }));
+  writeFileSync(docJson, `${JSON.stringify({ date, commit, ...numbers }, null, 2)}\n`);
   console.log("wrote docs/trust.md and docs/trust.json");
 }

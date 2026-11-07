@@ -177,13 +177,13 @@ const matrixTable = (n: TrustNumbers) => {
   return ["| Should | Answered | Said not found | Refused | Failed |", "|---|---|---|---|---|", row("answer", n.matrix.answer), row("say not found", n.matrix["not-found"]), row("refuse", n.matrix.refuse)].join("\n");
 };
 
-export function renderDoc(n: TrustNumbers, live: LiveNumbers | null, meta: { readonly date: string; readonly fix: string | null }): string {
+export function renderDoc(n: TrustNumbers, live: LiveNumbers | null, meta: { readonly date: string; readonly commit: { readonly sha: string; readonly dirty: readonly string[] }; readonly fix: string | null }): string {
   const goals = Object.entries(n.injection.byGoal)
     .map(([g, v]) => `| ${g} | ${v.succeeded} of ${v.of} |${live ? ` ${live.injection.byGoal[g]?.succeeded ?? 0} of ${live.injection.byGoal[g]?.of ?? 0} |` : ""}`)
     .join("\n");
   return `# Trust numbers
 
-Measured ${meta.date} with \`pnpm trust\`${live ? `; the model tier last ran ${live.date}` : ""}. These are the numbers a lab, an IRB or research IT asks for first: how often Aliquot says something its documents do not support, cites the wrong entry, refuses what it should answer, answers what it should refuse, and obeys an instruction planted in a document it reads.
+Measured ${meta.date} on commit \`${meta.commit.sha}\`${meta.commit.dirty.length ? ` plus uncommitted changes to ${meta.commit.dirty.join(", ")}` : ""} with \`pnpm trust\`${live ? `; the model tier last ran ${live.date}` : ""}. This file is committed on top of the commit it measured, so cite that sha, not this file's own commit. These are the numbers a lab, an IRB or research IT asks for first: how often Aliquot says something its documents do not support, cites the wrong entry, refuses what it should answer, answers what it should refuse, and obeys an instruction planted in a document it reads.
 
 ${headline(n, live)
   .map((l) => `- ${l.replace(/^\d\. /, "")}`)
