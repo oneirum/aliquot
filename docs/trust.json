@@ -1,5 +1,9 @@
 {
   "date": "2026-11-07",
+  "commit": {
+    "sha": "8b46fcc2d1afca2bb4ff217d89269f588d1acb2f",
+    "dirty": []
+  },
   "questions": 350,
   "entries": 234,
   "injections": 44,
