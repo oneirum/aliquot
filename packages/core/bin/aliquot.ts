@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n]>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
+// aliquot export also needs --allow-fs-write for the bundle directory (pnpm aliquot:export allows bundles/* only).
+// aliquot replay needs no lab.toml, database or key: it reads one bundle directory.
 // aliquot ask, acp, mcp and slack need no lab.toml or database: they reach the web door named by --door, and only it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -20,6 +22,7 @@ import { checkApiBase, runSocketMode, slackApi, SLACK_API } from "../src/surface
 import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
 import { rank } from "../src/dataclass.ts";
 import { STUDY_USAGE, studyCommands } from "./study-cli.ts";
+import { exportCommand, REPLAY_USAGE, replayCommand } from "./replay-cli.ts";
 
 const denied = requireProcessPermission();
 if (denied) {
@@ -57,9 +60,13 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       replaces lab.toml, never .env. --yes takes every default and needs --sample.
                       Run it as pnpm aliquot:init, which allows writes to config/lab.toml and .env only.
 ${STUDY_USAGE}
+${REPLAY_USAGE}
 
-Exit codes: 0 ok, 1 no such run, init found no pattern that passes, or ask was refused or got no answer,
-2 usage or setup problem (ask: the door could not be reached), 3 a hash chain is broken.
+Exit codes: 0 ok, 1 no such run, init found no pattern that passes, ask was refused or got no answer, or export
+was refused (no such run or study, --out not empty), 2 usage or setup problem (ask: the door could not be
+reached; replay: no readable bundle), 3 a hash chain is broken, 4 a re-executed run did not agree exactly with its
+record, 5 a run could not be re-executed (its bodies are above the bundle's clearance, or its tools are not in
+this build).
 `;
 
 function usage(): never {
@@ -92,6 +99,12 @@ try {
       prereg: { type: "string" },
       note: { type: "string" },
       reason: { type: "string" },
+      runs: { type: "string" },
+      study: { type: "string" },
+      clearance: { type: "string" },
+      out: { type: "string" },
+      reexecute: { type: "boolean", default: false },
+      endpoint: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -108,6 +121,11 @@ const [command, runId, ...extra] = positionals;
 if (command === "init") {
   if (runId !== undefined || values.json || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
   process.exit(await init());
+}
+if (command === "replay") process.exit(await replayCommand(positionals.slice(1), { json: values.json, reexecute: values.reexecute, endpoint: values.endpoint }));
+if (command === "export") {
+  const { runs, study, clearance, out } = values;
+  process.exit(await exportCommand(positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, runs, study, clearance, out }));
 }
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 if (command === "slack") process.exit(await slack(positionals.slice(1)));

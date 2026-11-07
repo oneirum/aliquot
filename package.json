@@ -17,6 +17,7 @@
     "doctor": "node scripts/doctor.ts",
     "aliquot": "node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts",
     "aliquot:init": "mkdir -p config && node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net --allow-fs-write=config/lab.toml --allow-fs-write=.env packages/core/bin/aliquot.ts init",
+    "aliquot:export": "mkdir -p bundles && node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net '--allow-fs-write=bundles/*' packages/core/bin/aliquot.ts export",
     "demo:agent": "node scripts/agent-demo.ts",
     "up:tmux": "scripts/tmux.sh"
   },

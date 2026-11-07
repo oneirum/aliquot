@@ -57,7 +57,9 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/dataclass.ts": ["egress-decision", "brand-cast"],
   "packages/core/src/frontdoor.ts": ["egress-decision"],
   "packages/core/src/record.ts": ["egress-decision", "stamp"],
-  "packages/core/src/replay.ts": ["egress-decision"],
+  // Export decides each body against the reviewer's clearance. Re-execution stamps bundle bodies at the class their
+  // verified event names, as the payload store stamps what it decrypts.
+  "packages/core/src/replay.ts": ["egress-decision", "stamp"],
   "packages/core/src/gate.ts": ["stamp"],
   "packages/core/src/kb.ts": ["stamp"],
   "packages/core/src/kb-compile.ts": ["stamp"],

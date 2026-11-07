@@ -213,30 +213,30 @@ export interface StoredEvent {
   readonly event: RunEvent;
 }
 
-/** The class of an event is the join of the classes of the bodies it references. Control events are D0. */
-export function eventClass(e: RunEvent): DataClass {
+/** Every body an event references. The reviewer bundle exports exactly these. */
+export function refsOf(e: RunEvent): PayloadRef[] {
   switch (e.t) {
     case "run.started":
-      return join(e.input.cls, ...e.history.map((h) => h.cls));
+      return [e.input, ...e.history];
     case "model.requested":
-      return e.prompt.cls;
+      return [e.prompt];
     case "model.completed":
-      return join(e.output.cls, ...e.toolCalls.map((c) => c.args.cls), ...(e.providerState ? [e.providerState.cls] : []));
+      return [e.output, ...e.toolCalls.map((c) => c.args), ...(e.providerState ? [e.providerState] : [])];
     case "tool.requested":
-      return e.input.cls;
+      return [e.input];
     case "tool.completed":
-      return e.output.cls;
+      return [e.output];
     case "inbox.consumed":
-      return e.item.t === "steer" ? e.item.text.cls : "D0";
+      return e.item.t === "steer" ? [e.item.text] : [];
     case "run.faulted":
-      return reasonClass(e.reason);
+      return reasonRefs(e.reason);
     case "run.finished":
-      return join(e.answer?.cls ?? "D0", e.reason ? reasonClass(e.reason) : "D0");
+      return [...(e.answer ? [e.answer] : []), ...(e.reason ? reasonRefs(e.reason) : [])];
     case "model.failed":
     case "tool.failed":
-      return e.failure.detail?.cls ?? "D0";
+      return e.failure.detail ? [e.failure.detail] : [];
     case "agent.session":
-      return e.refusedTargets?.cls ?? "D0";
+      return e.refusedTargets ? [e.refusedTargets] : [];
     case "tool.outcome-unknown":
     case "tool.withheld":
     case "egress.refused":
@@ -246,7 +246,7 @@ export function eventClass(e: RunEvent): DataClass {
     case "stop":
     case "limit.hit":
     case "reply.posted":
-      return "D0";
+      return [];
     default: {
       const never: never = e;
       return never;
@@ -254,9 +254,14 @@ export function eventClass(e: RunEvent): DataClass {
   }
 }
 
-function reasonClass(r: FailureReason): DataClass {
-  if (r.t === "agent-not-confined") return r.why.cls;
-  return r.t === "retries-exhausted" && r.error ? r.error.cls : "D0";
+function reasonRefs(r: FailureReason): PayloadRef[] {
+  if (r.t === "agent-not-confined") return [r.why];
+  return r.t === "retries-exhausted" && r.error ? [r.error] : [];
+}
+
+/** The class of an event is the join of the classes of the bodies it references. Control events are D0. */
+export function eventClass(e: RunEvent): DataClass {
+  return join(...refsOf(e).map((r) => r.cls));
 }
 
 export function eventHash(runId: RunId, seq: number, at: string, cls: DataClass, prevHash: Sha256 | null, event: RunEvent): Sha256 {
@@ -427,6 +432,12 @@ function fromRow(r: EventRow): StoredEvent {
 export async function loadEvents(db: Db, runId: RunId): Promise<StoredEvent[]> {
   const res = await db.query<EventRow>("select run_id, seq, at, cls, prev_hash, hash, event from run_events where run_id = $1 order by seq", [runId]);
   return res.rows.map(fromRow);
+}
+
+/** A study's runs, oldest first: every run whose run.started names the study. */
+export async function studyRunIds(db: Db, studyId: string): Promise<RunId[]> {
+  const res = await db.query<{ run_id: string }>("select run_id from run_events where seq = 0 and event->>'studyId' = $1 order by at, run_id", [studyId]);
+  return res.rows.map((r) => r.run_id as RunId);
 }
 
 /** The newest runs first, by the time of each run's first event. */
@@ -760,14 +771,14 @@ export function verifyChain(events: readonly StoredEvent[]): number | null {
   let prev: Sha256 | null = null;
   for (let i = 0; i < events.length; i++) {
     const e = events[i]!;
-    if (e.seq !== i || e.prevHash !== prev || e.cls !== eventClass(e.event)) return i;
-    if (e.hash !== eventHash(e.runId, e.seq, e.at, e.cls, e.prevHash, e.event)) return i;
+    // A bundle's events come from a file, so one that is not an event at all counts as one that does not verify.
+    try {
+      if (e.seq !== i || e.prevHash !== prev || e.cls !== eventClass(e.event)) return i;
+      if (e.hash !== eventHash(e.runId, e.seq, e.at, e.cls, e.prevHash, e.event)) return i;
+    } catch {
+      return i;
+    }
     prev = e.hash;
   }
   return null;
-}
-
-/** W3C PROV-JSON projection of a run. Derived, never stored. */
-export function toProv(_events: readonly StoredEvent[]): unknown {
-  throw new Error("PROV export is not part of this build");
 }
