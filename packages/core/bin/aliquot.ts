@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n] | keys ... | retention ...>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
+// aliquot export also needs --allow-fs-write for the bundle directory (pnpm aliquot:export allows bundles/* only).
+// aliquot replay needs no lab.toml, database or key: it reads one bundle directory.
 // aliquot ask, acp, mcp, slack and teams need no lab.toml or database: they reach the web door named by --door, and only it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -24,6 +26,8 @@ import { teamsDoor } from "../src/surfaces/teams.ts";
 import { BOT_OPENID, botConnector, botVerifier, checkBase, LOGIN, serveMessages } from "../src/surfaces/teams-wire.ts";
 import { ask, DoorError, isDataClass, stop, SURFACE_TOKEN_ENV, type Door, type DoorEvent } from "../src/door-client.ts";
 import { rank } from "../src/dataclass.ts";
+import { STUDY_USAGE, studyCommands } from "./study-cli.ts";
+import { exportCommand, REPLAY_USAGE, replayCommand } from "./replay-cli.ts";
 
 const denied = requireProcessPermission();
 if (denied) {
@@ -91,8 +95,14 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       file) and an [anchor] table whose log is --anchor-log (default anchors.log beside lab.toml);
                       it needs write access to the key file too. Keep the key off the database host if you can.
 
-Exit codes: 0 ok, 1 no such run, init found no pattern that passes, or ask was refused or got no answer,
-2 usage or setup problem (ask: the door could not be reached), 3 a hash chain is broken or an anchor does not hold.
+${STUDY_USAGE}
+${REPLAY_USAGE}
+
+Exit codes: 0 ok, 1 no such run, init found no pattern that passes, ask was refused or got no answer, or export
+was refused (no such run or study, --out not empty), 2 usage or setup problem (ask: the door could not be
+reached; replay: no readable bundle), 3 a hash chain is broken or an anchor does not hold, 4 a re-executed run did
+not agree exactly with its record, 5 a run could not be re-executed (its bodies are above the bundle's clearance,
+or its tools are not in this build).
 `;
 
 function usage(): never {
@@ -127,6 +137,19 @@ try {
       apply: { type: "boolean", default: false },
       "as-of": { type: "string" },
       batch: { type: "string", default: "500" },
+      as: { type: "string" },
+      title: { type: "string" },
+      floor: { type: "string" },
+      irb: { type: "string" },
+      prereg: { type: "string" },
+      note: { type: "string" },
+      reason: { type: "string" },
+      runs: { type: "string" },
+      study: { type: "string" },
+      clearance: { type: "string" },
+      out: { type: "string" },
+      reexecute: { type: "boolean", default: false },
+      endpoint: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -144,9 +167,18 @@ if (command === "init") {
   if (runId !== undefined || values.json || (values["anchor-log"] !== undefined && values["anchor-key"] === undefined) || (!values.yes && (values.pattern.length || values.sample.length)) || (values.yes && !values.sample.length)) usage();
   process.exit(await init());
 }
+if (command === "replay") process.exit(await replayCommand(positionals.slice(1), { json: values.json, reexecute: values.reexecute, endpoint: values.endpoint }));
+if (command === "export") {
+  const { runs, study, clearance, out } = values;
+  process.exit(await exportCommand(positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, runs, study, clearance, out }));
+}
 if (command === "ask" || command === "acp" || command === "mcp") process.exit(await viaDoor(command, positionals.slice(1)));
 if (command === "slack") process.exit(await slack(positionals.slice(1)));
 if (command === "teams") process.exit(await teams(positionals.slice(1)));
+if (command === "study" || command === "card" || command === "sheet") {
+  const { as, title, floor, irb, prereg, note, reason } = values;
+  process.exit(await studyCommands(command, positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, as, title, floor, irb, prereg, note, reason }));
+}
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0 || values["anchor-key"] !== undefined || values["anchor-log"] !== undefined;
 const verifyOnly = values.anchors || values["public-key"] !== undefined;

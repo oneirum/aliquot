@@ -63,7 +63,9 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/core/src/dataclass.ts": ["egress-decision", "brand-cast"],
   "packages/core/src/frontdoor.ts": ["egress-decision"],
   "packages/core/src/record.ts": ["egress-decision", "stamp"],
-  "packages/core/src/replay.ts": ["egress-decision"],
+  // Export decides each body against the reviewer's clearance. Re-execution stamps bundle bodies at the class their
+  // verified event names, as the payload store stamps what it decrypts.
+  "packages/core/src/replay.ts": ["egress-decision", "stamp"],
   "packages/core/src/gate.ts": ["stamp"],
   "packages/core/src/kb.ts": ["stamp"],
   "packages/core/src/kb-compile.ts": ["stamp"],
@@ -78,6 +80,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   // The sign-on walk drives the door over HTTP like a browser, picks a free port, and starts the door once without [auth]. It is not deployed.
   "scripts/walk-signon.ts": ["network-globals", "module:child_process", "module:net"],
   "scripts/record-demo.ts": ["module:child_process"],
+  // The study walk runs the aliquot binary as a PI and a reviewer would, with the write flag export needs. It is not deployed.
+  "scripts/walk-study.ts": ["module:child_process"],
   "scripts/agent-demo.ts": ["module:child_process"],
   "scripts/unit2.ts": ["network-globals", "module:child_process", "module:net"],
   // The keys walk runs the aliquot CLI, reads record pages from a door it boots, and writes last month's runs with their

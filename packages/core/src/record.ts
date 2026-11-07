@@ -573,6 +573,12 @@ export async function loadEvents(db: Db, runId: RunId): Promise<StoredEvent[]> {
   return res.rows.map(fromRow);
 }
 
+/** A study's runs, oldest first: every run whose run.started names the study. */
+export async function studyRunIds(db: Db, studyId: string): Promise<RunId[]> {
+  const res = await db.query<{ run_id: string }>("select run_id from run_events where seq = 0 and event->>'studyId' = $1 order by at, run_id", [studyId]);
+  return res.rows.map((r) => r.run_id as RunId);
+}
+
 /** The newest runs first, by the time of each run's first event. */
 export async function recentRunIds(db: Db, limit: number): Promise<RunId[]> {
   const res = await db.query<{ run_id: string }>("select run_id from run_events where seq = 0 order by at desc, run_id limit $1", [limit]);
@@ -904,14 +910,14 @@ export function verifyChain(events: readonly StoredEvent[]): number | null {
   let prev: Sha256 | null = null;
   for (let i = 0; i < events.length; i++) {
     const e = events[i]!;
-    if (e.seq !== i || e.prevHash !== prev || e.cls !== eventClass(e.event)) return i;
-    if (e.hash !== eventHash(e.runId, e.seq, e.at, e.cls, e.prevHash, e.event)) return i;
+    // A bundle's events come from a file, so one that is not an event at all counts as one that does not verify.
+    try {
+      if (e.seq !== i || e.prevHash !== prev || e.cls !== eventClass(e.event)) return i;
+      if (e.hash !== eventHash(e.runId, e.seq, e.at, e.cls, e.prevHash, e.event)) return i;
+    } catch {
+      return i;
+    }
     prev = e.hash;
   }
   return null;
-}
-
-/** W3C PROV-JSON projection of a run. Derived, never stored. */
-export function toProv(_events: readonly StoredEvent[]): unknown {
-  throw new Error("PROV export is not part of this build");
 }

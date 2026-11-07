@@ -110,7 +110,7 @@ test("the record view of a run with no events yet is empty, running and intact",
 test("a web surface bound to a channel puts every message there and refuses a body that names another", async () => {
   const seen: string[] = [];
   const gate = { members: async (id: string) => ({ id, audiences: [] }), channelFloor: async () => "D1", labPatterns: [], policy: DEFAULT_POLICY };
-  const probe = { gate, agentsFor: async (c: { channelId: string }) => (seen.push(c.channelId), []) } as unknown as IntakeDeps;
+  const probe = { db, gate, agentsFor: async (c: { channelId: string }) => (seen.push(c.channelId), []) } as unknown as IntakeDeps;
   const message = (extra: Record<string, unknown>) => JSON.stringify({ thread: "t", message: "m", text: "hi", user: "alice", ...extra });
   for (const [bound, body, want] of [
     ["public", message({}), { status: 403, channel: "public" }],

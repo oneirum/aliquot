@@ -1,0 +1,628 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "aliquot-agent-card-v1"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "The agent version: sha256 of the canonical JSON of the resolved agent."
+    },
+    "agentId": {
+      "type": "string"
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "loopContract": {
+      "type": "string",
+      "description": "The run policy this version runs under."
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "endpointId": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "placement": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "lab",
+                "institution",
+                "approved",
+                "zdr",
+                "public"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "From lab.toml. Null when this deployment has no such endpoint."
+        },
+        "receivesUpTo": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "D0",
+                    "D1",
+                    "D2",
+                    "D3",
+                    "R"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "const": "none"
+                }
+              ],
+              "description": "The most restricted class this destination may receive, from its placement (CEILINGS in dataclass.ts). none: nothing."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "params": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "endpointId",
+        "modelId",
+        "placement",
+        "receivesUpTo",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "modelsByClass": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "endpointId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "placement": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "lab",
+                  "institution",
+                  "approved",
+                  "zdr",
+                  "public"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From lab.toml. Null when this deployment has no such endpoint."
+          },
+          "receivesUpTo": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "D0",
+                      "D1",
+                      "D2",
+                      "D3",
+                      "R"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "const": "none"
+                  }
+                ],
+                "description": "The most restricted class this destination may receive, from its placement (CEILINGS in dataclass.ts). none: nothing."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "upTo": {
+            "type": "string",
+            "enum": [
+              "D0",
+              "D1",
+              "D2",
+              "D3",
+              "R"
+            ]
+          }
+        },
+        "required": [
+          "endpointId",
+          "modelId",
+          "placement",
+          "receivesUpTo",
+          "upTo"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Per-class bands, lowest first. Empty: model answers every class."
+    },
+    "agentCli": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "cliVersion": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "cliVersion"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "specHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "sha256 of the tool's spec: description, input schema, reads, effects, egress."
+          },
+          "deployedNow": {
+            "type": "boolean",
+            "description": "Whether this deployment serves this spec hash today."
+          },
+          "reads": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "D0",
+                  "D1",
+                  "D2",
+                  "D3",
+                  "R"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effects": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "lab-write",
+                  "external-send"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "egress": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hosts the tool may reach."
+          }
+        },
+        "required": [
+          "name",
+          "specHash",
+          "deployedNow",
+          "reads",
+          "effects",
+          "egress"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "knowledgeBases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kbId": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "cls": {
+            "type": "string",
+            "enum": [
+              "D0",
+              "D1",
+              "D2",
+              "D3",
+              "R"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entries": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "irbProtocol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consentScope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kbId",
+          "snapshot",
+          "cls",
+          "title",
+          "entries",
+          "irbProtocol",
+          "consentScope"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "dataCeilings": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "D0",
+                "D1",
+                "D2",
+                "D3",
+                "R"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The listing's ceiling: the most restricted class the agent may see."
+        },
+        "instructions": {
+          "type": "string",
+          "enum": [
+            "D0",
+            "D1",
+            "D2",
+            "D3",
+            "R"
+          ]
+        },
+        "knowledgeBases": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "D0",
+                "D1",
+                "D2",
+                "D3",
+                "R"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The highest class among the knowledge bases. Null: none."
+        },
+        "sandboxMounts": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "D0",
+                "D1",
+                "D2",
+                "D3",
+                "R"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "instructions",
+        "knowledgeBases",
+        "sandboxMounts"
+      ],
+      "additionalProperties": false
+    },
+    "prompt": {
+      "type": "object",
+      "properties": {
+        "frame": {
+          "type": "string",
+          "enum": [
+            "v1",
+            "custom"
+          ],
+          "description": "v1: PROMPT_FRAME_V1. custom: a frame written by a later release, in the resolved agent."
+        },
+        "frameSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "systemTextSha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "sha256 of the exact system prompt text. Null when a snapshot manifest was not available."
+        }
+      },
+      "required": [
+        "frame",
+        "frameSha256",
+        "systemTextSha256"
+      ],
+      "additionalProperties": false
+    },
+    "retrieval": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string"
+        },
+        "readCapTokens": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "algorithm",
+        "readCapTokens"
+      ],
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxSteps": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxWallMs": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "maxSteps",
+        "maxTokens",
+        "maxWallMs"
+      ],
+      "additionalProperties": false
+    },
+    "sandbox": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "imageDigest": {
+              "type": "string"
+            },
+            "mountCeiling": {
+              "type": "string",
+              "enum": [
+                "D0",
+                "D1",
+                "D2",
+                "D3",
+                "R"
+              ]
+            },
+            "mounts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "imageDigest",
+            "mountCeiling",
+            "mounts"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "listing": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "audience": {},
+            "irbProtocol": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provenancePolicy": {
+              "type": "object",
+              "properties": {
+                "numbersMustTrace": {
+                  "type": "boolean"
+                },
+                "claimsLinkEvidence": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "numbersMustTrace",
+                "claimsLinkEvidence"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "description",
+            "owner",
+            "audience",
+            "irbProtocol",
+            "provenancePolicy"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Routing and governance, not behavior: the listing at freeze when frozen, else the published one."
+    },
+    "studies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "studyId": {
+            "type": "string"
+          },
+          "frozenBy": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "studyId",
+          "frozenBy",
+          "at",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Active freezes of this exact version."
+    }
+  },
+  "required": [
+    "format",
+    "hash",
+    "agentId",
+    "name",
+    "loopContract",
+    "model",
+    "modelsByClass",
+    "agentCli",
+    "tools",
+    "knowledgeBases",
+    "dataCeilings",
+    "prompt",
+    "retrieval",
+    "limits",
+    "sandbox",
+    "listing",
+    "studies"
+  ],
+  "additionalProperties": false,
+  "title": "Aliquot agent card"
+}

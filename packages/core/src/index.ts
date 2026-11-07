@@ -14,7 +14,9 @@ export type { InboundMessage } from "./gate.ts";
 export type { Surface, IntakeResult } from "./frontdoor.ts";
 
 export { agentDocumentSchema, validateAgentDraft, parseExactModelId, parseAgentDocument, resolveAgent, versionHash } from "./agent.ts";
-export type { AgentDocument, AgentListing, AgentCard, Catalog, Issue, MemberId } from "./agent.ts";
+export type { AgentDocument, AgentListing, Catalog, Issue, MemberId } from "./agent.ts";
+export { agentCard, agentCardSchema } from "./card.ts";
+export type { AgentCard } from "./card.ts";
 
 export { requestPublish, confirmPublish, unpublish, PublishRefused, describePublishRefusal } from "./publish.ts";
 export type { PublishCheck, Published } from "./publish.ts";

@@ -34,7 +34,12 @@ export type AuditEvent =
   /** A data steward's `aliquot keys rotate`, `aliquot keys reencrypt` and `aliquot retention --apply` (steward.ts). */
   | { readonly t: "keys.rotated"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly held: readonly string[] }
   | { readonly t: "keys.reencrypted"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly rows: number }
-  | { readonly t: "retention.swept"; readonly purgeDays: Readonly<Partial<Record<DataClass, number>>>; readonly keepMinDays: Readonly<Partial<Record<DataClass, number>>>; readonly asOf: string; readonly redacted: number; readonly bytes: number; readonly runs: number; readonly replies: number };
+  | { readonly t: "retention.swept"; readonly purgeDays: Readonly<Partial<Record<DataClass, number>>>; readonly keepMinDays: Readonly<Partial<Record<DataClass, number>>>; readonly asOf: string; readonly redacted: number; readonly bytes: number; readonly runs: number; readonly replies: number }
+  | { readonly t: "study.created"; readonly studyId: string; readonly title: string; readonly owner: string; readonly irbProtocol: string | null; readonly dataFloor: DataClass }
+  | { readonly t: "study.channel-bound"; readonly studyId: string; readonly surface: string; readonly channelId: string }
+  | { readonly t: "agent.frozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly note: string }
+  /** A protocol deviation: the study owner ended a freeze before the study did, with the reason. */
+  | { readonly t: "agent.unfrozen"; readonly studyId: string; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly reason: string };
 
 export interface AuditRow {
   readonly seq: number;

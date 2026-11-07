@@ -157,6 +157,13 @@ to a tool's code alone moves no agent version.
 - **Audit stream** (`audit_events`). One hash-chained log for publishes, role changes and calls made outside a run.
 - **Studio tables.** Agent and knowledge base definitions, in plaintext. No detector runs when a definition is saved.
 
+## Studies, agent cards and reviewer replay
+
+- **A study pins its agent.** `aliquot study` registers a study (owner, data floor, IRB protocol), binds channels to it and freezes an agent version for it (`packages/core/src/study.ts`). A study channel runs the frozen version hash and is never routed or re-resolved, so a publish cannot change it (`intake` in `frontdoor.ts`). Only the study's owner may change a study. A freeze is refused when the version cannot run on this deployment, when the agent's ceiling is below the study's floor, or, at a D3 floor, when the agent does not name the study's IRB protocol. Ending a freeze needs a reason and is recorded as a protocol deviation. Every study write is in the audit stream, and a database trigger refuses to rewrite or delete a freeze (`migrations/0006_freezes_guard.sql`).
+- **The agent card** (`aliquot card <hash>`, `packages/core/src/card.ts`) states the version's model and the placement of its endpoint, each tool's spec hash, the knowledge base snapshots and their classes, the data ceilings and the sha256 of the exact system prompt. Its schema is `schemas/agent-card.schema.json`.
+- **The deployment sheet** (`aliquot sheet`, `packages/core/src/sheet.ts`) is generated from `lab.toml` and the study tables, so it lists what this deployment runs, not what a template says.
+- **Reviewer bundles.** `aliquot export` reads the payload key, like the worker, and writes a study's runs for a reviewer at a stated clearance. Each payload body is included only when the egress decision allows it at that clearance (`packages/core/src/replay.ts`); the rest are listed by hash and class. `aliquot replay` needs no database or key: it verifies every hash chain in the bundle, and can run each run again with its tools answered from the recording. A body's address is keyed, so a reviewer checks that the events are intact, and trusts the export for which body belongs to which address.
+
 ## Who can do what
 
 The five roles are member, author, publisher, data steward and PI (`packages/core/src/roles.ts`). Members ask
@@ -170,7 +177,7 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
 | Which third parties receive data? | Only the endpoints and hosts listed in `lab.toml`, each at most at its ceiling. The quickstart lists none. |
 | Is data encrypted at rest? | Payloads are encrypted with AES-256-GCM under a key held outside the database. Run records hold references, not text. |
 | Can we audit what an agent did? | Yes. Each run has a hash-chained record of every call, and each answer names the hash of the agent version that gave it. With `[anchor]` set, the worker also signs the head of the audit stream and of each closed run every few minutes, with a key the database never holds, into an append-only log; `aliquot verify --anchors` then shows whether anyone with database access rewrote a row after it was anchored, and names the seq. Keep the log, and the key, off the database host: see [Anchors](#anchors). |
-| Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. Two changes do not move the hash: the system prompt text the core adds around the instructions, and a built-in tool's code. Both ship only with a new Aliquot release. |
+| Can an agent be changed silently? | Mostly no. A change to an agent's instructions, model, knowledge bases, tools or limits changes its version hash, and a run pins the hash it ran. The text the core adds around the instructions in the system prompt is part of the version too (`PromptFrame` in `packages/core/src/agent.ts`), so a release that rewords it gives every agent a new version, and a version frozen before keeps its old text. One change does not move the hash: a built-in tool's code. It ships only with a new Aliquot release. |
 | Which agent answers in a channel with several? | The router in the door picks from the agents open to the member whose ceiling admits the message's class. It is local word matching over each agent's description and sample questions, with no model, so the message goes nowhere to be routed. When it is unsure the member picks. The decision and every agent's score are in the run record. |
 | Single sign-on? | Yes, on the web door, with any OpenID Connect provider: Entra ID, Okta, Keycloak, CILogon. A SAML-only campus puts Keycloak or CILogon in front. With `[auth]` in `lab.toml`, a member signs in with the university account and sees only the runs and records they asked signed in; the data steward and the PI see all, including token surfaces' runs, which can name any member. The role comes from a group or entitlement claim the lab maps, or from the studio account the PI added for an email the provider says it verified. Every run's record names the member by the provider's stable id (`sub`, or `eppn`), and a session unused for `idle_timeout_minutes` (30 by default) ends, for HIPAA automatic logoff and NIST SP 800-171 03.01.10 and 03.01.11. Without `[auth]` the door listens on 127.0.0.1 only and refuses any other address. The studio keeps its own accounts. A token surface (Slack, `aliquot ask`, `acp`) says which surface a request comes from, not which member sent it. |
 | Key rotation and retention? | Yes. `aliquot keys rotate` and `aliquot keys reencrypt` move payloads to a new key without changing a hash; `[store.class_keys]` keeps D3 under its own key. `[policy.retention]` sets a floor and a purge per class; `aliquot retention --apply` redacts bodies past the window and keeps tombstones, so records still verify. Retention runs when someone or a timer runs it, not on its own. |
@@ -211,7 +218,6 @@ after either.
   `aliquot ask` token cannot yet be minted from a signed-in session.
 - **Retention runs only when it is run.** Nothing in Aliquot schedules the sweep; research IT runs
   `aliquot retention --apply` from cron or a timer. A backup taken before a sweep still holds the redacted bodies.
-- **The version hash does not yet cover the system prompt text that the core builds around an agent's instructions.**
 - **The studio runs outside the network seal and still holds the database password.** It holds no payload key, so it
   cannot read a stored payload. But it connects to Postgres as the same user as the worker, for its own tables, and
   the web door's reply table (`web_messages`) holds answers as text until the retention sweep clears them. A separate database user for the studio is planned.
@@ -219,5 +225,6 @@ after either.
   separate user, a container or a VM).
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.
 - **IRB and consent checks against knowledge base sources are not built.**
+- **Studies have no studio page and no consent disclosure draft.** A study owner manages a study with `aliquot study` on the lab server, which names the member acting with `--as`, because sign-on covers the web door only. The draft of where participant data goes, for the IRB to edit, is not built.
 
 Aliquot has been tested on a synthetic lab with synthetic data. It has not yet been used by a real lab.

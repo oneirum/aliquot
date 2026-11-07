@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { LOOP_CONTRACT, listingOf, parseAgentDocument, parseExactModelId, resolveAgent, validateAgentDraft, verifyRunnable, versionHash, type Catalog } from "../packages/core/src/agent.ts";
-import type { Sha256, SnapshotId, ToolHash } from "../packages/core/src/hash.ts";
+import { LOOP_CONTRACT, listingOf, parseAgentDocument, parseExactModelId, PROMPT_FRAME, PROMPT_FRAME_V1, resolveAgent, validateAgentDraft, verifyRunnable, versionHash, type Catalog } from "../packages/core/src/agent.ts";
+import { contentHash, type Sha256, type SnapshotId, type ToolHash } from "../packages/core/src/hash.ts";
+import { systemPrompt } from "../packages/core/src/loop.ts";
 
 const fixture = JSON.parse(await readFile(new URL("../fixtures/agent.json", import.meta.url), "utf8")) as Record<string, unknown>;
 
@@ -67,6 +68,22 @@ test("the version hash covers exactly what the loop reads: governance fields mov
   assert.notEqual(versionHash(limited.agent), versionHash(base.agent), "limits are behavior");
   const listing = listingOf(doc({ irbProtocol: "IRB-2026-1" }));
   assert.deepEqual([listing.ceiling, listing.provenancePolicy, listing.irbProtocol], ["D3", { numbersMustTrace: false, claimsLinkEvidence: false }, "IRB-2026-1"]);
+});
+
+test("the version hash fixes the exact system prompt: a new frame moves the hash and the text, a stored version keeps its text", () => {
+  const r = resolveAgent(doc(), catalog);
+  assert.ok(r.ok);
+  const outline = { title: "Lab handbook", purpose: "How the lab works.", paths: ["sops/freezer.md", "onboarding.md"] };
+  assert.equal(
+    systemPrompt(r.agent, [outline]),
+    `${fixture.instructions as string}\n\nKnowledge base "Lab handbook" (id handbook): How the lab works.\nEntries:\n- sops/freezer.md\n- onboarding.md\n\nUse kb_search to find entries and kb_read to read whole entries by path. Answer only from entries you have read. If they do not contain the answer, say that you could not find it in the knowledge base.`,
+  );
+  const reworded = { ...r.agent, prompt: { ...PROMPT_FRAME, retrieval: "Search first. Cite every entry you use." } };
+  assert.notEqual(versionHash(reworded), versionHash(r.agent), "a release that rewords the frame resolves to a new version");
+  assert.match(systemPrompt(reworded, [outline]), /Search first\. Cite every entry you use\.$/);
+  const { prompt: _frame, ...stored } = r.agent;
+  assert.equal(systemPrompt(stored, [outline]), systemPrompt(r.agent, [outline]), "a version stored before the frame joined the hash runs the text it always ran");
+  assert.equal(contentHash(PROMPT_FRAME_V1), "b812f0caaeabeb924c41dc23193309f7c7856d215c7fdfe911dd22a5396ad764", "PROMPT_FRAME_V1 is what stored versions ran under; write a new frame instead of editing it");
 });
 
 test("verifyRunnable names every pin the deployment cannot honor", () => {
