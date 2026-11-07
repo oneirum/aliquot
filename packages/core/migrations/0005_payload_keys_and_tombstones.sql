@@ -13,6 +13,8 @@ create table payload_keys (
 
 -- A redaction keeps a tombstone: the row's hash, class and bytes, plus when
 -- and why the body went. Both are written with the redaction, never after.
+-- The tombstone is cleared only when the same body is put again (same class
+-- and bytes, so the same address): the row then holds that new copy.
 alter table payloads add column redacted_at timestamptz, add column redaction_reason text;
 
 -- The door keeps a copy of each reply for the chat page. The retention sweep
@@ -27,6 +29,9 @@ begin
   if new.hash <> old.hash or new.bytes <> old.bytes or new.cls <> old.cls or new.created_at <> old.created_at then
     raise exception 'payloads rows are immutable except the body (redaction or rewrap)' using errcode = 'insufficient_privilege';
   end if;
+  if old.ciphertext is null and new.ciphertext is not null and new.nonce is not null and new.key_id is not null and new.redacted_at is null and new.redaction_reason is null then
+    return new;                                                -- refill: the same body put again after a redaction, under the current key
+  end if;
   if new.redacted_at is distinct from old.redacted_at or new.redaction_reason is distinct from old.redaction_reason then
     if old.ciphertext is not null and new.ciphertext is null and new.nonce is null and new.key_id is not distinct from old.key_id and new.redacted_at is not null and new.redaction_reason is not null then
       return new;                                              -- redaction with its tombstone
@@ -37,7 +42,7 @@ begin
     return new;                                                -- redaction
   end if;
   if new.key_id is distinct from old.key_id and old.ciphertext is not null and new.ciphertext is not null and new.nonce is not null and new.ciphertext <> old.ciphertext then
-    return new;                                                -- rewrap: a new key and a new body together; a redacted body cannot come back
+    return new;                                                -- rewrap: a new key and a new body together
   end if;
   if new.ciphertext is not distinct from old.ciphertext and new.nonce is not distinct from old.nonce and new.key_id is not distinct from old.key_id then
     return new;                                                -- nothing changed

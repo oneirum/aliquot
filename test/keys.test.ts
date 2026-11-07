@@ -52,6 +52,7 @@ test("a rotation reads old and new payloads mid-rotation, re-encrypts without mo
   assert.equal((await after.put(body({ text: "freezer 3 alarm" }))).hash, old.hash, "the same bytes dedupe to the same row");
 
   await assert.rejects(open(ring({ k1: k3 }, "k1")), /payload key k1 is not the key this lab knows as k1/, "a wrong key under a known id is refused at startup");
+  await assert.rejects(open(ring({ k1, k2: k3 }, "k2")), /payload key k2 is not the key this lab knows as k2/, "every held key is checked, not only the first that unwraps");
 });
 
 test("a class that names its own key is written under it, and a process without that key says the body is unavailable", async () => {
@@ -131,4 +132,11 @@ test("the retention sweep redacts bodies whose newest run is past the window, ke
   assert.equal(again.redacted.length, 0, "a second sweep redacts nothing");
   assert.deepEqual((await loadAudit(db)).filter((r) => r.event.t === "retention.swept").map((r) => (r.event as { redacted: number }).redacted), [1, 0], "and each sweep is audited");
   assert.deepEqual((await sweepRetention(db, retention, new Date("2026-07-01T00:00:00Z"), "steward")).redacted.map((c) => c.hash).sort(), [question.hash, followUp.hash].sort(), "once the later run is past the window too, its bodies go");
+
+  const asked = await store.put(body({ text: "how cold is freezer 3?" }));
+  assert.equal(asked.hash, question.hash, "asking the same question again addresses the tombstoned row");
+  assert.deepEqual(await read(store, asked), { text: "how cold is freezer 3?" }, "and the put stores its body again, so a run on it can read it");
+  assert.equal(await keyOf(asked), "k2", "under the current key");
+  assert.deepEqual((await db.query("select redacted_at, redaction_reason from payloads where hash = $1", [question.hash])).rows[0], { redacted_at: null, redaction_reason: null });
+  await assert.rejects(db.query("update payloads set redacted_at = null, redaction_reason = null where hash = $1", [followUp.hash]), /tombstone is written once/, "a tombstone is cleared only by a new body");
 });

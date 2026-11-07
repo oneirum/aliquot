@@ -83,3 +83,22 @@ test("restore.sh reads a backup from before key ids as LABH_PAYLOAD_KEY alone", 
   writeFileSync(join(dir, "old/payload-key"), `LABH_PAYLOAD_KEY=${key}\n`);
   assert.equal(run("restore.sh", [join(dir, "old")]).status, 0);
 });
+
+test("backup.sh and restore.sh refuse a key id or env var name that is not one, before using it", () => {
+  const key = hex();
+  const odd = lab("k2 LABH.PAYLOAD_KEY 3\n", { LABHXPAYLOAD_KEY: key, "LABH.PAYLOAD_KEY": key });
+  const backup = odd.run("backup.sh", [join(odd.dir, "b")]);
+  assert.equal(backup.status, 2);
+  assert.match(backup.stderr, /^backup: aliquot keys env named key k2 with env var LABH\.PAYLOAD_KEY, which is not an env var name$/m);
+  assert.equal(existsSync(join(odd.dir, "b")), false);
+
+  const { dir, run, calls } = lab("", { LABHXPAYLOAD_KEY: key });
+  mkdirSync(join(dir, "b"));
+  writeFileSync(join(dir, "b/labh.dump"), "DUMP");
+  writeFileSync(join(dir, "b/key-ids"), "k1 LABH.PAYLOAD_KEY\n");
+  writeFileSync(join(dir, "b/payload-key"), `LABH.PAYLOAD_KEY=${key}\n`);
+  const restore = run("restore.sh", [join(dir, "b")]);
+  assert.equal(restore.status, 2, "a pattern in key-ids never matches another variable's line");
+  assert.match(restore.stderr, /^restore: .*key-ids names key k1 with env var LABH\.PAYLOAD_KEY, which is not an env var name$/m);
+  assert.doesNotMatch(calls(), /pg_restore/);
+});

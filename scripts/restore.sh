@@ -16,12 +16,17 @@ compose=(docker compose --env-file "$env_file")
 if [[ -f "$dir/SHA256SUMS" && "$key_file" == "$dir/payload-key" ]]; then
   (cd "$dir" && { sha256sum -c --quiet SHA256SUMS 2>/dev/null || shasum -a 256 -c --quiet SHA256SUMS; }) || { echo "restore: $dir fails its SHA256SUMS" >&2; exit 2; }
 fi
+# The last NAME=value line for an exact name: awk compares the name as a string, so it is never read as a pattern.
+env_value() { awk -v name="$1" 'index($0, name "=") == 1 { value = substr($0, length(name) + 2) } END { print value }' "$2"; }
+
 manifest="k1 LABH_PAYLOAD_KEY"
 [[ -f "$dir/key-ids" ]] && manifest="$(cat "$dir/key-ids")"
 while read -r id env; do
   [[ -n "$id" ]] || continue
-  backup_key="$(sed -n "s/^${env}=//p" "$key_file" | tail -1)"
-  live_key="$(sed -n "s/^${env}=//p" "$env_file" | tail -1)"
+  [[ "$id" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo "restore: $dir/key-ids names key id $id, which is not a key id" >&2; exit 2; }
+  [[ "$env" =~ ^[A-Z_][A-Z0-9_]*$ ]] || { echo "restore: $dir/key-ids names key $id with env var $env, which is not an env var name" >&2; exit 2; }
+  backup_key="$(env_value "$env" "$key_file")"
+  live_key="$(env_value "$env" "$env_file")"
   [[ "$backup_key" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "restore: $key_file holds no $env for key $id" >&2; exit 2; }
   if [[ "$backup_key" != "$live_key" ]]; then
     echo "restore: key $id is not supplied: $env_file's $env is not the key this backup was made with." >&2

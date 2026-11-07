@@ -88,6 +88,13 @@ test("a bad command, a bad limit or an extra argument prints the usage and exits
   }
 });
 
+test("retention --apply refuses --as-of, so a sweep never judges the window at a later date than today", () => {
+  const r = aliquot(["retention", "--apply", "--as-of", "2099-01-01"]);
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /^aliquot retention: --as-of previews with --dry-run only; --apply always judges the window as of today\.\n$/);
+});
+
 test("setup problems are one line, not a stack trace", () => {
   const unset = aliquot(["runs"], {});
   assert.deepEqual({ status: unset.status, stderr: unset.stderr }, { status: 2, stderr: "DATABASE_URL is not set\n" });

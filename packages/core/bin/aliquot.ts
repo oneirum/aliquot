@@ -54,9 +54,9 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
   keys reencrypt [--batch n]
                       move every body to its class's key, in batches (default 500); safe to stop and run again
   keys env            one line per key id: id, env var, bodies (scripts/backup.sh reads it)
-  retention --dry-run | --apply [--as-of YYYY-MM-DD]
+  retention --dry-run [--as-of YYYY-MM-DD] | --apply
                       list, or redact, the run bodies past [policy.retention] purge_payload_after_days. A redacted body keeps its
-                      hash, class and size, so every chain still verifies; --apply checks them after
+                      hash, class and size, so every chain still verifies; --apply checks them after. --as-of previews a later date
   ask [--door url] [--user id] [--thread id] [--ceiling D0..D3] [--timeout s] <question... | ->
                       ask a question through the web door, as the chat page does; - reads it from stdin.
                       --json prints one JSON line per event: started, tool, finished, refused
@@ -161,6 +161,11 @@ const valid =
     (command === "keys" && ["status", "rotate", "reencrypt", "env"].includes(runId ?? "") && !values["dry-run"] && !values.apply && (values["as-of"] === undefined || runId === "status")) ||
     (command === "retention" && !runId && values["dry-run"] !== values.apply));
 if (!valid) usage();
+if (command === "retention" && values.apply && values["as-of"] !== undefined) {
+  // A sweep judged at a later date would redact bodies before their floor; only a preview may look ahead.
+  process.stderr.write("aliquot retention: --as-of previews with --dry-run only; --apply always judges the window as of today.\n");
+  process.exit(2);
+}
 
 async function slack(words: readonly string[]): Promise<number> {
   if (words.length || values.json || values.user || values.ceiling || values.thread) usage();
@@ -533,6 +538,8 @@ async function steward(db: Db): Promise<number> {
     const kept = (await db.query<{ key_id: string }>("select key_id from payload_keys order by key_id")).rows.map((r) => r.key_id);
     say(`${keyring.current} is current: new payloads go under it once the worker and the web door restart.`);
     say(`The lab's address key is kept under ${kept.join(", ")}, so an old key can be removed once it holds no bodies. Payload hashes do not change.`);
+    say("A rotation does not re-key the address key, which keeps a guessed body from being confirmed against its hash: anyone who held an old key can still compute addresses.");
+    say("Old ciphertext stays in Postgres dead rows until VACUUM reclaims them, in WAL segments until they are recycled, and in every backup taken before the re-encrypt.");
     const toMove = keys.reduce((n, k) => n + k.toMove, 0);
     say(toMove ? `${toMove} ${toMove === 1 ? "body is" : "bodies are"} under another key and stay readable while that key is set. Next: aliquot keys reencrypt.` : "Every body is already under its class's key.");
     return 0;

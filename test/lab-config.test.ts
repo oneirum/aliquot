@@ -150,6 +150,8 @@ test("each [store] key rule refuses with one line", () => {
   refuse('[store.keys]\nk1 = "A"\n[store.class_keys]\nD3 = "k3"\n', /class_keys D3 = "k3" is not a key/);
   refuse('current = "k1"\n[store.keys]\nk1 = "A"\nk2 = "A"\n', /keys k1 and k2 both read A/);
   refuse('[store.keys]\n"K 1" = "A"\n', /a key id is lowercase letters/);
+  refuse('key_env = "LABH.KEY"\n', /an env var name is capital letters, digits and _/);
+  refuse('current = "k1"\n[store.keys]\nk1 = "A/;s/x/"\n', /an env var name is capital letters, digits and _/);
   refuse('currrent = "k1"\n', /currrent/);
 });
 

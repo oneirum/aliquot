@@ -17,6 +17,8 @@ import { ROLES, type Role } from "./roles.ts";
 
 const placement = z.enum(PLACEMENTS);
 const KEY_ID = /^[a-z0-9][a-z0-9_-]*$/;
+/** scripts/backup.sh and restore.sh read these names out of .env, so they must be names, never patterns. */
+const keyEnvName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/, "an env var name is capital letters, digits and _, not starting with a digit");
 const retentionDays = z.object({ keep_min_days: z.number().int().min(0).optional(), purge_payload_after_days: z.number().int().positive().optional() }).strict();
 
 const IMAGE_BY_DIGEST = /^(?:[a-z0-9][a-z0-9._\/:-]*@)?sha256:([0-9a-f]{64})$/;
@@ -175,8 +177,8 @@ const schema = z.object({
   store: z
     .object({
       placement: placement.default("lab"),
-      key_env: z.string().min(1).optional(),
-      keys: z.record(z.string().regex(KEY_ID, "a key id is lowercase letters, digits, _ and -, because every payload row names one"), z.string().min(1)).optional(),
+      key_env: keyEnvName.optional(),
+      keys: z.record(z.string().regex(KEY_ID, "a key id is lowercase letters, digits, _ and -, because every payload row names one"), keyEnvName).optional(),
       current: z.string().optional(),
       class_keys: z.partialRecord(z.enum(DATA_CLASSES), z.string()).default({}),
     })
