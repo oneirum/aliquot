@@ -462,7 +462,7 @@ async function init(): Promise<number> {
   say(`Wrote ${labPath}`);
   if (writeEnv) {
     writeFileSync(envPath, renderEnv(answers.sandboxImage !== null), { flag: "wx", mode: 0o600 });
-    say(`Wrote ${envPath} with new POSTGRES_PASSWORD, LABH_PAYLOAD_KEY, PAYLOAD_SECRET, ALIQUOT_ACP_TOKEN and ALIQUOT_STUDIO_TOKEN (mode 600). Keep a copy of LABH_PAYLOAD_KEY offline.`);
+    say(`Wrote ${envPath} with new POSTGRES_PASSWORD, LABH_PAYLOAD_KEY, PAYLOAD_SECRET, ALIQUOT_ACP_TOKEN, ALIQUOT_STUDIO_TOKEN and ALIQUOT_STUDIO_DB_PASSWORD (mode 600). Keep a copy of LABH_PAYLOAD_KEY offline.`);
   } else {
     say(`Left ${envPath} as it is. It holds LABH_PAYLOAD_KEY, and a new key would make every stored payload unreadable.`);
     for (const hint of surfaceTokenHints(readFileSync(envPath, "utf8"), envPath)) say(hint);

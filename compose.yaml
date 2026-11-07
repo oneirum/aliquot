@@ -2,7 +2,9 @@
 # production studio. It reads two files you make once with `docker compose run --rm init`: config/lab.toml
 # (what is where) and .env (its secrets). Every port is published on 127.0.0.1 unless .env sets LABH_BIND;
 # put the lab's reverse proxy in front of the web door and the studio. LABH_PAYLOAD_KEY (and _2, _3) go to the sealed
-# services only, the worker and the web door; the studio reaches core through the door with ALIQUOT_STUDIO_TOKEN.
+# services only, the worker and the web door; the studio reaches core through the door with ALIQUOT_STUDIO_TOKEN,
+# and Postgres as its own role, aliquot_studio, which holds nothing in core's tables (docs/install.md, "Least privilege").
+# Monitoring: GET /healthz on the web door; logging: docker compose exec worker aliquot audit export --follow.
 #
 # For development and the checks, docker compose up -d postgres still starts only the database.
 # Ollama is the optional local model (--profile ollama); drop it when lab.toml points at the lab's own vLLM box.
@@ -47,6 +49,7 @@ services:
       ALIQUOT_TEAMS_TOKEN: ${ALIQUOT_TEAMS_TOKEN:-}    # the [surfaces.teams] token, so the door knows the Teams door
       LABH_SESSION_SECRET: ${LABH_SESSION_SECRET:-}    # signs session cookies when lab.toml has [auth]
       LABH_OIDC_CLIENT_SECRET: ${LABH_OIDC_CLIENT_SECRET:-}   # [auth] client_secret_env, when the provider gave the door a secret
+      ALIQUOT_STUDIO_DB_PASSWORD: ${ALIQUOT_STUDIO_DB_PASSWORD:-}  # the door sets aliquot_studio's password before the studio starts
     ports: ["${LABH_BIND:-127.0.0.1}:${LABH_WEB_PORT:-3000}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
@@ -55,7 +58,7 @@ services:
       retries: 40
 
   # Its own environment, not the anchor's: the studio holds no payload key (compose-check.sh asserts it). DATABASE_URL
-  # is for Payload's own tables, in the studio schema.
+  # is for Payload's own tables, in the studio schema, as the aliquot_studio role, which may not read core's tables.
   studio:
     <<: *app
     depends_on:
@@ -64,7 +67,7 @@ services:
     working_dir: /app/packages/studio
     command: ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3001"]
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-labh}@postgres:5432/labh
+      DATABASE_URL: postgres://aliquot_studio:${ALIQUOT_STUDIO_DB_PASSWORD:-}@postgres:5432/labh
       LABH_CONFIG: /etc/aliquot/lab.toml
       LABH_DOOR_URL: http://web:3000
       ALIQUOT_STUDIO_TOKEN: ${ALIQUOT_STUDIO_TOKEN:-}

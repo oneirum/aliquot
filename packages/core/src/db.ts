@@ -65,7 +65,9 @@ export const STUDIO_DB_PASSWORD_ENV = "ALIQUOT_STUDIO_DB_PASSWORD";
 
 /**
  * Sets the studio role's password, as a SCRAM-SHA-256 verifier computed here, so the plain password never reaches the
- * server or its statement log. Returns false when the role does not exist (a migrator that was not a superuser).
+ * server or its statement log, and grants it this database again: a restore (scripts/restore.sh) makes a new database,
+ * and pg_restore does not carry database grants. Returns false when the role does not exist (a migrator that was not
+ * a superuser).
  */
 export async function setStudioPassword(db: Db, password: string): Promise<boolean> {
   if (!/^[A-Za-z0-9_-]{16,}$/.test(password)) throw new Error(`${STUDIO_DB_PASSWORD_ENV} must be at least 16 letters, digits, _ or -`);
@@ -73,6 +75,7 @@ export async function setStudioPassword(db: Db, password: string): Promise<boole
   if (!role.rowCount) return false;
   // Base64 and the separators only, so the verifier needs no quoting beyond the literal's own.
   await db.query(`alter role ${STUDIO_ROLE} with login password '${scramVerifier(password)}'`);
+  await db.query(`do $$ begin execute format('grant connect, create on database %I to ${STUDIO_ROLE}', current_database()); end $$`);
   return true;
 }
 

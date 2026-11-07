@@ -22,7 +22,7 @@ after(async () => {
 
 async function healthz(query = "", p = port): Promise<{ status: number; body: { ok: boolean; database: string; workerBeatAgeMs: number | null } }> {
   const res = await fetch(`http://127.0.0.1:${p}/healthz${query}`);
-  return { status: res.status, body: await res.json() };
+  return { status: res.status, body: (await res.json()) as { ok: boolean; database: string; workerBeatAgeMs: number | null } };
 }
 
 async function until(what: string, check: () => Promise<boolean>, ms = 15_000): Promise<void> {

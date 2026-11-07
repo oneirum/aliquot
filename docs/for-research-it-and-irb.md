@@ -282,6 +282,13 @@ to a tool's code alone moves no agent version.
   refusal, stop and the final answer, with class labels and payload references, not plaintext.
 - **Audit stream** (`audit_events`). One hash-chained log for publishes, role changes and calls made outside a run.
 - **Studio tables.** Agent and knowledge base definitions, in plaintext. No detector runs when a definition is saved.
+  The studio runs outside the network seal, so it holds no payload key and signs in to Postgres as its own role,
+  `aliquot_studio`, which owns these tables and is refused every one of core's, `payloads` and `web_messages` included
+  (`packages/core/migrations/0011_studio_role.sql`, tested in `test/studio-role.test.ts`).
+- **Event log for a SIEM.** `aliquot audit export` prints the audit stream and every run record as JSON lines with
+  ids, classes, hashes, actors and refusal codes, never content (`packages/core/src/audit-export.ts`). `--follow`
+  streams new events, in commit order, for syslog or a forwarder. The web door's `GET /healthz` reports whether the
+  database answers and a worker is running. [Install](install.md), "Logging and monitoring", has the commands.
 
 ## Studies, agent cards and reviewer replay
 
@@ -354,6 +361,9 @@ What anchors do not cover: a change made before the next anchor is written (at m
 still open, and lines cut from the end of the only copy of the log, which leaves an older log that still verifies. That
 last one is why the lines belong somewhere the database administrator cannot write as well. Redaction and retention delete payload bodies but keep their hashes, so anchored runs still verify
 after either.
+| Central event logging (NIST SP 800-171 03.03.01)? | Yes. `aliquot audit export --follow` writes every audited event as a JSON line for syslog or the campus SIEM, with no content in it. |
+| Health checks? | `GET /healthz` on the web door: 200 when the database answers and a worker beat in the last 30 seconds, else 503. |
+| Least privilege between services? | The worker and the web door hold the payload key. The studio holds neither the key nor a database role that can read core's tables. |
 
 ## Not covered yet
 
@@ -371,9 +381,6 @@ after either.
   `aliquot ask` token cannot yet be minted from a signed-in session.
 - **Retention runs only when it is run.** Nothing in Aliquot schedules the sweep; research IT runs
   `aliquot retention --apply` from cron or a timer. A backup taken before a sweep still holds the redacted bodies.
-- **The studio runs outside the network seal and still holds the database password.** It holds no payload key, so it
-  cannot read a stored payload. But it connects to Postgres as the same user as the worker, for its own tables, and
-  the web door's reply table (`web_messages`) holds answers as text until the retention sweep clears them. A separate database user for the studio is planned.
 - **A lab cannot add its own tools yet.** Contributed tools are planned, behind an operating-system boundary (a
   separate user, a container or a VM).
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.
