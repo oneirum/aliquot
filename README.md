@@ -111,7 +111,7 @@ A lab answers the same questions every week. Where the freezer log is, how a var
 - **Claude Code or Codex as the agent.** An agent can run on one of these CLIs instead of a model endpoint. The CLI is confined: it has no tools of its own, and it reaches only Aliquot and its vendor's API.
 - **Restricted data does not leave.** Every piece of content carries a data class. Participant identifiers are restricted, and restricted content never reaches a hosted model or a hosted agent CLI: the harness refuses the call and records the refusal. One agent can send public questions to a hosted model (Anthropic, OpenAI) and restricted ones to a lab model (Ollama or any OpenAI-compatible server).
 - **Built by the people who know the work.** Agents and knowledge bases are forms in a web studio, with revisions, diff, restore, a test thread and a publish button. No git, no deploy.
-- **Kept in step with Box, OneDrive and Drive.** A synced folder or a Drive folder feeds a knowledge base, an edited SOP reaches the next answer without anyone running a command, every answer's record names the document version it read, and an entry shared with one group is never retrieved for anyone else.
+- **Kept in step with Box, SharePoint, OneDrive and Drive.** A synced folder, a Drive folder or a SharePoint library feeds a knowledge base, an edited SOP reaches the next answer without anyone running a command, every answer's record names the document version it read, and an entry shared with one group is never retrieved for anyone else.
 - **Coverage before publish.** A knowledge base lists the questions it must answer. If the documents do not support one, publish is refused and names the gap, unless a publisher overrides it with a written note.
 - **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later: it opens with a summary of what the run read, called and refused, and downloads as JSON. Each run names the hash of the agent version that answered.
 - **Studies an IRB can cite.** A PI freezes the agent version a study uses, an IRB reads its card and a sheet generated from the deployment, and a reviewer replays a run from an exported bundle without the lab's database.
@@ -293,9 +293,23 @@ folder_id = "1AbC..."
 token_env = "LAB_DRIVE_TOKEN"
 kb = "lab-docs"
 class = "D1"
+
+[sources.lab-sharepoint]
+kind = "graph"                       # a SharePoint library or OneDrive through Microsoft Graph delta
+drive_id = "b!3fK..."
+token_env = "LAB_GRAPH_TOKEN"
+kb = "lab-docs"
+class = "D1"
+site_groups = { "Lab SOPs Members" = "lab" }
 ```
 
-`pnpm sources --watch` (`kb sync --watch`) ingests every source and keeps watching: a folder on change, Drive on its poll. When the freezer SOP is edited in Box, the next question about the freezer gets the new text, and the record says which version it read. An answer given before the edit says, under the answer, **Changed since this answer** with when the document was edited. A document shared with the cryo group is never retrieved, listed or ranked for a member outside it. `pnpm walk:sources` runs that whole loop on a synthetic lab in about ten seconds. [`docs/sources.md`](docs/sources.md) covers scope, Drive permissions and what is not built yet.
+| Source | `kind` | Changes seen by | Scope from |
+|---|---|---|---|
+| Box, OneDrive or Drive desktop sync folder | `folder` | a file watch | `scope` in `lab.toml` |
+| Google Drive folder | `gdrive` | a poll of the folder | each file's Drive permissions |
+| SharePoint library or OneDrive | `graph` | Graph delta: one request when nothing changed; deletes and renames follow | each file's effective SharePoint permissions |
+
+`pnpm sources --watch` (`kb sync --watch`) ingests every source and keeps watching: a folder on change, Drive and Graph on their poll. When the freezer SOP is edited in Box, the next question about the freezer gets the new text, and the record says which version it read. An answer given before the edit says, under the answer, **Changed since this answer** with when the document was edited. A document shared with the cryo group is never retrieved, listed or ranked for a member outside it. `pnpm walk:sources` runs that whole loop on a synthetic lab in about ten seconds. [`docs/sources.md`](docs/sources.md) covers scope, Drive and SharePoint permissions and what is not built yet; [`docs/install.md`](docs/install.md#sharepoint-and-onedrive-what-the-tenant-admin-consents-to) lists the Graph permissions a tenant admin consents to.
 
 ## The studio
 

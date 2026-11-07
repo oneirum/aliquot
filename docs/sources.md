@@ -34,8 +34,23 @@ kb = "lab-docs"
 class = "D1"
 poll_seconds = 60
 
+# A SharePoint document library (or a OneDrive) through Microsoft Graph. Scope from each file's permissions.
+[sources.lab-sharepoint]
+kind = "graph"
+drive_id = "b!3fK..."   # the library's drive id (below)
+folder = "Lab SOPs"     # optional: only this folder of the library
+token_env = "LAB_GRAPH_TOKEN"
+kb = "lab-docs"
+class = "D1"
+poll_seconds = 60
+[sources.lab-sharepoint.site_groups]
+"Lab SOPs Members" = "lab"          # a SharePoint group: who it is in the lab
+"Cryo Owners" = "group:cryo"
+
 [hosts]
 "www.googleapis.com" = "approved"   # the Drive request carries folder and file ids, which are D1
+"graph.microsoft.com" = "approved"  # so does the Graph request
+"contoso.sharepoint.com" = "approved"  # Graph redirects each download to the tenant's SharePoint host
 
 # Until member sign-on lands, the directory says who is in which group,
 # and which email a Drive permission names.
@@ -54,7 +69,7 @@ pnpm sources --config config/lab.toml --watch    # and keep watching
 ```
 
 `--watch` syncs every knowledge base once, then again whenever a file in a synced folder changes (after 300 ms of
-quiet, so a save that writes several times is one sync) and on each Drive poll. Each line it prints says what changed:
+quiet, so a save that writes several times is one sync) and on each Drive or Graph poll. Each line it prints says what changed:
 
 ```
 kb lab-docs: published 462f79beafb9 (was 01028611cd1b): changed box-sops/freezer-alarm.md
@@ -96,6 +111,42 @@ scope entries names them. Drive permissions map like this:
 | A group | `group:<name>` for the group `[directory.emails]` maps its address to |
 | An email the directory does not know | nobody |
 
+## SharePoint and OneDrive
+
+A `graph` source reads one drive: a SharePoint document library, or a member's OneDrive. Find a library's drive id
+with Graph Explorer or any Graph client: `GET /v1.0/sites/contoso.sharepoint.com:/sites/LabSOPs` gives the site id,
+and `GET /v1.0/sites/<site id>/drives` lists its libraries with their ids. The permissions an admin consents to are in
+[`install.md`](install.md#sharepoint-and-onedrive-what-the-tenant-admin-consents-to).
+
+Each poll asks Graph only what changed:
+
+- The first sync reads the library's root delta, page by page, and keeps the `deltaLink`. Every later sync reads that
+  link, so a poll of an unchanged library is one request and downloads nothing. When Graph answers 410 Gone (the link
+  expired), the next sync reads the whole library again.
+- An edited file is downloaded again (its `cTag` moved); nothing else is. A file whose sharing changed has its
+  permissions read again, and so does every file under a folder whose sharing changed, was renamed or was moved.
+- A file deleted in SharePoint, or moved out of `folder`, leaves the knowledge base on the next sync. An answer that
+  cited it says its source was removed.
+- A folder rename moves every entry under it to its new path.
+- Permissions are read before content, so a file no lab member may see is never downloaded.
+- Word, Markdown and text files go through the same readers as a synced folder; a PDF needs `[sandbox]`, and without
+  it is listed as skipped and never downloaded.
+
+The download is a redirect to a short-lived URL on the tenant's SharePoint host. The egress decides that host on its
+own, so `lab.toml` must place it, and the Graph token is never sent there. A `nextLink` or `deltaLink` naming any
+origin other than `base_url` is refused before the token is sent.
+
+| Graph permission on a file | Scope |
+|---|---|
+| A sharing link for anyone, or for people in the organization | `lab` |
+| A user (Entra or SharePoint site user) | `member:<id>` for the member `[directory.emails]` maps their address to |
+| An Entra group | `group:<name>` for the group `[directory.emails]` maps its address to |
+| A SharePoint group | what `site_groups` maps its display name to (`lab`, `member:<id>` or `group:<name>`) |
+| Anything else (a sharing link for named people outside the lab, an unmapped group) | nobody |
+
+Graph returns a file's effective permissions, inherited ones included, so a library shared with "Lab SOPs Members"
+and a Cryo folder with its own permissions for the cryo group give the folder's files `group:cryo` only.
+
 Scope is enforced at retrieval, in one place (`packages/core/src/kb.ts`). For a member outside an entry's scope, the
 outline in the model's prompt does not list it, `kb_search` never returns it and builds its ranking without it, and
 `kb_read` reports it as missing, exactly like a path that does not exist. A run with no member (a schedule, an eval)
@@ -106,9 +157,12 @@ record of an out-of-scope member's run hold neither the entry's path nor its tex
 
 - **LabArchives and Benchling.** `kind = "labarchives"` or `"benchling"` is refused with a message. Sync their exports
   to a folder and register the folder. A new kind implements `DocumentSource` in `packages/core/src/sources.ts`.
-- **SharePoint and OneDrive through the Graph API.** Use the OneDrive sync client's folder.
-- **A live Drive OAuth flow.** `token_env` holds an access token the lab obtains; the fake Drive in
-  `scripts/fake-drive.ts` serves the same three calls the real API does.
+- **A live Drive or Graph OAuth flow.** `token_env` holds an access token the lab obtains and renews (a Graph app
+  token lasts about an hour); Aliquot does not fetch or refresh one yet. The fake Drive in `scripts/fake-drive.ts`
+  and the fake Graph in `scripts/fake-graph.ts` serve the same calls the real APIs do, and a real token takes the
+  same path with only `base_url` and the token changed. The Graph source has not yet run against a live tenant.
+- **Graph's delta link across restarts.** It is kept in memory, so the first sync after `kb sync --watch` starts reads
+  the whole library once.
 - **Member identity.** `[directory]` is a stand-in for the identity unit's member directory (`MemberDirectory` in
   `packages/core/src/members.ts` is the seam). The web door has no sign-in yet, so the member a chat message names is
   the member it is from.
