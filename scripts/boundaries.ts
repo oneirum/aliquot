@@ -68,6 +68,7 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/procs.ts": ["network-globals", "module:child_process"],
   // The compose check asks the web door over HTTP from inside its container. It is not deployed.
   "scripts/compose-ask.ts": ["network-globals"],
+  "scripts/walk-policy.ts": ["network-globals"],
   "scripts/unit3.ts": ["module:http"],
   "scripts/record-demo.ts": ["module:child_process"],
   "scripts/agent-demo.ts": ["module:child_process"],
@@ -81,6 +82,7 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "packages/studio/components/TestThread.tsx": ["network-globals"],
   "packages/studio/components/KbPanel.tsx": ["network-globals"],
   "packages/studio/components/ToolsPanel.tsx": ["network-globals"],
+  "packages/studio/components/ClassesPanel.tsx": ["network-globals"],
 };
 
 /**

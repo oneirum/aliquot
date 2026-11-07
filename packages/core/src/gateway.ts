@@ -46,6 +46,11 @@ export interface ModelEndpoint {
   readonly id: string;
   readonly baseUrl: string;
   readonly placement: Placement;
+  /**
+   * Where the endpoint's servers run, as an ISO country code ("us"), when lab.toml says. A data class with a residency
+   * rule is read only by an endpoint in that region; an endpoint with no region is in none (fail closed).
+   */
+  readonly region?: string;
   readonly apiKeyEnv?: string;
   /** Read on every request, so a timer outside Aliquot can refresh a short-lived token. An absolute path. */
   readonly apiKeyFile?: string;

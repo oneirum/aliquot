@@ -134,6 +134,15 @@ contact_email_env = "LABH_CONTACT_EMAIL"
 review_confidential = "refuse"           # or "lab-only"
 participant_id_patterns = ["\\bP-\\d{5}\\b"]   # anything matching is D3
 
+# Data classes on top of the five built-ins (public, internal, confidential, restricted, review-confidential).
+# See README "Data classes" and fixtures/policy/classes.toml for PHI, controlled-access and export-controlled examples.
+# [classes.phi]
+# model_tier = "none"          # hosted, local or none
+# record = "hash"              # what the record keeps of a refused message: text, hash or none
+# retention_days = 30
+# detectors = ["hipaa-safe-harbor"]
+# message = "This message carries a HIPAA identifier. Remove it, or ask the lab's honest broker."
+
 # An agent published in the studio answers in the channels it names (surface:channel, for example web:lab).
 # Until the router arrives, the fixture agent answers in every other channel. Knowledge bases come from fixtures.
 [agents]

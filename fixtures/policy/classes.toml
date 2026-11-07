@@ -1,0 +1,30 @@
+# Data classes for a lab that holds PHI, dbGaP data under a DUA, and export-controlled material.
+# Appended to a lab.toml by the policy test and `pnpm walk:policy`. The five built-in classes
+# (public, internal, confidential, restricted, review-confidential) are always there; these add three:
+# phi, controlled_access and export_controlled.
+
+# HIPAA Safe Harbor identifiers. Phone and email stay in confidential, because in this lab they are
+# mostly members' own; a lab whose messages carry patients' contact details names them here too.
+[classes.phi]
+model_tier = "none"
+record = "hash"
+retention_days = 30
+detectors = ["phi-name", "phi-address", "phi-zip", "phi-date", "phi-age", "phi-fax", "phi-health-plan", "phi-account", "phi-license", "phi-vehicle", "phi-device", "phi-ip", "phi-biometric", "ssn", "mrn", "dob"]
+message = "This message carries a HIPAA identifier. Remove it, or ask the lab's honest broker for a de-identified extract."
+
+# NIH controlled-access data under a Data Use Certification (dbGaP, and other DUA-bound releases). NIH says sharing it
+# with generative AI tools violates the DUC's non-transferability (NOT-OD-25-081), so no model reads it, local or hosted.
+[classes.controlled_access]
+model_tier = "none"
+record = "hash"
+retention_days = 365
+detectors = ["dua-marker"]
+message = "This message names a controlled-access dataset. Its data use certification keeps it out of AI tools; work with it on the lab's analysis server."
+
+# ITAR and EAR material: a lab or institution model in the United States may read it, nothing else.
+# An endpoint reads it only when lab.toml gives it region = "us".
+[classes.export_controlled]
+model_tier = "local"
+residency = "us"
+detectors = ["export-marker"]
+message = "This message carries export-controlled material, which stays on lab or institution systems in the United States."

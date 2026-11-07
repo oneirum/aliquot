@@ -176,7 +176,7 @@ export async function stop(door: Door, runId: string, user: string): Promise<voi
 }
 
 /** The studio's reads and writes of core, each a POST /studio/<op> that studio-door.ts serves. */
-export const STUDIO_OPS = ["kb-compile", "kb-compile-result", "kb-publish", "kb-entry", "agent-check", "agent-publish", "agent-test", "test-run"] as const;
+export const STUDIO_OPS = ["kb-compile", "kb-compile-result", "kb-publish", "kb-entry", "agent-check", "agent-publish", "agent-test", "test-run", "data-classes"] as const;
 export type StudioOpName = (typeof STUDIO_OPS)[number];
 
 /** Where the studio finds the web door when it is not at [surfaces.web] base_url, as inside the compose network. */
