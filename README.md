@@ -515,7 +515,7 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm walk:data` | A member asks lab0's visits CSV and REDCap project three questions and one refused one; each record reruns to the same number, and no row value reaches the hosted model. Needs the sandbox image. |
 | `aliquot verify --anchors` | That nobody rewrote history in the database. The worker signs the head of the audit stream and of each closed run into an anchor log outside the database every few minutes, with a key the database never holds. This checks every line's signature and that the database still holds each signed hash, and names the first seq that changed. `test/anchor.test.ts` rewrites an audit row and a run event, recomputes every later hash so plain `aliquot verify` passes, and shows this check fail at that seq; it also catches a forged line, a line under another key, and a removed line. |
 | `pnpm trust` | The trust numbers in [`docs/trust.md`](docs/trust.md): unsupported claims, wrong citations, refusals both ways and planted instructions obeyed, on a larger synthetic lab. No Postgres and no key; CI runs it on every push. |
-| `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. |
+| `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. Then accessibility: axe-core over the chat page, a record, the runs list and both studio forms in light and dark, failing on any serious or critical WCAG 2.1 AA violation, and a keyboard-only walk from asking to downloading the record with a visible focus ring at every stop. [`docs/accessibility.md`](docs/accessibility.md) has what is tested, the result and what is not covered. |
 
 The tests that need macOS or the sandbox image skip elsewhere, each with its reason; CI runs on Linux.
 
@@ -625,6 +625,8 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 A campus security review asks control by control. `pnpm review-pack --config config/lab.toml` writes one answer per control for your lab: HIPAA Security Rule sections, every NIST SP 800-171 Rev. 3 family, and the HECVAT 4 question areas (in our words, not EDUCAUSE's). Each row says what Aliquot does toward the control, what your `lab.toml` makes true for it, and its status: met, partly, not met, or the lab's responsibility. A row reads met only when it names the tests that prove it, and a test in the suite fails when a cited test does not exist. Change `lab.toml` and the rows that depend on it change with it. The pack never says a deployment is compliant; that call is your institution's.
 
 The pack for the compose check's lab is committed: [summary](docs/review/check/summary.md) (not met first), [HIPAA](docs/review/check/hipaa.md), [NIST 800-171](docs/review/check/nist-800-171.md), [HECVAT answers](docs/review/check/hecvat-answers.md). Sign-on, key rotation and retention read not met until they land in 0.7.
+
+[`docs/accessibility.md`](docs/accessibility.md) is the accessibility statement: the WCAG 2.1 AA checks every `pnpm unit2` runs, their result, and the known exceptions, for a university's ADA Title II review or the accessibility section of a HECVAT.
 
 ## Working with a coding agent
 

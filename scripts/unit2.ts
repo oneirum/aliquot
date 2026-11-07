@@ -29,6 +29,14 @@
  *      message. A D1 hosted agent's test runs reach the worker: a roster id
  *      is refused there and the hosted model receives nothing, while a
  *      control message does reach it.
+ *   7. With the keyboard alone, in light and dark, a member asks on the chat
+ *      page, the live region announces the answer, Check verifies it, Open
+ *      record opens it and Download JSON saves it; every focus stop shows a
+ *      ring at least 2 px wide and 3:1 against the page.
+ *   8. axe-core (WCAG 2.0 and 2.1 A and AA) finds no serious or critical
+ *      violation on the chat page, a record, the runs list and the studio's
+ *      agent and knowledge base forms, in light and dark. The report is
+ *      .unit2/axe.json; docs/accessibility.md is the statement.
  *
  *   node scripts/unit2.ts [--headed] [--shots <dir>] [--proof <dir>]
  *
@@ -778,52 +786,56 @@ try {
     return page;
   }
 
-  await check("check 7: with the keyboard alone a member asks, hears the answer, checks and opens its record, and downloads the JSON, with focus visible at every stop", async () => {
-    const stops: string[] = [];
-    let page: Page | null = null;
-    const at = async (expect: RegExp, still: string): Promise<void> => {
-      const ring = await focusRing(page!);
-      assert.ok(ring, `focus is on an element at stop ${stops.length + 1}`);
-      assert.match(ring.element, expect);
-      assert.ok(ring.ring, `${ring.element} shows a focus ring`);
-      stops.push(`${ring.element} (${ring.ring})`);
-      await page!.screenshot({ path: join(work, `focus-${stops.length}-${still}.png`) });
-    };
-    page = await (await b.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, acceptDownloads: true })).newPage();
-    page.setDefaultTimeout(60000);
-    await page.goto(chatUrl);
-    await at(/^textarea#text "Your question"/, "question");
-    await page.keyboard.type(asked.question);
-    await page.keyboard.press("Enter");
-    await page.locator("[data-entry-done]").waitFor();
-    const heard = (await page.locator("#announce").textContent()) ?? "";
-    assert.match(heard, /^Answer: /, `the live region announces the answer: ${heard}`);
-    assert.ok(heard.includes(asked.expected), `the announcement carries the answer text: ${heard}`);
-    await page.keyboard.press("Shift+Tab");
-    await at(/^a "Open record"/, "open-record");
-    await page.keyboard.press("Shift+Tab");
-    await at(/^button "Check"/, "check");
-    await page.keyboard.press("Enter");
-    await page.locator('.witness[data-chain="verified"]').waitFor();
-    const verdict = await page.locator(".witness .status").innerText();
-    assert.match(verdict, /Verified: chain intact/);
-    await at(/^button "Check"/, "check-verified");
-    await page.keyboard.press("Tab");
-    await at(/^a "Open record"/, "open-record-again");
-    await Promise.all([page.waitForURL(/\/runs\/[0-9a-f-]{36}$/), page.keyboard.press("Enter")]);
-    const runId = page.url().split("/").pop()!;
-    await page.locator("#download:not([hidden])").waitFor();
-    for (let i = 0; i < 8 && (await page.evaluate("document.activeElement?.id")) !== "download"; i++) {
+  await check("check 7: with the keyboard alone a member asks, hears the answer, checks and opens its record, and downloads the JSON, with focus visible at every stop, light and dark", async () => {
+    const said: string[] = [];
+    let stops = 0;
+    for (const theme of ["light", "dark"] as const) {
+      const page = await (await b.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, acceptDownloads: true, colorScheme: theme })).newPage();
+      page.setDefaultTimeout(60000);
+      const ringed: string[] = [];
+      const at = async (expect: RegExp, still: string): Promise<void> => {
+        const ring = await focusRing(page);
+        assert.ok(ring, `${theme}: focus is on an element at stop ${ringed.length + 1}`);
+        assert.match(ring.element, expect);
+        assert.ok(ring.ring, `${theme}: ${ring.element} shows a focus ring at least 2 px wide and 3:1 against the page`);
+        ringed.push(`${ring.element} (${ring.ring})`);
+        await page.screenshot({ path: join(work, `focus-${theme}-${ringed.length}-${still}.png`) });
+      };
+      await page.goto(chatUrl);
+      await at(/^textarea#text "Your question"/, "question");
+      await page.keyboard.type(asked.question);
+      await page.keyboard.press("Enter");
+      await page.locator("[data-entry-done]").waitFor();
+      const heard = (await page.locator("#announce").textContent()) ?? "";
+      assert.match(heard, /^Answer: /, `the live region announces the answer: ${heard}`);
+      assert.ok(heard.includes(asked.expected), `the announcement carries the answer text: ${heard}`);
+      await page.keyboard.press("Shift+Tab");
+      await at(/^a "Open record"/, "open-record");
+      await page.keyboard.press("Shift+Tab");
+      await at(/^button "Check"/, "check");
+      await page.keyboard.press("Enter");
+      await page.locator('.witness[data-chain="verified"]').waitFor();
+      const verdict = await page.locator(".witness .status").innerText();
+      assert.match(verdict, /Verified: chain intact/);
+      await at(/^button "Check"/, "check-verified");
       await page.keyboard.press("Tab");
-      await at(/./, `record-${i + 1}`);
+      await at(/^a "Open record"/, "open-record-again");
+      await Promise.all([page.waitForURL(/\/runs\/[0-9a-f-]{36}$/), page.keyboard.press("Enter")]);
+      const runId = page.url().split("/").pop()!;
+      await page.locator("#download:not([hidden])").waitFor();
+      for (let i = 0; i < 8 && (await page.evaluate("document.activeElement?.id")) !== "download"; i++) {
+        await page.keyboard.press("Tab");
+        await at(/./, `record-${i + 1}`);
+      }
+      assert.match(ringed.at(-1)!, /^a#download "Download JSON"/, "Tab reaches Download JSON");
+      const download = page.waitForEvent("download");
+      await page.keyboard.press("Enter");
+      const json = JSON.parse(readFileSync(await (await download).path(), "utf8")) as { runId: string };
+      assert.equal(json.runId, runId, "the downloaded JSON is this run's record");
+      stops += ringed.length;
+      said.push(`${theme}: ${ringed.length} stops, ${ringed.join("; ")}; live region "${heard.slice(0, 60)}"; Check "${verdict}"; saved aliquot-run-${runId.slice(0, 8)}.json`);
     }
-    assert.match(stops.at(-1)!, /^a#download "Download JSON"/, "Tab reaches Download JSON");
-    const download = page.waitForEvent("download");
-    await page.keyboard.press("Enter");
-    const file = await (await download).path();
-    const json = JSON.parse(readFileSync(file, "utf8")) as { runId: string; chain: { firstBad: number | null } };
-    assert.equal(json.runId, runId, "the downloaded JSON is this run's record");
-    return `${stops.length} focus stops, each with a ring: ${stops.join("; ")}; live region said "${heard.slice(0, 80)}"; Check said "${verdict}"; Enter on Download JSON saved aliquot-run-${runId.slice(0, 8)}.json`;
+    return `${stops} focus stops, each with a ring at least 2 px and 3:1. ${said.join(" | ")}`;
   });
 
   await check("check 8: axe-core finds no serious or critical WCAG 2.1 A or AA violation on the chat page, a record, the runs list and the studio's agent and knowledge base forms, in light and dark", async () => {

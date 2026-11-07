@@ -23,7 +23,7 @@ No API key is needed. The checks use scripted fake models. Only the last check o
 | `pnpm lab0` | Before you finish. The first-use check on the synthetic lab. |
 | `pnpm walk:data` | After a change to `data_query`, `tables.ts`, `table-engine.py` or `Sandbox.aggregate`. Needs the sandbox image. |
 | `scripts/compose-check.sh` | After a change to `Dockerfile`, `compose*.yaml`, `deploy/`, the studio's collections or migrations, `scripts/backup.sh` or `restore.sh`, or PDF reading. Needs only Docker; builds the images, so it takes a few minutes. |
-| `pnpm unit2` | After a change to `packages/studio`, publish or roles. Needs Chromium: `pnpm exec playwright install chromium` once, or `LABH_CHROMIUM` set to a Chromium on disk. `--proof <dir>` also saves the agent and knowledge base pages in both themes, at 1440 and 390 wide, for a UI change. |
+| `pnpm unit2` | After a change to `packages/studio`, publish or roles. Needs Chromium: `pnpm exec playwright install chromium` once, or `LABH_CHROMIUM` set to a Chromium on disk. `--proof <dir>` also saves the agent and knowledge base pages in both themes, at 1440 and 390 wide, for a UI change. Also after any change to the web door's pages: checks 7 and 8 are the keyboard walk and the axe-core scan ([`docs/accessibility.md`](docs/accessibility.md)). |
 
 Each check script creates its own database (`labh_slice1`, `labh_unit3`, `labh_lab0`, `labh_unit2`) and writes logs to a dot folder of the same name.
 

@@ -7,11 +7,10 @@
  */
 
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import type { Page } from "playwright";
 
-const AXE = readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
-export const AXE_VERSION = (JSON.parse(readFileSync(createRequire(import.meta.url).resolve("axe-core/package.json"), "utf8")) as { version: string }).version;
+const AXE = readFileSync(new URL(import.meta.resolve("axe-core/axe.min.js")), "utf8");
+export const AXE_VERSION = (JSON.parse(readFileSync(new URL(import.meta.resolve("axe-core/package.json")), "utf8")) as { version: string }).version;
 export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] as const;
 
 export interface Violation {
