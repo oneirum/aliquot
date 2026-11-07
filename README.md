@@ -109,6 +109,38 @@ A lab answers the same questions every week. Where the freezer log is, how a var
 - **Coverage before publish.** A knowledge base lists the questions it must answer. If the documents do not support one, publish is refused and names the gap, unless a publisher overrides it with a written note.
 - **A record for every answer.** Each run is an append-only, hash-chained log of every model call, tool call, CLI session and refusal. A crashed run resumes from its record, and the record is what a reviewer reads later: it opens with a summary of what the run read, called and refused, and downloads as JSON. Each run names the hash of the agent version that answered.
 
+## Data classes
+
+A lab's data is not one kind of restricted. Participant ids, PHI, dbGaP releases and export-controlled drawings each come with their own rules, and `lab.toml` says what they are. Every message and every knowledge base source is put in one class before any model sees it, and the class decides three things:
+
+- **Which model may read it.** `model_tier = "hosted"` (an approved hosted model), `"local"` (only a model on lab or institution hardware), or `"none"` (no model: the door refuses it before a run exists, and a knowledge base source in it is refused before the compiler is called).
+- **What the record keeps of a refused message.** `record = "text"`, `"hash"` or `"none"`, with `retention_days` for how long.
+- **What the member is told.** Every refusal names the class, the detector that found it and the rule it applied, in the chat, in Slack and in the record:
+
+```text
+Not sent. Data class phi, found by detector phi-name; rule model_tier = "none". This message carries a HIPAA
+identifier. Remove it, or ask the lab's honest broker for a de-identified extract. Recorded as audit event 2.
+```
+
+```toml
+[classes.phi]
+model_tier = "none"
+record = "hash"
+retention_days = 30
+detectors = ["hipaa-safe-harbor"]   # names, addresses, dates, ages over 89, fax, plan, account, licence, vehicle, device, URL, IP, biometric ids, SSN, MRN
+
+[classes.controlled_access]         # NIH controlled-access data: the DUC keeps it out of AI tools
+model_tier = "none"
+detectors = ["dua-marker"]          # "DUA: ..." lines, dbGaP phs accessions, EGA ids
+
+[classes.export_controlled]
+model_tier = "local"
+residency = "us"                    # read only by an endpoint whose lab.toml entry says region = "us"
+detectors = ["export-marker"]       # ITAR, EAR99, ECCN, USML categories
+```
+
+With no `[classes]` table a lab has the five built-in classes, which behave exactly as Aliquot did before classes: `public` (D0), `internal` (D1), `confidential` (D2: phone numbers and email addresses), `restricted` (D3, local only: SSNs, MRNs, dates of birth, the lab's participant id patterns) and `review-confidential` (R). Each class sits at one level of the D0 to R lattice, and the level is what every egress decision reads, so a class cannot loosen what the lattice enforces: a `hosted` class must be D0 to D2, a `local` one D3 or R, and `lab.toml` fails to load otherwise. The studio's knowledge base page lists the classes and which published entries carry each. `pnpm walk:policy` asks one question per class on the synthetic lab and prints what the member reads and how many requests reached each model; the table for a review is in [`docs/for-research-it-and-irb.md`](docs/for-research-it-and-irb.md#classes-a-lab-declares).
+
 ## The chat page and the record
 
 Members ask on the chat page. An answer names the entry it came from and says what the run read and how long it took. Answers keep their lists, headings and code blocks, and no model text is ever parsed as HTML. A message with a participant id is refused before anything is sent, and the page says why.

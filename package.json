@@ -18,6 +18,7 @@
     "aliquot": "node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts",
     "aliquot:init": "mkdir -p config && node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net --allow-fs-write=config/lab.toml --allow-fs-write=.env packages/core/bin/aliquot.ts init",
     "demo:agent": "node scripts/agent-demo.ts",
+    "walk:policy": "node scripts/walk-policy.ts",
     "up:tmux": "scripts/tmux.sh"
   },
   "devDependencies": {
