@@ -19,6 +19,7 @@ import type { ResolvedAgent } from "../agent.ts";
 import { describeRefusal, join, Labelled, type DataClass } from "../dataclass.ts";
 import type { ChatPart, ModelGateway, Prompt } from "../gateway.ts";
 import type { KbReader } from "../kb.ts";
+import { EMPTY_DIRECTORY, runViewer } from "../members.ts";
 import { buildPrompt, type LoopDeps } from "../loop.ts";
 import { describeFailure, fold, MAX_ATTEMPTS, type ConfinementCheck, type RunEvent, type RunJournal, type RunState, type StoredEvent } from "../record.ts";
 import type { ToolRunner } from "../tools.ts";
@@ -155,7 +156,7 @@ async function runAttempt(
   const backend = cli.backend.id;
   const kind = KINDS[cli.backend.kind];
   const state = fold(journal.events());
-  const prompt = render(await buildPrompt(state, agent, journal, { kb: sd.kb, tools: sd.tools }, false));
+  const prompt = render(await buildPrompt(state, agent, journal, { kb: sd.kb, tools: sd.tools, directory: deps.directory }, false));
   const admitted = sd.gateway.admit(prompt, backend);
   if (!admitted.allow) {
     await journal.append({ t: "egress.refused", destination: `model:${backend}`, payload: prompt.cls, refusal: admitted.refusal });
@@ -200,7 +201,7 @@ async function runAttempt(
     if (!agent.tools.some((t) => t.name === name)) return notice(`No tool named ${name} is available.`);
     const callId = `s${attempt}-${calls}`;
     const input = await journal.put(Labelled.derive(args, [], "agent:tool-args", sessionClass));
-    await sd.tools.invoke(journal, { callId, tool: name, attempt: 1, input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox }, signal.signal);
+    await sd.tools.invoke(journal, { callId, tool: name, attempt: 1, input }, { knowledgeBases: agent.knowledgeBases, retrieval: agent.retrieval, sandbox: agent.sandbox, viewer: runViewer(journal.events(), deps.directory ?? EMPTY_DIRECTORY) }, signal.signal);
     const done = terminal(journal.events(), callId);
     let content: Labelled<string>;
     if (done?.t === "tool.completed") {

@@ -98,7 +98,7 @@ test("a compile produces entries with per-fact sources, the joined class, and a 
   assert.equal(compiler.requests, 3 + 6, "three sources and six coverage judgments, one call each");
 
   const reader = createKbReader(storedSnapshots(db, store));
-  assert.deepEqual((await reader.search(s.id, "freezer", 1)).value.map((h) => h.path), ["sop/storage.md"]);
+  assert.deepEqual((await reader.search(s.id, "freezer", 1, "all")).value.map((h) => h.path), ["sop/storage.md"]);
 
   assert.deepEqual(await publishSnapshot(db, store.address, s.id, "test"), { ok: false, gaps: ["What is the parking reimbursement rate for visitors?"] });
   assert.equal((await db.query("select 1 from kb_heads")).rowCount, 0);

@@ -27,9 +27,9 @@ test("a saved snapshot reads back from Postgres and the store with the same outl
   const stored = createKbReader(storedSnapshots(db, store));
   const memory = createKbReader(memorySnapshots([loaded]));
   const id = loaded.snapshot.id;
-  assert.deepEqual((await stored.outline(id)).value, (await memory.outline(id)).value);
-  assert.deepEqual((await stored.search(id, "participant id data class", 3)).value, (await memory.search(id, "participant id data class", 3)).value);
-  const read = await stored.read(id, ["equipment.md"], 15_000);
+  assert.deepEqual((await stored.outline(id, "all")).value, (await memory.outline(id, "all")).value);
+  assert.deepEqual((await stored.search(id, "participant id data class", 3, "all")).value, (await memory.search(id, "participant id data class", 3, "all")).value);
+  const read = await stored.read(id, ["equipment.md"], 15_000, "all");
   assert.deepEqual(read.value.entries.map((e) => e.hash), [loaded.snapshot.entries["equipment.md"]]);
   assert.equal(read.cls, "D1");
   assert.deepEqual(await loadManifest(db, store.address, id), loaded.snapshot);

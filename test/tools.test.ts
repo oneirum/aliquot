@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { DEFAULT_POLICY, Labelled } from "../packages/core/src/dataclass.ts";
-import { createKbReader, memorySnapshots, snapshotFromFixture } from "../packages/core/src/kb.ts";
+import { createKbReader, memorySnapshots, NO_MEMBER, snapshotFromFixture } from "../packages/core/src/kb.ts";
 import { builtinTools, createHttpEgress, createToolRunner, defineTool, kbSearch, MAX_REDIRECTS, registryOf, type ToolManifest } from "../packages/core/src/tools.ts";
 import type { RunId } from "../packages/core/src/record.ts";
 import { contentHash, keyedAddresser, type ToolHash } from "../packages/core/src/hash.ts";
@@ -59,7 +59,7 @@ const registry = registryOf([
   { manifest: touchy as ToolManifest<unknown, unknown>, hash: "y".repeat(64) as ToolHash, owner: "test" },
 ]);
 const runner = createToolRunner(registry, { http: createHttpEgress({ policy: DEFAULT_POLICY, hosts: { [host]: "lab" }, fetchImpl: fetch }), kb: createKbReader(memorySnapshots([loaded])) });
-const env = { knowledgeBases: [{ kbId: "handbook", snapshot: loaded.snapshot.id, cls: loaded.snapshot.cls }], retrieval: { algorithm: "bm25-v1" as const, readCapTokens: 15_000 }, sandbox: null };
+const env = { knowledgeBases: [{ kbId: "handbook", snapshot: loaded.snapshot.id, cls: loaded.snapshot.cls }], retrieval: { algorithm: "bm25-v1" as const, readCapTokens: 15_000 }, sandbox: null, viewer: NO_MEMBER };
 const RUN = "00000000-0000-4000-8000-000000000002" as RunId;
 const signal = new AbortController().signal;
 

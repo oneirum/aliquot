@@ -52,6 +52,8 @@ export type AuditEvent =
     }
   /** A knowledge base source in a class no model may read, refused before its compile job existed. */
   | { readonly t: "kb.source-refused"; readonly kbId: string; readonly sourceId: string; readonly dataClass: string; readonly level: DataClass; readonly rule: string; readonly classRule: string; readonly detectors: readonly string[] }
+  /** A source sync (sources.ts) found changed documents and wrote a new snapshot. Counts only: entry paths are file names, which `kb diff` shows. */
+  | { readonly t: "kb.synced"; readonly kbId: string; readonly snapshot: SnapshotId; readonly previous: SnapshotId | null; readonly added: number; readonly removed: number; readonly changed: number; readonly skipped: number }
   | { readonly t: "agent.published"; readonly agentId: AgentId; readonly version: AgentVersionHash; readonly previous: AgentVersionHash | null; readonly draftHash: Sha256; readonly changelog: string }
   /** A data steward's `aliquot keys rotate`, `aliquot keys reencrypt` and `aliquot retention --apply` (steward.ts). */
   | { readonly t: "keys.rotated"; readonly current: string; readonly classKeys: Readonly<Partial<Record<DataClass, string>>>; readonly held: readonly string[] }

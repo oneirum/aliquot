@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile } from "node:fs/promises";
 import { DEFAULT_POLICY, Labelled, type DataClass } from "../packages/core/src/dataclass.ts";
-import { createKbReader, memorySnapshots } from "../packages/core/src/kb.ts";
+import { createKbReader, memorySnapshots, NO_MEMBER } from "../packages/core/src/kb.ts";
 import { createHttpEgress, createToolRunner, registryOf, type ToolManifest } from "../packages/core/src/tools.ts";
 import type { CallFailure, RunEvent, RunId } from "../packages/core/src/record.ts";
 import type { ToolHash } from "../packages/core/src/hash.ts";
@@ -54,7 +54,7 @@ export async function fakeApi(routes: Readonly<Record<string, Route>>): Promise<
       });
       const j = memoryJournal("00000000-0000-4000-8000-0000000000aa" as RunId);
       const ref = await j.put(Labelled.stamp(input, opts.inputClass ?? "D0", "test"));
-      await runner.invoke(j, { callId: "c1", tool: manifest.name, attempt: 1, input: ref }, { knowledgeBases: [], retrieval: { algorithm: "bm25-v1", readCapTokens: 1000 }, sandbox: null }, new AbortController().signal);
+      await runner.invoke(j, { callId: "c1", tool: manifest.name, attempt: 1, input: ref }, { knowledgeBases: [], retrieval: { algorithm: "bm25-v1", readCapTokens: 1000 }, sandbox: null, viewer: NO_MEMBER }, new AbortController().signal);
       const last = j.log.at(-1)!;
       return {
         events: j.log.map((e) => e.t),

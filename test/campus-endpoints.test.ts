@@ -271,7 +271,7 @@ test("a knowledge base with one PHI entry marks every search and read of it; an 
   const plain = snapshotFromFixture(fixture, address);
   const withPhi = snapshotFromFixture({ ...fixture, entries: [...fixture.entries, { path: "clinic/visit.md", title: "Visit log", body: "MRN 0012345 seen on Tuesday.", facts: [] }] }, address);
   const reader = createKbReader(memorySnapshots([plain, withPhi]));
-  assert.deepEqual((await reader.search(plain.snapshot.id, "office hours", 3)).marks, []);
-  assert.deepEqual((await reader.search(withPhi.snapshot.id, "office hours", 3)).marks, ["phi"]);
-  assert.deepEqual((await reader.outline(withPhi.snapshot.id)).marks, ["phi"]);
+  assert.deepEqual((await reader.search(plain.snapshot.id, "office hours", 3, "all")).marks, []);
+  assert.deepEqual((await reader.search(withPhi.snapshot.id, "office hours", 3, "all")).marks, ["phi"]);
+  assert.deepEqual((await reader.outline(withPhi.snapshot.id, "all")).marks, ["phi"]);
 });

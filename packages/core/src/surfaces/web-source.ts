@@ -12,7 +12,7 @@
  * the run is the person's own before either route runs.
  */
 
-import type { KbReader, HashedEntry } from "../kb.ts";
+import type { KbReader, HashedEntry, Viewer } from "../kb.ts";
 import type { SnapshotId } from "../hash.ts";
 import type { DataClass } from "../dataclass.ts";
 import type { StoredEvent } from "../record.ts";
@@ -25,7 +25,7 @@ export type CitedEntry =
   | { readonly t: "missing"; readonly path: string };
 
 /** The entry at path that the run retrieved: same path, and its hash in the record. */
-export async function citedEntry(events: readonly StoredEvent[], path: string, kb: KbReader): Promise<CitedEntry> {
+export async function citedEntry(events: readonly StoredEvent[], path: string, kb: KbReader, viewer: Viewer): Promise<CitedEntry> {
   const retrieved = new Map<SnapshotId, Set<string>>();
   for (const e of events) {
     if (e.event.t !== "tool.completed") continue;
@@ -37,10 +37,10 @@ export async function citedEntry(events: readonly StoredEvent[], path: string, k
   }
   for (const [snapshot, hashes] of retrieved) {
     if (!(await kb.has(snapshot))) continue;
-    const read = await kb.read(snapshot, [path], Number.MAX_SAFE_INTEGER);
+    const read = await kb.read(snapshot, [path], Number.MAX_SAFE_INTEGER, viewer);
     const entry = read.value.entries[0];
     if (!entry || !hashes.has(entry.hash)) continue;
-    const outline = await kb.outline(snapshot);
+    const outline = await kb.outline(snapshot, viewer);
     return { t: "entry", kb: outline.value.title, snapshot, cls: read.cls, entry };
   }
   return { t: "missing", path };

@@ -32,6 +32,23 @@ export type RunId = string & { readonly __run: true };
 /** `${surface}:${channel}:${threadId}`. Runs in one thread are serialized by the claim query. */
 export type ThreadKey = string & { readonly __thread: true };
 
+/** The document version behind a synced entry a retrieval returned: which source, which file, which version, as of when. */
+export interface CitedVersion {
+  readonly path: string;
+  readonly source: string;
+  readonly location: string;
+  readonly version: Sha256;
+  readonly modifiedAt: string;
+}
+
+/** One snapshot's entries a kb tool returned. versions is set only for entries a source sync produced (sources.ts). */
+export interface Retrieved {
+  readonly snapshot: SnapshotId;
+  readonly entries: readonly EntryHash[];
+  readonly truncated: boolean;
+  readonly versions?: readonly CitedVersion[];
+}
+
 export interface PayloadRef {
   readonly hash: PayloadHash;
   readonly cls: DataClass;
@@ -155,7 +172,7 @@ export type RunEvent =
       readonly attempt: number;
       readonly output: PayloadRef;
       /** Set by kb_read and kb_search: every entry returned, cited or not, per snapshot touched. */
-      readonly retrieved?: readonly { readonly snapshot: SnapshotId; readonly entries: readonly EntryHash[]; readonly truncated: boolean }[];
+      readonly retrieved?: readonly Retrieved[];
       readonly ms: number;
     }
   | { readonly t: "tool.failed"; readonly callId: string; readonly attempt: number; readonly failure: CallFailure; readonly retryable: boolean }

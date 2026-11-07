@@ -177,27 +177,27 @@ export function scopeKb(kb: KbReader, kbOf: (snapshot: SnapshotId) => string | u
     changed || floor !== "D0" ? Labelled.derive(value, [orig], `dua:${kbOf(snapshot) ?? snapshot}`, floor) : orig;
   return {
     has: (snapshot) => kb.has(snapshot),
-    async outline(snapshot) {
-      const o = await kb.outline(snapshot);
+    async outline(snapshot, viewer) {
+      const o = await kb.outline(snapshot, viewer);
       const refused = new Set(refusedOf(snapshot, o.value.paths).map((w) => w.path));
       const paths = o.value.paths.filter((p) => !refused.has(p));
       return scoped<Outline>(o, { ...o.value, paths }, refused.size > 0, levelOf(snapshot, paths), snapshot);
     },
-    async search(snapshot, query, k) {
+    async search(snapshot, query, k, viewer) {
       // Ask for enough hits that the k best open ones survive the filter, and count only refusals in the unfiltered top k.
-      const all = (await kb.outline(snapshot)).value.paths;
+      const all = (await kb.outline(snapshot, viewer)).value.paths;
       const extra = refusedOf(snapshot, all).length;
-      const hits = await kb.search(snapshot, query, k + extra);
+      const hits = await kb.search(snapshot, query, k + extra, viewer);
       const refused = refusedOf(snapshot, hits.value.slice(0, k).map((h) => h.path));
       withheld.push(...refused);
       const shown = hits.value.filter((h) => judge(snapshot, h.path).t !== "refused").slice(0, k);
       return scoped<readonly SearchHit[]>(hits, shown, extra > 0, levelOf(snapshot, shown.map((h) => h.path)), snapshot);
     },
-    async read(snapshot, paths, cap) {
+    async read(snapshot, paths, cap, viewer) {
       const refused = refusedOf(snapshot, [...new Set(paths)]);
       withheld.push(...refused);
       const gone = new Set(refused.map((w) => w.path));
-      const r = await kb.read(snapshot, paths.filter((p) => !gone.has(p)), cap);
+      const r = await kb.read(snapshot, paths.filter((p) => !gone.has(p)), cap, viewer);
       return scoped<ReadResult>(r, r.value, gone.size > 0, levelOf(snapshot, r.value.entries.map((e) => e.path)), snapshot);
     },
   };

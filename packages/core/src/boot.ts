@@ -7,6 +7,7 @@
 
 import { bootShared, type BootOptions, type SharedCore } from "./boot-shared.ts";
 import { createGateway, type ModelGateway } from "./gateway.ts";
+import { directoryFromConfig, type MemberDirectory } from "./members.ts";
 import { createKbReader, firstOf, memorySnapshots, storedSnapshots, type KbReader } from "./kb.ts";
 import { createToolRunner, type ToolRunner } from "./tools.ts";
 import { contactFromEnv } from "./config.ts";
@@ -22,6 +23,8 @@ export interface Core extends SharedCore {
   readonly tools: ToolRunner;
   readonly sandbox: Sandbox | null;
   readonly surfaces: (id: string) => Surface;
+  /** Groups by member, for entry scopes. The stand-in from [directory] until the identity unit's directory replaces it. */
+  readonly directory: MemberDirectory;
 }
 
 export async function boot(configPath: string, env: NodeJS.ProcessEnv = process.env, options: BootOptions = {}): Promise<Core> {
@@ -36,6 +39,7 @@ export async function boot(configPath: string, env: NodeJS.ProcessEnv = process.
     kb,
     tools: createToolRunner(shared.registry, { http: shared.http, kb, contact: contactFromEnv(shared.config, env), datasets: shared.config.datasets, duas: shared.config.duas, sandbox }),
     sandbox,
+    directory: directoryFromConfig(shared.config.directory),
     surfaces: (id) => {
       const surface = served.get(id);
       if (surface) return surface;

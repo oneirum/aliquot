@@ -9,7 +9,7 @@ import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_POLICY, Labelled, type DataClass } from "../packages/core/src/dataclass.ts";
-import { createKbReader, memorySnapshots } from "../packages/core/src/kb.ts";
+import { createKbReader, memorySnapshots, NO_MEMBER } from "../packages/core/src/kb.ts";
 import { builtinTools, createHttpEgress, createToolRunner, registryOf, type ToolEnv } from "../packages/core/src/tools.ts";
 import { createSandbox, readTar, TAR_ENTRIES_CAP } from "../packages/core/src/sandbox.ts";
 import type { Dataset, SandboxConfig } from "../packages/core/src/config.ts";
@@ -58,6 +58,7 @@ const env: ToolEnv = {
   knowledgeBases: [],
   retrieval: { algorithm: "bm25-v1", readCapTokens: 1000 },
   sandbox: { mountCeiling: "D2", mounts: ["visits", "cohort", "restricted", "linked"] },
+  viewer: NO_MEMBER,
 };
 
 async function runCode(input: { language: "r" | "python"; code: string; datasets?: string[] }, inputClass: DataClass = "D0", runner = runnerWith()) {

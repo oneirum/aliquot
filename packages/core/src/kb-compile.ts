@@ -222,7 +222,9 @@ async function sourceLevel(def: KbDefinition, sourceId: string, text: string, de
   throw new SourceClassRefused(sourceId, `data class ${classLabel(rule)}${detectors.length ? ` (detector ${detectors.join(", ")})` : ""}; rule ${classRule}. ${why}`, c.class);
 }
 
-async function readFileSource(name: string, files: SourceFiles, pdf: SourceDeps["pdf"]): Promise<string> {
+
+/** One document file to text: Markdown and plain text as is, Word through docx.ts, a PDF only through the sandbox reader. */
+export async function readFileSource(name: string, files: SourceFiles, pdf: SourceDeps["pdf"]): Promise<string> {
   const ext = extname(name).toLowerCase();
   if (ext === ".docx") return docxToMarkdown(await files(name), name);
   if (ext === ".pdf") {

@@ -252,3 +252,24 @@ fixtures = ["fixtures/kb.json"]
 # [anchor]
 # path = "anchors.log"                 # relative to this file unless absolute; ship it to write-once storage
 # every_minutes = 15
+# Document sources: where the lab's documents already live (docs/sources.md). `pnpm sources --watch` keeps the
+# knowledge base in step: a folder on every change, Drive on its poll. Scope says which members may see what.
+# [sources.box-sops]
+# kind = "folder"                  # a Box, OneDrive or Google Drive desktop sync folder
+# path = "/Users/labadmin/Library/CloudStorage/Box-Box/Lab SOPs"
+# kb = "lab-docs"
+# class = "D1"
+# scope = ["lab"]                  # or ["group:cryo"], ["member:ana"]
+#
+# [sources.lab-drive]
+# kind = "gdrive"                  # scope comes from each file's Drive permissions
+# folder_id = "1AbC..."
+# token_env = "LAB_DRIVE_TOKEN"
+# kb = "lab-docs"
+# class = "D1"
+#
+# Until member sign-on lands: groups by member id, and the emails Drive permissions name.
+# [directory.groups]
+# cryo = ["ana"]
+# [directory.emails]
+# "cryo-group@lab.example.edu" = "group:cryo"
