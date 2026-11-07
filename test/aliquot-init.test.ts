@@ -172,3 +172,29 @@ test("--anchor-key writes a new Ed25519 key, mode 600, and an [anchor] table; it
   assert.match(again.stderr, /init never replaces an anchor key/);
   assert.equal(readFileSync(key, "utf8"), before);
 });
+
+test("init asks for the campus last and writes its preset, which loads with the campus tiers on every class", async () => {
+  const l = lab();
+  const r = init(l, answers("", "", "", "", "", "P-00123", "", "n", "stanford", "uw-madison"));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Answer uw-madison, umich, harvard or none\. Try again\./);
+  assert.match(readFileSync(l.cfg, "utf8"), /^preset = "uw-madison"$/m);
+  const config = await loadConfig(l.cfg);
+  assert.equal(config.preset?.campus, "UW-Madison");
+  assert.ok(config.classes.classes.every((c) => c.campusTier));
+});
+
+test("init --yes --campus writes the preset, and no answer to the campus question writes none", async () => {
+  const a = lab();
+  const r = init(a, "", ["--yes", "--sample", "P-00123", "--campus", "harvard"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal((await loadConfig(a.cfg)).preset?.campus, "Harvard");
+  const b = lab();
+  assert.equal(init(b, answers("", "", "", "", "", "P-00123", "", "n")).status, 0);
+  assert.doesNotMatch(readFileSync(b.cfg, "utf8"), /^preset/m);
+  const c = lab();
+  const bad = init(c, "", ["--yes", "--sample", "P-00123", "--campus", "mit"]);
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /--campus mit is not a campus/);
+  assert.equal(existsSync(c.cfg), false);
+});

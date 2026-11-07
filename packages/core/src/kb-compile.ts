@@ -34,7 +34,7 @@ import { appendAudit, auditRecorder, type AuditEvent, type CallContext } from ".
 import { DATA_CLASSES, join, Labelled, MARKS, type DataClass, type EgressRefusal } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { classifyText, marksIn as marksOfText } from "./gate.ts";
-import { classById, classify, residencyRuleText, ruleText, type Policy } from "./policy.ts";
+import { classById, classify, classLabel, residencyRuleText, ruleText, type Policy } from "./policy.ts";
 import { describeOutcome, Prompt, type ExactModelId, type ModelGateway, type ModelResult, type ModelTarget } from "./gateway.ts";
 import { contentHash, type Addresser, type PayloadHash, type Sha256, type SnapshotId } from "./hash.ts";
 import { buildBm25, hashEntry, LICENCES, loadManifest, saveSnapshot, searchBm25, snapshotId, SOURCE_KINDS, type CoverageResult, type HashedEntry, type KbEntry, type KbSnapshot, type LoadedSnapshot, type SourceRef } from "./kb.ts";
@@ -219,7 +219,7 @@ async function sourceLevel(def: KbDefinition, sourceId: string, text: string, de
   const classRule = rule.modelTier === "none" ? ruleText(rule) : residencyRuleText(rule);
   await appendAudit(deps.db, deps.actor, { t: "kb.source-refused", kbId: def.kbId, sourceId, dataClass: c.class, level: c.level, rule: c.rule, classRule, detectors });
   const why = rule.modelTier === "none" ? "No model may read it, so it cannot be compiled into a knowledge base." : `The compiler's endpoint ${endpointId} ${region ? `is in region ${region}` : "names no region"}.`;
-  throw new SourceClassRefused(sourceId, `data class ${c.class}${detectors.length ? ` (detector ${detectors.join(", ")})` : ""}; rule ${classRule}. ${why}`, c.class);
+  throw new SourceClassRefused(sourceId, `data class ${classLabel(rule)}${detectors.length ? ` (detector ${detectors.join(", ")})` : ""}; rule ${classRule}. ${why}`, c.class);
 }
 
 async function readFileSource(name: string, files: SourceFiles, pdf: SourceDeps["pdf"]): Promise<string> {

@@ -1,0 +1,64 @@
+# UW-Madison's data tiers (policy UW-504: Public, Internal, Sensitive, Restricted) mapped to Aliquot's data classes.
+# lab.toml takes it with preset = "uw-madison"; the lab's own [classes.<id>] keys win over the ones here.
+#
+# UW-Madison is moving to the Universities of Wisconsin low, medium and high risk categories (SYS-1031) on
+# 1 January 2027, and says the mapping from UW-504 "will not be a one-to-one mapping"
+# (https://data.wisc.edu/data-governance/data-classification/). Revisit this file then.
+
+[preset]
+campus = "UW-Madison"
+scheme = "UW-504"
+tiers = ["Public", "Internal", "Sensitive", "Restricted"]
+source = "https://policy.wisc.edu/library/UW-504"
+note = "A starting point for your data steward, not UW-Madison's official interpretation. Data stewards classify the data in their domain; check each line with yours before the lab relies on it."
+
+# The five built-in classes. Their level and model tier stay Aliquot's; only the campus tier is added.
+
+[classes.public]
+campus_tier = "Public"
+source = "https://data.wisc.edu/data-governance/data-classification/"
+
+[classes.internal]
+campus_tier = "Internal"    # "all Institutional Data that is not explicitly classified ... should be treated as Internal"
+source = "https://data.wisc.edu/data-governance/data-classification/"
+
+[classes.confidential]
+campus_tier = "Sensitive"   # members' contact details, which only an approved model reads
+source = "https://data.wisc.edu/data-governance/data-classification/"
+
+[classes.restricted]
+campus_tier = "Sensitive"   # coded participant ids: identifiable research data that no law names; PHI and SSNs are in phi
+source = "https://it.wisc.edu/guides/handling-sensitive-university-data"
+
+[classes.review-confidential]
+campus_tier = "Sensitive"   # the generative AI policy names "material under confidential review"
+source = "https://it.wisc.edu/generative-ai-uw-madison-use-policies/"
+
+# Restricted: "protection of the data is required by law or regulation". The generative AI policy forbids it in any
+# AI tool "unless it has undergone appropriate internal review", so no model reads these here until that review.
+
+[classes.phi]
+campus_tier = "Restricted"  # PHI under HIPAA and PII under Wis. Stat. 134.98, named in UW-504
+source = "https://policy.wisc.edu/library/UW-504"
+model_tier = "none"
+record = "hash"
+retention_days = 30
+detectors = ["phi-name", "phi-address", "phi-zip", "phi-date", "phi-age", "phi-fax", "phi-health-plan", "phi-account", "phi-license", "phi-vehicle", "phi-device", "phi-ip", "phi-biometric", "ssn", "mrn", "dob", "card-number"]
+message = "This message carries a HIPAA identifier or personal information UW-504 calls Restricted. Remove it, or ask the lab's honest broker for a de-identified extract."
+
+[classes.controlled_access]
+campus_tier = "Restricted"  # NIH Data Use Certification terms; NIH says sharing it with generative AI breaks them (NOT-OD-25-081)
+source = "https://grants.nih.gov/grants/guide/notice-files/NOT-OD-25-081.html"
+model_tier = "none"
+record = "hash"
+retention_days = 365
+detectors = ["dua-marker"]
+message = "This message names a controlled-access dataset. Its data use certification keeps it out of AI tools; work with it on the lab's analysis server."
+
+[classes.export_controlled]
+campus_tier = "Restricted"  # the generative AI policy names "information subject to export control"
+source = "https://it.wisc.edu/generative-ai-uw-madison-use-policies/"
+model_tier = "local"
+residency = "us"
+detectors = ["export-marker"]
+message = "This message carries export-controlled material, which stays on lab or institution systems in the United States."

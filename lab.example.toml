@@ -173,6 +173,11 @@ contact_email_env = "LABH_CONTACT_EMAIL"
 review_confidential = "refuse"           # or "lab-only"
 participant_id_patterns = ["\\bP-\\d{5}\\b"]   # anything matching is D3
 
+# Your campus's data tiers beside each class: "uw-madison", "umich", "harvard", or a path to your own copy of one.
+# presets/<id>.toml is a starting point for your data steward; this file's [classes] keys win over it. This key goes
+# at the top of lab.toml, before any table.
+# preset = "uw-madison"
+
 # Data classes on top of the five built-ins (public, internal, confidential, restricted, review-confidential).
 # See README "Data classes" and fixtures/policy/classes.toml for PHI, controlled-access and export-controlled examples.
 # [classes.phi]

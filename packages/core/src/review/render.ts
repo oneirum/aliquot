@@ -42,7 +42,28 @@ function frameworkFile(fw: Framework, rows: readonly Row[], src: PackSource): st
   ].join("\n");
 }
 
-function summaryFile(rows: readonly Row[], src: PackSource): string {
+const WHO = { hosted: "an approved hosted model", local: "a lab or institution model only", none: "no model: refused at the door" } as const;
+
+/** The lab's data classes, with the campus tier beside each under a preset, so a reviewer reads them in the campus's words. */
+function classesSection(config: ReviewConfig): string[] {
+  const p = config.preset;
+  const rows = config.classes.classes.map((c) => {
+    const tier = c.campusTier ? `| ${cell(`${c.campusTier.campus} ${c.campusTier.tier}`)} ` : "";
+    const keeps = c.modelTier === "none" ? `${c.record}${c.retentionDays === null ? "" : `, ${c.retentionDays} days`}` : "text";
+    return `| \`${c.id}\` ${tier}| ${c.level} | ${WHO[c.modelTier]}${c.residency ? `, region ${c.residency}` : ""} | ${keeps} |`;
+  });
+  return [
+    "## Data classes",
+    "",
+    ...(p ? [`Campus tiers from preset \`${p.id}\` (${cell(p.scheme)}, ${p.source}). ${cell(p.note)}`, ""] : []),
+    `| Class ${p ? "| Campus tier " : ""}| Level | Who may read it | Record of a refused message |`,
+    `|---|${p ? "---|" : ""}---|---|---|`,
+    ...rows,
+    "",
+  ];
+}
+
+function summaryFile(rows: readonly Row[], src: PackSource, config: ReviewConfig): string {
   const count = (fw: Framework, s: Status) => rows.filter((r) => r.control.framework === fw && r.assessment.status === s).length;
   const notMet = rows.filter((r) => r.assessment.status === "not-met");
   return [
@@ -59,6 +80,7 @@ function summaryFile(rows: readonly Row[], src: PackSource): string {
     "",
     "Partly and lab's responsibility rows say, on each row, which part is Aliquot's and which is the lab's.",
     "",
+    ...classesSection(config),
   ].join("\n");
 }
 
@@ -66,7 +88,7 @@ function summaryFile(rows: readonly Row[], src: PackSource): string {
 export function renderPack(config: ReviewConfig, src: PackSource): Readonly<Record<string, string>> {
   const rows = assessAll(config);
   return {
-    "summary.md": summaryFile(rows, src),
+    "summary.md": summaryFile(rows, src, config),
     ...Object.fromEntries(FRAMEWORKS.map((fw) => [PACK_FILES[fw], frameworkFile(fw, rows, src)])),
   };
 }
