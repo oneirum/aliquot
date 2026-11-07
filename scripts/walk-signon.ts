@@ -197,8 +197,8 @@ await step("Member A asks and gets a cited answer", async () => {
 
 await step("Member A clicks Source and reads the entry", async () => {
   const path = encodeURIComponent("sop-freezer.md#freezer-alarm");
-  const chip = (await json(ada, `/runs/${adaRun}/source.json?path=${path}`)) as { open: boolean; title: string; cls: string; retrieved: boolean };
-  expect(chip.open && chip.retrieved, `the chip opens a retrieved entry: ${JSON.stringify(chip)}`);
+  const chip = (await json(ada, `/runs/${adaRun}/source.json?path=${path}`)) as { found: boolean; open: boolean; title: string; cls: string };
+  expect(chip.found && chip.open, `the chip opens a retrieved entry: ${JSON.stringify(chip)}`);
   const page = await ada.fetch(`${door}/runs/${adaRun}/source?path=${path}`);
   const html = await page.text();
   expect(page.status === 200 && html.includes(`<h1>${chip.title}</h1>`) && html.includes("Retrieved by this run"), `expected the entry page, got ${page.status}`);
@@ -251,11 +251,11 @@ await step("Member A asks about the roster; the D3 entry's Source chip says who 
   expect(source === "roster.md#lab0-0004", `expected Source: roster.md#lab0-0004, got ${source}`);
   const path = encodeURIComponent(source!);
   const chip = (await json(ada, `/runs/${restrictedRun}/source.json?path=${path}`)) as { open: boolean; cls: string; who: string };
-  expect(!chip.open && chip.cls === "D3" && chip.who === "the data steward or the PI", `chip: ${JSON.stringify(chip)}`);
+  expect(!chip.open && chip.cls === "D3" && chip.who === "the data steward or the PI" && !("title" in chip), `chip: ${JSON.stringify(chip)}`);
   const page = await ada.fetch(`${door}/runs/${restrictedRun}/source?path=${path}`);
   const html = await page.text();
   expect(page.status === 403 && html.includes("the data steward or the PI can") && !html.includes("withdrawn 2026-10-01"), `entry page ${page.status}`);
-  return [`Source: ${source}`, `chip: "${chip.cls}: The data steward or the PI can open this entry."`, `entry page for A: 403, no roster text`];
+  return [`Source: ${source}`, `chip: "${chip.cls}: The data steward or the PI can open this entry." (no title)`, `entry page for A: 403, no roster text`];
 });
 
 await step("The PI signs in with the provider's lab0:pi group, sees every member's runs, and may open the D3 entry", async () => {

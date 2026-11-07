@@ -104,14 +104,21 @@ export const RUNS_LISTED = 100;
  * The newest runs, from their events alone: no bodies, and no chain check (each record page verifies its own chain).
  * member narrows them to the runs that member asked; null lists everyone's.
  */
-export async function listRuns(db: Db, limit = RUNS_LISTED, member: MemberId | null = null): Promise<RunListRow[]> {
+/** Which runs a list shows: all (null), one surface's, or one member's on one surface. */
+export interface RunScope {
+  readonly surface: string;
+  readonly member: MemberId | null;
+}
+
+export async function listRuns(db: Db, limit = RUNS_LISTED, scope: RunScope | null = null): Promise<RunListRow[]> {
   const rows = await db.query<{ run_id: string; at: Date; agent: string | null; outcome: string; events: number; refusals: number }>(
     `select s.run_id, s.at, s.event->>'agent' as agent,
          coalesce((select f.event->>'outcome' from run_events f where f.run_id = s.run_id and f.event->>'t' = 'run.finished' limit 1), 'running') as outcome,
          (select count(*) from run_events e where e.run_id = s.run_id)::int as events,
          (select count(*) from run_events e where e.run_id = s.run_id and e.event->>'t' in ('egress.refused', 'tool.withheld'))::int as refusals
-     from run_events s where s.seq = 0 and ($2::text is null or s.event->'trigger'->>'memberId' = $2) order by s.at desc, s.run_id limit $1`,
-    [limit, member],
+     from run_events s where s.seq = 0 and ($2::text is null or s.event->>'surface' = $2) and ($3::text is null or s.event->'trigger'->>'memberId' = $3)
+     order by s.at desc, s.run_id limit $1`,
+    [limit, scope?.surface ?? null, scope?.member ?? null],
   );
   return rows.rows.map((r) => ({ runId: r.run_id, startedAt: r.at.toISOString(), agent: r.agent, outcome: r.outcome, events: r.events, refusals: r.refusals }));
 }
@@ -220,6 +227,9 @@ function surfaceOf(req: IncomingMessage, tokens: DoorTokens): { readonly id: Sur
 /**
  * Who a request speaks for. open: sign-on is off, so the web surface trusts the body's user and records are open, as
  * before sign-on. member: the session's member. surface: a token surface while sign-on is on, which reads its own runs.
+ *
+ * A member's own runs are the ones they asked signed in, on the web surface. A token client names whatever member it
+ * likes, so a token surface's run is never a member's own: only the data steward and the PI see it.
  */
 type Viewer = { readonly t: "open" } | { readonly t: "member"; readonly id: MemberId; readonly email: string; readonly role: Role } | { readonly t: "surface"; readonly id: SurfaceId };
 
@@ -233,7 +243,7 @@ async function runOwner(db: Db, runId: string): Promise<{ readonly surface: stri
 async function requireVisible(db: Db, runId: string, viewer: Viewer): Promise<void> {
   if (viewer.t === "open" || (viewer.t === "member" && seesAllRuns(viewer.role))) return;
   const owner = await runOwner(db, runId);
-  const mine = viewer.t === "member" ? owner?.member === viewer.id : owner?.surface === viewer.id;
+  const mine = viewer.t === "member" ? owner?.surface === WEB_SURFACE && owner.member === viewer.id : owner?.surface === viewer.id;
   if (!mine) throw new HttpError(404, "no such run");
 }
 
@@ -308,7 +318,8 @@ export function createWebHandler(
             return sendHtml(req, res, signInPage(where, signOn.provider, "/", err.message), NO_STORE, 403);
           }
         }
-        if ((req.method === "GET" || req.method === "POST") && url.pathname === "/logout") return redirect(res, "/?signed-out", signOn.signOut());
+        // POST only, as the page's Sign out form sends it, so an image or a link on another page cannot sign anyone out.
+        if (req.method === "POST" && url.pathname === "/logout") return redirect(res, "/?signed-out", signOn.signOut());
         const session = await signOn.session(req.headers.cookie);
         const page = req.method === "GET" && PAGE.test(url.pathname);
         if (session.t === "idle") {
@@ -363,7 +374,8 @@ export function createWebHandler(
         const show = url.searchParams.get("show");
         const filter: RunFilter = show === "refusals" || show === "failed" ? show : "all";
         const mine = me && !me.seesAll ? me.id : null;
-        return sendHtml(req, res, runsPage(await listRuns(db, RUNS_LISTED, mine), filter, RUNS_LISTED, where, mine), NO_STORE);
+        const scope: RunScope | null = mine ? { surface: WEB_SURFACE, member: mine } : viewer.t === "surface" ? { surface: viewer.id, member: null } : null;
+        return sendHtml(req, res, runsPage(await listRuns(db, RUNS_LISTED, scope), filter, RUNS_LISTED, where, mine), NO_STORE);
       }
       const runPath = /^\/runs\/([^/]+)(?:\/(events|view|source|source\.json))?$/.exec(url.pathname);
       if (req.method === "GET" && runPath) {

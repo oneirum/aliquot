@@ -13,7 +13,7 @@ import type { IntakeDeps } from "../packages/core/src/frontdoor.ts";
 import { createKbReader, memorySnapshots, snapshotFromFixture } from "../packages/core/src/kb.ts";
 import { createPayloadStore, type RunEvent, type RunId } from "../packages/core/src/record.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
-import { createSignOn, verifyIdToken } from "../packages/core/src/surfaces/signon.ts";
+import { createSignOn, safeNext, verifyIdToken } from "../packages/core/src/surfaces/signon.ts";
 import { providerWire } from "../packages/core/src/surfaces/signon-wire.ts";
 import { createWebHandler, doorTokens, listenWeb } from "../packages/core/src/surfaces/web.ts";
 import { freshDatabase } from "./db.ts";
@@ -45,12 +45,13 @@ const kb = createKbReader(memorySnapshots([handbook, visits]));
 const asked: string[] = [];
 const probe = {
   agentFor: async () => ({}) as AgentDocument,
+  agentsFor: async () => [{} as AgentDocument],
   gate: { members: async (user: string) => (asked.push(user), null), channelFloor: async () => "D1", labPatterns: [], policy: DEFAULT_POLICY },
 } as unknown as IntakeDeps;
 
 const acpToken = "a".repeat(40);
 const tokens = doorTokens([{ id: "acp" as never, kind: "acp", placement: "lab", tokenEnv: "ACP" }], { ACP: acpToken }, () => {});
-const auth: SignOnConfig = { issuer: idp.issuer, clientId: "aliquot-door", clientSecretEnv: "SECRET", sessionSecretEnv: "SESSION", emailClaim: "email", idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] };
+const auth: SignOnConfig = { issuer: idp.issuer, clientId: "aliquot-door", clientSecretEnv: "SECRET", sessionSecretEnv: "SESSION", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] };
 let handler: ReturnType<typeof createWebHandler> = async () => {};
 const { server, port } = await listenWeb((req, res) => handler(req, res), 0);
 const door = `http://127.0.0.1:${port}`;
@@ -142,8 +143,10 @@ test("the runs list shows a member only their own runs, another member's run is 
   const alice = await signedIn(ALICE);
   const list = await (await alice.fetch(`${door}/runs`)).text();
   assert.ok(list.includes("Your runs"));
-  assert.ok(list.includes(aliceRun) && list.includes(aliceRestricted) && list.includes(acpRun), "alice's own runs, from any surface");
+  assert.ok(list.includes(aliceRun) && list.includes(aliceRestricted), "alice's own signed-in runs");
   assert.ok(!list.includes(bobRun), "not bob's");
+  assert.ok(!list.includes(acpRun), "nor a token surface's run that names her: a token client may name any member");
+  assert.equal((await alice.fetch(`${door}/runs/${acpRun}`)).status, 404);
   for (const path of [`/runs/${bobRun}`, `/runs/${bobRun}/events`, `/runs/${bobRun}/view`, `/runs/${bobRun}/source.json?path=office-hours.md`, `/replies?runId=${bobRun}`])
     assert.equal((await alice.fetch(`${door}${path}`)).status, 404, path);
   const stop = await alice.fetch(`${door}/stop`, { method: "POST", headers: { origin: door }, body: JSON.stringify({ runId: bobRun }) });
@@ -166,13 +169,16 @@ test("with sign-on on, a token surface reads only its own surface's runs", async
   const as = (path: string) => fetch(`${door}${path}`, { headers: { authorization: `Bearer ${acpToken}` } });
   assert.equal((await as(`/runs/${acpRun}/events`)).status, 200);
   assert.equal((await as(`/runs/${aliceRun}/events`)).status, 404);
+  const list = await (await as("/runs")).text();
+  assert.ok(list.includes(acpRun), "its runs list has its own run");
+  assert.ok(![aliceRun, aliceRestricted, bobRun].some((r) => list.includes(r)), "and no member's signed-in run");
 });
 
 test("the Source chip opens an entry below D3 for a member, and for a D3 entry says who can", async () => {
   const alice = await signedIn(ALICE);
   const chip = await (await alice.fetch(`${door}/runs/${aliceRun}/source.json?path=office-hours.md`)).json();
   const entry = handbook.entries.find((e) => e.path === "office-hours.md")!;
-  assert.deepEqual(chip, { path: "office-hours.md", found: true, title: entry.title, kb: handbook.snapshot.title, cls: "D1", retrieved: true, open: true, who: "every member" });
+  assert.deepEqual(chip, { path: "office-hours.md", found: true, title: entry.title, kb: handbook.snapshot.title, cls: "D1", open: true });
   const page = await alice.fetch(`${door}/runs/${aliceRun}/source?path=office-hours.md`);
   assert.equal(page.status, 200);
   const html = await page.text();
@@ -181,18 +187,21 @@ test("the Source chip opens an entry below D3 for a member, and for a D3 entry s
   assert.ok(html.includes(entry.body.split("\n")[0]!.slice(0, 30).replace(/&/g, "&#38;")), "and the entry's text");
 
   const restricted = await (await alice.fetch(`${door}/runs/${aliceRestricted}/source.json?path=office-hours.md`)).json();
-  assert.deepEqual(restricted, { path: "office-hours.md", found: true, title: entry.title, kb: "Visit log", cls: "D3", retrieved: true, open: false, who: "the data steward or the PI" });
+  assert.deepEqual(restricted, { path: "office-hours.md", found: true, cls: "D3", open: false, who: "the data steward or the PI" }, "no title or knowledge base for a role that may not open it");
   const refused = await alice.fetch(`${door}/runs/${aliceRestricted}/source?path=office-hours.md`);
   assert.equal(refused.status, 403);
   const refusedHtml = await refused.text();
   assert.ok(refusedHtml.includes("the data steward or the PI can"));
   assert.ok(!refusedHtml.includes(entry.body.split("\n")[0]!.slice(0, 30)), "and none of the entry's text");
+  assert.ok(!refusedHtml.includes(entry.title) && !refusedHtml.includes("Visit log"), "nor its title or knowledge base");
 
   const pi = await signedIn(PI);
   assert.equal((await pi.fetch(`${door}/runs/${aliceRestricted}/source?path=office-hours.md`)).status, 200, "the PI may open D3");
 
   assert.deepEqual(await (await alice.fetch(`${door}/runs/${aliceRun}/source.json?path=made-up.md`)).json(), { path: "made-up.md", found: false });
   assert.equal((await alice.fetch(`${door}/runs/${aliceRun}/source?path=made-up.md`)).status, 404);
+  assert.equal((await alice.fetch(`${door}/runs/${aliceRun}/source?path=equipment.md`)).status, 404, "an entry in a snapshot the run read, but not one it retrieved");
+  assert.deepEqual(await (await alice.fetch(`${door}/runs/${aliceRun}/source.json?path=equipment.md`)).json(), { path: "equipment.md", found: false });
 });
 
 test("without sign-on the Source chip treats everyone as a member: D1 opens, D3 does not", async () => {
@@ -215,6 +224,8 @@ test("an ID token with the wrong audience, nonce, issuer or expiry, or an unveri
     ["nonce", (c) => ({ ...c, nonce: "replayed" }), "does not answer this sign-in"],
     ["issuer", (c) => ({ ...c, iss: "https://evil.example" }), "issued by https://evil.example"],
     ["expiry", (c) => ({ ...c, exp: Math.floor(Date.now() / 1000) - 3600 }), "has expired"],
+    ["no email_verified", ({ email_verified: _, ...c }) => c, "has not verified"],
+    ["email_verified as a string", (c) => ({ ...c, email_verified: "true" }), "has not verified"],
   ];
   for (const [what, change, says] of cases) {
     idp.tamperNext(change);
@@ -253,6 +264,23 @@ test("a callback without the login cookie, or with another browser's state, is r
   assert.equal(elsewhere.status, 403, "another browser, no login cookie");
   const forged = await b.fetch(back.replace(/state=[^&]+/, "state=forged"));
   assert.equal(forged.status, 403, "state that does not match the login cookie");
+  const wide = await b.fetch(back.replace(/state=[^&]+/, `state=${encodeURIComponent("é".repeat(43))}`));
+  assert.equal(wide.status, 403, "a state as long as the real one in characters, not bytes");
+  const error = await b.fetch(`${door}/callback?error=access_denied&error_description=${encodeURIComponent("Call 555-0100 at evil.example to restore access")}`);
+  assert.equal(error.status, 403);
+  const said = await error.text();
+  assert.ok(said.includes("The provider did not sign you in") && !said.includes("evil.example"), "a fixed message, never the provider's text");
+});
+
+test("next after sign-in is a path on this door: tabs, backslashes, other hosts and control characters go to /", async () => {
+  for (const bad of ["/\t/evil.example", "//evil.example", "/\\evil.example", "https://evil.example/", "/a\r\nset-cookie: x=1", "javascript:alert(1)", "/\u0000"]) assert.equal(safeNext(bad), "/", JSON.stringify(bad));
+  assert.equal(safeNext("/runs?show=failed"), "/runs?show=failed");
+  assert.equal(safeNext(null), "/");
+  const { res, hops } = await new Browser().signIn(door, ALICE, "/\t/evil.example");
+  assert.equal(res.status, 200);
+  assert.equal(hops.at(-1), `${door}/`);
+  const crlf = await new Browser().signIn(door, ALICE, "/a\r\nb");
+  assert.equal(crlf.res.status, 200, "CR and LF in next are a redirect to /, never a 500");
 });
 
 test("an altered session cookie is no session, and signing out ends it", async () => {
@@ -265,9 +293,13 @@ test("an altered session cookie is no session, and signing out ends it", async (
   assert.equal((await b.fetch(`${door}/runs/${bobRun}/events`)).status, 401, "a session altered to the PI's email");
   b.cookies.set("aliquot_session", real);
   assert.equal((await b.fetch(`${door}/runs/${aliceRun}/events`)).status, 200);
-  const out = await b.open(`${door}/logout`);
-  assert.equal(out.res.status, 401);
-  assert.ok((await out.res.text()).includes("You are signed out."));
+  assert.notEqual((await b.fetch(`${door}/logout`)).status, 302, "GET /logout signs nobody out: an image tag could");
+  assert.equal((await b.fetch(`${door}/runs/${aliceRun}/events`)).status, 200);
+  const out = await b.fetch(`${door}/logout`, { method: "POST" });
+  assert.equal(out.status, 302);
+  const after = await b.open(new URL(out.headers.get("location")!, door).href);
+  assert.equal(after.res.status, 401);
+  assert.ok((await after.res.text()).includes("You are signed out."));
   assert.equal((await b.fetch(`${door}/runs/${aliceRun}/events`)).status, 401);
 });
 
@@ -341,6 +373,8 @@ test("roles_claim maps a group claim to a role without a studio account, eppn is
     { email: BOB, eppn: "bob@wisc.edu", groups: ["campus:staff"] },
     { email: "dan@campus.edu", eppn: "dan@wisc.edu", groups: ["campus:staff"] },
     { email: "noeppn@campus.edu", groups: ["lab0:pi"] },
+    { email: PI, eppn: "mallory@other.edu", groups: [], emailVerified: false },
+    { email: "eve@campus.edu", eppn: "eve@wisc.edu", groups: ["lab0:member"], emailVerified: false },
   ]);
   try {
     const c = new Browser();
@@ -360,6 +394,18 @@ test("roles_claim maps a group claim to a role without a studio account, eppn is
     const noId = await new Browser().signIn(d.url, "noeppn@campus.edu");
     assert.equal(noId.res.status, 403);
     assert.ok((await noId.res.text()).includes("has no eppn claim"), "a token without the id claim signs nobody in");
+    const mallory = await new Browser().signIn(d.url, PI);
+    assert.equal(mallory.res.status, 403, "an upstream that asserts the PI's email unverified does not get the PI's studio account");
+    assert.equal((await new Browser().signIn(d.url, "eve@campus.edu")).res.status, 200, "an unverified email is fine when a mapped group, not the email, names the role");
+  } finally {
+    await d.stop();
+  }
+});
+
+test("trust_unverified_email lets a provider that never says it verified the email sign members in by it", async () => {
+  const d = await otherDoor({ trustUnverifiedEmail: true }, [{ email: ALICE, emailVerified: false }]);
+  try {
+    assert.equal((await new Browser().signIn(d.url, ALICE)).res.status, 200);
   } finally {
     await d.stop();
   }
@@ -372,12 +418,15 @@ test("lab.toml refuses a web bind beyond loopback without [auth], and takes it w
   });
   assert.equal(parseConfig(`${base}[surfaces.web]\nbind = "127.0.0.1"\n`, "/lab/lab.toml").web.bind, "127.0.0.1");
   const c = parseConfig(`${base}[surfaces.web]\nbind = "0.0.0.0"\nbase_url = "https://ask.lab.edu"\n[auth]\nissuer = "https://login.lab.edu"\nclient_id = "aliquot"\nclient_secret_env = "OIDC_SECRET"\n`, "/lab/lab.toml");
-  assert.deepEqual({ bind: c.web.bind, signOn: c.signOn }, { bind: "0.0.0.0", signOn: { issuer: "https://login.lab.edu", clientId: "aliquot", clientSecretEnv: "OIDC_SECRET", sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] } });
+  assert.deepEqual({ bind: c.web.bind, signOn: c.signOn }, { bind: "0.0.0.0", signOn: { issuer: "https://login.lab.edu", clientId: "aliquot", clientSecretEnv: "OIDC_SECRET", sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] } });
   const auth2 = `${base}[auth]\nissuer = "https://cilogon.org"\nclient_id = "aliquot"\nid_claim = "eppn"\nidle_timeout_minutes = 15\nroles_claim = "isMemberOf"\nscopes = ["openid", "email", "org.cilogon.userinfo"]\n`;
   assert.deepEqual(parseConfig(`${auth2}[auth.roles]\n"lab0:pi" = "pi"\n`, "/lab/lab.toml").signOn, {
-    issuer: "https://cilogon.org", clientId: "aliquot", clientSecretEnv: null, sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", idClaim: "eppn", idleMinutes: 15, rolesClaim: "isMemberOf", roleValues: { "lab0:pi": "pi" }, scopes: ["openid", "email", "org.cilogon.userinfo"],
+    issuer: "https://cilogon.org", clientId: "aliquot", clientSecretEnv: null, sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "eppn", idleMinutes: 15, rolesClaim: "isMemberOf", roleValues: { "lab0:pi": "pi" }, scopes: ["openid", "email", "org.cilogon.userinfo"],
   });
   assert.throws(() => parseConfig(auth2, "/lab/lab.toml"), /roles_claim and \[auth.roles\] go together/);
+  const entra = `${base}[auth]\nissuer = "https://login.microsoftonline.com/t/v2.0"\nclient_id = "a"\nemail_claim = "preferred_username"\n`;
+  assert.throws(() => parseConfig(entra, "/lab/lab.toml"), /email_claim names a claim nobody verified/);
+  assert.equal(parseConfig(`${entra}trust_unverified_email = true\n`, "/lab/lab.toml").signOn?.trustUnverifiedEmail, true);
   assert.throws(() => parseConfig(`${base}[auth]\nissuer = "https://cilogon.org"\nclient_id = "a"\nscopes = ["email"]\n`, "/lab/lab.toml"), /scopes must include openid/);
   assert.throws(() => parseConfig(`${auth2}[auth.roles]\n"lab0:pi" = "dean"\n`, "/lab/lab.toml"), /roles/);
 });

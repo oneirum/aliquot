@@ -105,9 +105,16 @@ export function cookieValue(header: string | undefined, name: string): string | 
   return undefined;
 }
 
-/** Only a path on this door, so a crafted /login?next= cannot send a member elsewhere after they sign in. */
+/**
+ * Only a path on this door, so a crafted /login?next= cannot send a member elsewhere after they sign in. A browser
+ * drops tabs and newlines from a URL and reads a backslash as a slash, so "/\t/evil" is "//evil": any control character
+ * is refused, and what remains must resolve to this origin.
+ */
 export function safeNext(next: string | null): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+  if (!next || !next.startsWith("/") || /[\x00-\x1f\x7f]/.test(next)) return "/";
+  const here = "http://door.invalid";
+  const url = URL.parse(next, here);
+  return url && url.origin === here ? `${url.pathname}${url.search}` : "/";
 }
 
 interface Jwk extends JsonWebKey {
@@ -341,11 +348,13 @@ export function createSignOn(deps: SignOnDeps): SignOn {
     }),
     finish: (query, cookieHeader) => reach(async () => {
       const error = query.get("error");
-      if (error) throw new SignOnRefused(`The provider did not sign you in: ${query.get("error_description") ?? error}.`);
+      // A fixed message: the provider's error_description arrives in the URL, so anyone could write it.
+      if (error) throw new SignOnRefused("The provider did not sign you in. Try again, or tell the lab's research IT.");
       const login = (openValue(sessionSecret, "login", cookieValue(cookieHeader, LOGIN_COOKIE), seconds())?.v ?? null) as LoginState | null;
       if (!login) throw new SignOnRefused("This sign-in started more than ten minutes ago, or in another browser. Sign in again.");
       const state = query.get("state") ?? "";
-      if (state.length !== login.state.length || !timingSafeEqual(Buffer.from(state), Buffer.from(login.state))) throw new SignOnRefused("This sign-in does not match the one this browser started. Sign in again.");
+      const [got, want] = [Buffer.from(state), Buffer.from(login.state)];
+      if (got.length !== want.length || !timingSafeEqual(got, want)) throw new SignOnRefused("This sign-in does not match the one this browser started. Sign in again.");
       const code = query.get("code");
       if (!code) throw new SignOnRefused("The provider sent no code. Sign in again.");
       const p = await discover();
@@ -360,10 +369,12 @@ export function createSignOn(deps: SignOnDeps): SignOn {
       const claims = await verify(tokens.id_token, login.nonce);
       const email = claims[config.emailClaim];
       if (typeof email !== "string" || !email.includes("@")) throw new SignOnRefused(`The provider's ID token has no email in its ${config.emailClaim} claim, so Aliquot cannot match you to a lab account.`);
-      if (claims.email_verified === false) throw new SignOnRefused(`The provider has not verified ${email}, so Aliquot cannot match it to a lab account.`);
       const id = claims[config.idClaim];
       if (typeof id !== "string" || !id.trim()) throw new SignOnRefused(`The provider's ID token has no ${config.idClaim} claim, which lab.toml's [auth] id_claim names as the member's id. Tell the lab's research IT.`);
       const fromClaim = config.rolesClaim === null ? null : claimRole(claims, config.rolesClaim, config.roleValues);
+      // The email decides the role only through the studio account, and only an email the provider verified may.
+      if (!fromClaim && claims.email_verified !== true && !config.trustUnverifiedEmail)
+        throw new SignOnRefused(`The provider has not verified ${email}, so Aliquot cannot match it to a lab account.`);
       const role = fromClaim ?? (await studioRole(db, email));
       if (!role) throw new SignOnRefused(`You signed in as ${email}, but this lab has no account for that address. Ask the PI to add it in the studio.`);
       const value: SessionValue = { id, email, ...(fromClaim ? { role: fromClaim } : {}), seen: seconds() };

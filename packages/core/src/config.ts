@@ -83,6 +83,12 @@ export interface SignOnConfig {
   readonly sessionSecretEnv: string;
   /** The ID token claim that holds the member's email: email for most providers, preferred_username for some Entra ID tenants. */
   readonly emailClaim: string;
+  /**
+   * Accept an email the provider does not say it verified (email_verified true) as the key to a studio account. Only for
+   * a provider that never sends email_verified, and only when it vouches for every address it issues: otherwise anyone it
+   * federates with could claim the PI's address. A role from roles_claim never needs it.
+   */
+  readonly trustUnverifiedEmail: boolean;
   /** The claim whose value is the member id every run records: sub by default, eppn on InCommon campuses. An email can change; this does not. */
   readonly idClaim: string;
   /** A session nobody has used for this long ends, and the next request signs in again (HIPAA automatic logoff). */
@@ -94,6 +100,9 @@ export interface SignOnConfig {
   /** What /login asks the provider for. CILogon releases eppn only under org.cilogon.userinfo; Okta's groups claim may need groups. */
   readonly scopes: readonly string[];
 }
+
+/** Claims that look like an email but that nobody verified: Entra ID's preferred_username and upn. */
+const UNVERIFIED_EMAIL_CLAIMS: readonly string[] = ["preferred_username", "upn", "unique_name"];
 
 /** 127.0.0.0/8, ::1 and localhost: the addresses only this machine reaches. */
 export function isLoopback(address: string): boolean {
@@ -221,6 +230,7 @@ const schema = z.object({
       client_secret_env: z.string().min(1).optional(),
       session_secret_env: z.string().min(1).default("LABH_SESSION_SECRET"),
       email_claim: z.string().min(1).default("email"),
+      trust_unverified_email: z.boolean().default(false),
       id_claim: z.string().min(1).default("sub"),
       idle_timeout_minutes: z.number().int().min(1).max(12 * 60).default(30),
       roles_claim: z.string().min(1).optional(),
@@ -229,6 +239,10 @@ const schema = z.object({
     })
     .strict()
     .refine((a) => (a.roles_claim === undefined) === (a.roles === undefined), "roles_claim and [auth.roles] go together: the claim to read, and which of its values is which role")
+    .refine(
+      (a) => a.trust_unverified_email || !UNVERIFIED_EMAIL_CLAIMS.includes(a.email_claim),
+      `email_claim names a claim nobody verified (preferred_username, upn, unique_name): a user or tenant admin can set it to any address, the PI's included. Use email, or set trust_unverified_email = true only for a provider that issues every address itself`,
+    )
     .optional(),
 });
 
@@ -340,6 +354,7 @@ export function parseConfig(text: string, path: string): LabConfig {
           clientSecretEnv: c.auth.client_secret_env ?? null,
           sessionSecretEnv: c.auth.session_secret_env,
           emailClaim: c.auth.email_claim,
+          trustUnverifiedEmail: c.auth.trust_unverified_email,
           idClaim: c.auth.id_claim,
           idleMinutes: c.auth.idle_timeout_minutes,
           rolesClaim: c.auth.roles_claim ?? null,

@@ -35,7 +35,7 @@ Every port is published on `127.0.0.1`. `LABH_BIND` in `.env` changes the addres
 
 Without sign-on, the web door trusts the member id the page sends, so it listens on the machine only. With an `[auth]` table in `lab.toml`, members sign in with the university account through any OpenID Connect provider, and the door may face the campus network behind a reverse proxy.
 
-What a signed-in member gets: their own runs on `/runs` and nobody else's (the data steward and the PI see all), a 404 for anyone else's record, events, sources, replies or stop, and the cited entry behind the chat's Source chip when its class allows. A member id in a request body is ignored. Each run's record names the member by the provider's stable id.
+What a signed-in member gets: the runs they asked signed in, on `/runs`, and nobody else's (the data steward and the PI see all), a 404 for anyone else's record, events, sources, replies or stop, and the entry behind the chat's Source chip when the run retrieved it and its class allows. A member id in a request body is ignored. Each run's record names the member by the provider's stable id. A token surface's runs are never a member's own, even when they name the member, because a token client can name anyone: only the data steward and the PI see them.
 
 1. Register Aliquot with the provider as a web application (a confidential client). The redirect URI is the door's address plus `/callback`, for example `https://ask.lab.example.edu/callback`. Ask for the authorization code flow; Aliquot always sends PKCE (S256).
 2. Add to `config/lab.toml`:
@@ -51,14 +51,15 @@ What a signed-in member gets: their own runs on `/runs` and nobody else's (the d
 	client_id = "<application id>"
 	client_secret_env = "LABH_OIDC_CLIENT_SECRET"
 	# id_claim = "sub"                 # the member id each run records; eppn on an InCommon campus
-	# email_claim = "email"            # preferred_username for Entra ID tenants that send no email claim
+	# email_claim = "email"            # must be an email the provider says it verified (email_verified)
+	# trust_unverified_email = false   # see the Entra ID row below before setting it
 	# idle_timeout_minutes = 30        # a session unused this long ends (HIPAA automatic logoff)
 	# scopes = ["openid", "email", "profile"]
 
 3. Add to `.env`: `LABH_SESSION_SECRET=$(openssl rand -hex 32)` (it signs the session cookie; the door refuses one shorter than 32 characters) and `LABH_OIDC_CLIENT_SECRET=<the provider's client secret>`. Set `LABH_BIND=0.0.0.0` only once the proxy is in front.
 4. `docker compose up -d`. The door's start line names the provider members sign in at. Without `roles_claim`, it also warns when the studio has not created its accounts yet, because nobody can sign in until it has.
 
-Who may sign in: a person the provider vouches for whose email matches a studio account the PI added, with that account's role, read on every request, so a removed account loses access at once. A university provider vouches for the whole campus, so anyone else is told to ask the PI. A lab that manages membership in the provider instead maps a group or entitlement claim to roles, and the studio account then only matters for someone with no mapped group:
+Who may sign in: a person the provider vouches for whose verified email (`email_verified` true in the ID token) matches a studio account the PI added, with that account's role, read on every request, so a removed account loses access at once. A university provider vouches for the whole campus, so anyone else is told to ask the PI. A lab that manages membership in the provider instead maps a group or entitlement claim to roles, and the studio account then only matters for someone with no mapped group:
 
 	[auth]
 	roles_claim = "isMemberOf"
@@ -71,7 +72,7 @@ A role from a claim holds for the session. A session lasts 12 hours from sign-in
 
 | Provider | `issuer` | Notes |
 |---|---|---|
-| Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Add the `email` optional claim, or set `email_claim = "preferred_username"`. For roles, the `groups` claim carries group object ids, which are the keys of `[auth.roles]`. |
+| Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Entra ID sends no `email_verified`, and its `email`, `preferred_username` and `upn` can be set by a user or a tenant admin, guest tenants included. Prefer `roles_claim = "groups"`: the claim carries group object ids, which are the keys of `[auth.roles]`, and a role from a group never rests on the email. Matching studio accounts by email needs `trust_unverified_email = true`, which is safe only for a single-tenant app registration with guest access off. |
 | Okta | `https://<org>.okta.com/oauth2/default` | A groups claim needs the authorization server's claim rule, and may need `"groups"` in `scopes`. |
 | Keycloak | `https://<host>/realms/<realm>` | Add a group membership mapper to the client for `roles_claim = "groups"`. |
 | CILogon | `https://cilogon.org` | Set `scopes = ["openid", "email", "profile", "org.cilogon.userinfo"]`: CILogon releases `eppn` and `isMemberOf` only under that scope. Then `id_claim = "eppn"`. |
@@ -84,7 +85,7 @@ The reverse proxy terminates TLS and passes requests to the door on port 3000 wi
 		reverse_proxy 127.0.0.1:3000
 	}
 
-Sign-on covers the web door. The studio keeps its own accounts, and the token surfaces (`aliquot ask`, `aliquot acp`, Slack) keep their tokens. With sign-on on, a token surface reads only its own surface's runs.
+Sign-on covers the web door. The studio keeps its own accounts, and the token surfaces (`aliquot ask`, `aliquot acp`, Slack) keep their tokens. With sign-on on, a token surface reads and lists only its own surface's runs.
 
 ## Knowledge bases
 
