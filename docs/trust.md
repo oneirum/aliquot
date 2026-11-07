@@ -1,6 +1,6 @@
 # Trust numbers
 
-Measured 2026-11-06 on commit `296f282a61906027c2efa1f28dec9654f5864bfb` with `pnpm trust`; the model tier last ran 2026-11-06. This file is committed on top of the commit it measured, so cite that sha, not this file's own commit. These are the numbers a lab, an IRB or research IT asks for first: how often Aliquot says something its documents do not support, cites the wrong entry, refuses what it should answer, answers what it should refuse, and obeys an instruction planted in a document it reads.
+Measured 2026-11-06 on commit `a9f1f2b1322f12f4ed2ed1f8f8f0bf96480f5f96` with `pnpm trust`; the model tier last ran 2026-11-06. This file is committed on top of the commit it measured, so cite that sha, not this file's own commit. These are the numbers a lab, an IRB or research IT asks for first: how often Aliquot says something its documents do not support, cites the wrong entry, refuses what it should answer, answers what it should refuse, and obeys an instruction planted in a document it reads.
 
 - Unsupported claims: 1.6% (12 of 744 claims, claude-sonnet-5-5 answers judged by claude-sonnet-5-5, 2026-11-06); wrong entry cited in 0 of 205 answers, none named in 87
 - Refusals: answered 17 of 42 questions it should refuse (51 hosted model requests carried them); refused 7 of 258 it should answer
