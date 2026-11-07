@@ -51,18 +51,49 @@ placement = "lab"                        # lab hardware: up to D3
 # api_key_env = "AWS_BEARER_TOKEN_BEDROCK"
 # models = ["us.anthropic.claude-sonnet-5"]
 
+# Campus contracts. baa = true says PHI may go to the endpoint: a business associate agreement covers it, or the
+# covered entity runs it. Without it a message carrying PHI (an MRN, a date of birth, a PHI: banner) is refused there
+# before any request. region says where the vendor keeps the data. Export-controlled and CUI content goes only to
+# an endpoint with region = "us"; an endpoint without region counts as outside the US. Lab hardware needs neither.
 # [endpoints.azure]
 # base_url = "https://your-resource.openai.azure.com/openai/v1"
 # placement = "approved"                 # the lab's tenant; not available to OpenAI, no training
 # protocol = "openai-responses"
 # api_key_env = "AZURE_OPENAI_API_KEY"
 # auth_header = "api-key"
+# region = "us"                          # the resource's region is in the US
+
+# Azure OpenAI through a deployment URL, as many campus tenants still expose it. api_version is sent as
+# ?api-version= on every request. A deployment has no model list, so models names the id it answers with.
+# [endpoints.azure-hipaa]
+# base_url = "https://your-resource.openai.azure.com/openai/deployments/gpt-4o"
+# placement = "institution"              # the university's own tenant under its Microsoft BAA
+# api_version = "2024-10-21"
+# api_key_env = "AZURE_OPENAI_API_KEY"
+# auth_header = "api-key"
+# models = ["gpt-4o-2024-11-20"]
+# baa = true
+# region = "us"
 
 # [endpoints.foundry]
 # base_url = "https://your-resource.services.ai.azure.com/anthropic"
 # placement = "approved"                 # Claude inside the lab's Azure tenant, with a HIPAA configuration available
 # protocol = "anthropic-messages"
 # api_key_env = "AZURE_FOUNDRY_API_KEY"
+# region = "us"
+
+# Bedrock's Converse API, signed with AWS Signature Version 4 in Aliquot (no AWS SDK). The keys come from
+# aws_access_key_id_env and aws_secret_access_key_env (defaults AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), and
+# aws_session_token_env (default AWS_SESSION_TOKEN) when the credentials are temporary. A us. inference profile stays
+# in US regions; a global. one may run anywhere, so an endpoint with region = "us" refuses to list one.
+# [endpoints.bedrock-converse]
+# base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
+# placement = "institution"              # the university's AWS account under its AWS BAA
+# protocol = "bedrock-converse"
+# aws_region = "us-east-1"
+# models = ["us.anthropic.claude-sonnet-5"]
+# baa = true
+# region = "us"
 
 # [endpoints.gemini]
 # base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"

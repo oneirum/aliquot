@@ -19,7 +19,8 @@
  */
 
 import { z } from "zod";
-import { DATA_CLASSES, Labelled, type DataClass } from "./dataclass.ts";
+import { DATA_CLASSES, Labelled, unionMarks, type DataClass, type Mark } from "./dataclass.ts";
+import { marksIn } from "./gate.ts";
 import type { Db } from "./db.ts";
 import type { Addresser, EntryHash, PayloadHash, SnapshotId, Sha256 } from "./hash.ts";
 import type { ModelTarget } from "./gateway.ts";
@@ -279,7 +280,16 @@ export function createKbReader(source: SnapshotSource): KbReader {
     }
     return l;
   };
-  const stamp = <T>(l: LoadedSnapshot, value: T) => Labelled.stamp(value, l.snapshot.cls, `kb:${l.snapshot.id}`);
+  // A snapshot's marks are every mark any of its entries carries, as its class is the steward's for all of them: a
+  // search or read of a knowledge base with one PHI entry is PHI. Found from the entry text at load, so a snapshot
+  // compiled before marks existed is marked too. The seam aliquot-policy fills with classify() per entry.
+  const marks = new WeakMap<LoadedSnapshot, readonly Mark[]>();
+  const marksOfSnapshot = (l: LoadedSnapshot): readonly Mark[] => {
+    let m = marks.get(l);
+    if (!m) marks.set(l, (m = unionMarks(l.entries.flatMap((e) => marksIn(`${e.title}\n${e.body}`)))));
+    return m;
+  };
+  const stamp = <T>(l: LoadedSnapshot, value: T) => Labelled.stamp(value, l.snapshot.cls, `kb:${l.snapshot.id}`, marksOfSnapshot(l));
   return {
     has: (id) => source.has(id),
     async outline(id) {

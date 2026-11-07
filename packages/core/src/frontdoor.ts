@@ -16,7 +16,7 @@
 
 import { z } from "zod";
 import { modelFor, resolveAgent, versionHash, type AgentDocument, type Catalog } from "./agent.ts";
-import { decideEgress, join, rank, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
+import { decideEgress, join, MARKS, rank, type Labelled, type DataClass, type EgressPolicy, type Placement, type SurfaceId } from "./dataclass.ts";
 import type { Db } from "./db.ts";
 import { appendAudit, type AuditEvent } from "./audit.ts";
 import { gateClassified, type GateDeps, type InboundMessage } from "./gate.ts";
@@ -37,7 +37,8 @@ export type IntakeResult =
       readonly dataClass?: { readonly id: string; readonly level: DataClass; readonly rule: string; readonly classRule: string; readonly audit: number };
     };
 
-const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number() });
+const ref = z.object({ hash: z.string(), cls: z.string(), bytes: z.number(), marks: z.array(z.enum(MARKS)).optional() });
+type RefJson = z.infer<typeof ref>;
 
 /** What a run job carries. Written by intake, read by drive() to write run.started. */
 export const runJobPayloadSchema = z.object({
@@ -87,7 +88,7 @@ export function parseRunJobPayload(json: unknown): RunJobPayload {
   const parsed = runJobPayloadSchema.safeParse(json);
   if (!parsed.success) throw new MalformedJob(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const p = parsed.data;
-  const ref = (r: { hash: string; cls: string; bytes: number }): PayloadRef => ({ hash: r.hash as PayloadRef["hash"], cls: r.cls as DataClass, bytes: r.bytes });
+  const ref = (r: RefJson): PayloadRef => ({ hash: r.hash as PayloadRef["hash"], cls: r.cls as DataClass, bytes: r.bytes, ...(r.marks?.length ? { marks: r.marks } : {}) });
   return { ...p, agent: p.agent as AgentVersionHash, thread: p.thread as ThreadKey, input: ref(p.input), history: p.history.map(ref) };
 }
 

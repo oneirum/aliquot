@@ -203,7 +203,7 @@ test("an agent that pins a Covered Model to a zdr endpoint is a publish error, a
   assert.ok((await gateway.complete(target("hosted", A.MODEL), prompt(), memoryRecorder(), opts)).ok);
 });
 
-test("lab.example.toml's Bedrock, Azure, Foundry, Gemini and campus gateway blocks parse once uncommented", () => {
+test("lab.example.toml's Bedrock, Azure, Foundry, Gemini, campus gateway and campus contract blocks parse once uncommented", () => {
   const path = fileURLToPath(new URL("../lab.example.toml", import.meta.url));
   const text = readFileSync(path, "utf8");
   const expected: Record<string, Partial<ModelEndpoint>> = {
@@ -212,6 +212,8 @@ test("lab.example.toml's Bedrock, Azure, Foundry, Gemini and campus gateway bloc
     foundry: { placement: "approved", protocol: "anthropic-messages" },
     gemini: { placement: "public", protocol: "openai-chat" },
     campus: { placement: "institution", protocol: "openai-chat" },
+    "azure-hipaa": { placement: "institution", protocol: "openai-chat", apiVersion: "2024-10-21", baa: true, region: "us" },
+    "bedrock-converse": { placement: "institution", protocol: "bedrock-converse", baa: true, region: "us", aws: { region: "us-east-1", accessKeyIdEnv: "AWS_ACCESS_KEY_ID", secretAccessKeyEnv: "AWS_SECRET_ACCESS_KEY", sessionTokenEnv: "AWS_SESSION_TOKEN" } },
   };
   for (const [id, want] of Object.entries(expected)) {
     const start = text.indexOf(`# [endpoints.${id}]`);

@@ -19,7 +19,7 @@
  */
 
 import { AgentUnavailable, instructionsOf, modelFor, UnrunnableAgent, verifyRunnable, type Deployed, type ResolvedAgent } from "./agent.ts";
-import { Labelled, type EgressPolicy } from "./dataclass.ts";
+import { describeRefusal, Labelled, type EgressPolicy } from "./dataclass.ts";
 import { MalformedJob, parseRunJobPayload, postReply, runJobPayloadSchema, SurfaceUnknown, type Surface } from "./frontdoor.ts";
 import { runRefusalText, type Policy } from "./policy.ts";
 import { Prompt, type ChatPart, type ModelGateway } from "./gateway.ts";
@@ -205,10 +205,18 @@ const NOTICES: Record<Notice, string> = {
 
 /** A refused run names the data class that refused it and the class's rule, when the deployment's classes are known. */
 function noticeText(notice: Notice, state: RunState, job: LeasedJob, deps: LoopDeps): string {
+  const refusal = state.refused;
+  // A refusal by a mark's rule names the rule, so the member knows which endpoint to ask for, not only that it was
+  // refused. The sentence names an endpoint id and a mark, never the content, so the notice stays D0.
+  if (notice === "refused" && refusal && (refusal.code === "phi-needs-baa" || refusal.code === "export-needs-us")) {
+    const rule = describeRefusal(refusal);
+    return `${NOTICES.refused} ${rule[0]!.toUpperCase()}${rule.slice(1)}.`;
+  }
   if (notice !== "refused" || !deps.classes || !state.refused) return NOTICES[notice];
   const parsed = runJobPayloadSchema.shape.dataClass.safeParse((job.payload as { dataClass?: unknown } | null)?.dataClass);
   return runRefusalText(deps.classes, state.refused, parsed.success ? parsed.data : undefined) ?? NOTICES[notice];
 }
+
 
 /**
  * The shell. Writes run.started from the job on first claim, loads the agent

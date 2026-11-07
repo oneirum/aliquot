@@ -31,9 +31,9 @@ import { extname, join as joinPath } from "node:path";
 import { z } from "zod";
 import { parseExactModelId } from "./agent.ts";
 import { appendAudit, auditRecorder, type AuditEvent, type CallContext } from "./audit.ts";
-import { DATA_CLASSES, join, Labelled, type DataClass, type EgressRefusal } from "./dataclass.ts";
+import { DATA_CLASSES, join, Labelled, MARKS, type DataClass, type EgressRefusal } from "./dataclass.ts";
 import type { Db } from "./db.ts";
-import { classifyText } from "./gate.ts";
+import { classifyText, marksIn as marksOfText } from "./gate.ts";
 import { classById, classify, classLabel, residencyRuleText, ruleText, type Policy } from "./policy.ts";
 import { describeOutcome, Prompt, type ExactModelId, type ModelGateway, type ModelResult, type ModelTarget } from "./gateway.ts";
 import { contentHash, type Addresser, type PayloadHash, type Sha256, type SnapshotId } from "./hash.ts";
@@ -326,7 +326,17 @@ export async function requestCompile(deps: { readonly queue: Queue; readonly sto
   return { jobId: r.id, key, created: r.created };
 }
 
-const refSchema = z.object({ hash: z.string(), cls: z.enum(DATA_CLASSES), bytes: z.number() });
+/**
+ * The marks a compile or coverage prompt's own text carries (an MRN in a source, a CUI banner), as a D0 label to
+ * derive the prompt from, so the gateway's mark rules see them. Only the prompt takes it: what the compiler returns
+ * is cached unmarked and marked again from its text when the snapshot loads (kb.ts). A source in a lab class with
+ * model_tier none or a residency rule was already refused when the sources were gathered (sourceLevel).
+ */
+function marksIn(text: string): Labelled<string> {
+  return Labelled.stamp("", "D0", "kb-compile:marks", marksOfText(text));
+}
+
+const refSchema = z.object({ hash: z.string(), cls: z.enum(DATA_CLASSES), bytes: z.number(), marks: z.array(z.enum(MARKS)).optional() });
 const compileJobSchema = z.object({
   definition: z.object({
     kbId: z.string(),
@@ -398,7 +408,8 @@ export async function compileKb(job: CompileJob, deps: CompileDeps): Promise<Com
     }
     const text = await deps.store.get(source.text);
     if ("redacted" in text) return { t: "failed", reason: `source ${source.sourceId} was redacted from the store` };
-    const input = Labelled.derive(`Knowledge base purpose: ${purpose.value}\n\nSource id: ${source.sourceId}\n\n<source>\n${String(text.value)}\n</source>`, [purpose, text], `kb-compile:${def.kbId}:${source.sourceId}`, cls);
+    const body = `Knowledge base purpose: ${purpose.value}\n\nSource id: ${source.sourceId}\n\n<source>\n${String(text.value)}\n</source>`;
+    const input = Labelled.derive(body, [purpose, text, marksIn(body)], `kb-compile:${def.kbId}:${source.sourceId}`, cls);
     const prompt = Prompt.of([{ role: "system", content: Labelled.stamp(COMPILE_SYSTEM, "D0", "kb-compile:prompt") }, { role: "user", content: input }], []);
     const result = await callUntilParsed(deps, def, { t: "kb-compile", job: deps.jobId, kbId: def.kbId, step: { t: "source", sourceId: source.sourceId } }, prompt, (r) => parseEntries(r.text, source.sourceId));
     if (result.t !== "ok") return result.t === "refused" ? { t: "refused", cls, refusal: result.refusal } : { t: "failed", reason: `source ${source.sourceId}: ${result.reason}` };
@@ -423,7 +434,8 @@ export async function compileKb(job: CompileJob, deps: CompileDeps): Promise<Com
     if (!verdict) {
       const q = Labelled.stamp(question, defCls, `kb-def:${def.kbId}`);
       const shown = candidates.map((c) => Labelled.stamp(`<entry path="${c.entry.path}">\n# ${c.entry.title}\n${c.entry.body}\n</entry>`, c.cls, `kb-compile:${def.kbId}:entry`));
-      const input = Labelled.derive(`Question: ${question}\n\nEntries:\n${shown.map((s) => s.value).join("\n")}`, [q, ...shown], `kb-coverage:${def.kbId}`, cls);
+      const body = `Question: ${question}\n\nEntries:\n${shown.map((s) => s.value).join("\n")}`;
+      const input = Labelled.derive(body, [q, ...shown, marksIn(body)], `kb-coverage:${def.kbId}`, cls);
       const prompt = Prompt.of([{ role: "system", content: Labelled.stamp(COVERAGE_SYSTEM, "D0", "kb-compile:prompt") }, { role: "user", content: input }], []);
       const paths = candidates.map((c) => c.entry.path);
       const result = await callUntilParsed(deps, def, { t: "kb-compile", job: deps.jobId, kbId: def.kbId, step: { t: "coverage", question } }, prompt, (r) => parseVerdict(r.text, question, paths));
