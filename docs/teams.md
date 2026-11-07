@@ -111,7 +111,7 @@ To see it on the synthetic lab0 lab with no Microsoft account, `pnpm demo --team
 ## Not in this release
 
 - File uploads from Teams, adaptive cards, and single sign-on. The member's identity is their Entra object id, which is what the record names.
-- Sign-on beyond Teams: anyone in the tenant who can reach the app is a member. Limit who can install it in step 3 in step 3. The web door's sign-on does not reach Teams.
+- Sign-on beyond Teams: anyone in the tenant who can reach the app is a member. Limit who can install it in step 3. The web door's sign-on does not reach Teams.
 - A router across several agents. One Teams surface reaches the agent bound to its channel, else the deployment's agent.
 
 ## Checks
