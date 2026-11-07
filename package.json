@@ -26,6 +26,7 @@
     "aliquot:export": "mkdir -p bundles && node --disable-warning=ExperimentalWarning --permission --allow-fs-read=* --allow-net '--allow-fs-write=bundles/*' packages/core/bin/aliquot.ts export",
     "demo:agent": "node scripts/agent-demo.ts",
     "walk:policy": "node scripts/walk-policy.ts",
+    "presets:table": "node scripts/presets-table.ts",
     "up:tmux": "scripts/tmux.sh"
   },
   "devDependencies": {

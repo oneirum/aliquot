@@ -5,6 +5,7 @@
 
 import { randomBytes } from "node:crypto";
 import { parseConfig } from "./config.ts";
+import { PRESETS } from "./preset.ts";
 
 export const OFFERED_PLACEMENTS = {
   lab: "lab hardware: up to D3",
@@ -21,6 +22,20 @@ export interface InitAnswers {
   readonly patterns: readonly string[];
   /** The digest docker image inspect reports, or null when run_code and PDF reading stay off. */
   readonly sandboxImage: string | null;
+  /** The campus preset lab.toml names (presets/<id>.toml), or null for Aliquot's own class names only. */
+  readonly preset: string | null;
+}
+
+/** The campus question's answers: each shipped preset by what a member calls the campus. */
+export const OFFERED_CAMPUSES: Readonly<Record<(typeof PRESETS)[number], string>> = {
+  "uw-madison": "UW-Madison: Public, Internal, Sensitive, Restricted (UW-504)",
+  umich: "University of Michigan: Low, Moderate, High, Restricted",
+  harvard: "Harvard: data security levels 1 to 5, Sensitive from level 3",
+};
+
+export function parseCampus(text: string): string | null | undefined {
+  if (/^none$/i.test(text)) return null;
+  return text in OFFERED_CAMPUSES ? text : undefined;
 }
 
 export const DEFAULTS = { lab: "our lab", baseUrl: "http://ollama:11434/v1", placement: "lab", port: 3000, patterns: ["\\bP-\\d{5}\\b"] } as const;
@@ -108,10 +123,17 @@ every_minutes = 15
 export function renderLabToml(a: InitAnswers, anchorLog: string | null = null): string {
   // The default name is a placeholder, so it stays a comment and the pages show the hostname.
   const [labTable, labName] = a.lab === DEFAULTS.lab ? ["# [lab]", '# name = "Your Lab"'] : ["[lab]", `name = ${s(a.lab)}`];
+  const preset = a.preset
+    ? `
+# Your campus's data tiers, shown beside each data class in refusals and the studio. presets/${a.preset}.toml is a
+# starting point for your data steward, not the campus's official interpretation: check each line with yours.
+preset = ${s(a.preset)}
+`
+    : "";
   const text = `# lab.toml for ${a.lab.replace(/[\r\n]/g, " ")}, written by aliquot init.
 # Every outbound destination has a placement, and the placement alone decides which data classes may go there.
 # D0 is public, D1 internal, D2 confidential, D3 restricted (participant data). lab.example.toml lists every option.
-
+${preset}
 [database]
 url_env = "DATABASE_URL"            # docker compose builds this URL from POSTGRES_PASSWORD in .env
 
@@ -278,16 +300,23 @@ export async function askAnswers(ask: Prompt, out: (line: string) => void): Prom
     out("Then paste what this prints: docker image inspect --format '{{.Id}}' aliquot-sandbox");
     sandboxImage = await askValid(ask, out, "Sandbox image id", null, parseDigest, "An image id is sha256: followed by 64 hex characters.");
   }
-  return { lab, baseUrl, placement, port, patterns, sandboxImage };
+  out("Which campus's data tiers should the classes carry? A preset is a starting point for your data steward:");
+  for (const [id, line] of Object.entries(OFFERED_CAMPUSES)) out(`  ${id.padEnd(10)} ${line}`);
+  out(`  ${"none".padEnd(10)} Aliquot's own class names only`);
+  const campus = await askValid(ask, out, "Campus", "none", (t) => {
+    const c = parseCampus(t);
+    return c === undefined ? null : { preset: c };
+  }, `Answer ${Object.keys(OFFERED_CAMPUSES).join(", ")} or none.`);
+  return { lab, baseUrl, placement, port, patterns, sandboxImage, preset: campus.preset };
 }
 
 /** --yes: every default, with the patterns and sample from the flags. Returns the report lines and the answers, or null answers on FAIL. */
-export function defaultAnswers(patterns: readonly string[], sample: readonly string[]): { readonly lines: string[]; readonly answers: InitAnswers | null } {
+export function defaultAnswers(patterns: readonly string[], sample: readonly string[], preset: string | null = null): { readonly lines: string[]; readonly answers: InitAnswers | null } {
   const tried = patterns.length ? patterns : DEFAULTS.patterns;
   const problems = patternProblems(tried);
   if (problems.length) return { lines: problems, answers: null };
   const report = sampleReport(tried, sample);
-  return { lines: report.lines, answers: report.ok ? { ...DEFAULTS, patterns: tried, sandboxImage: null } : null };
+  return { lines: report.lines, answers: report.ok ? { ...DEFAULTS, patterns: tried, sandboxImage: null, preset } : null };
 }
 
 /** For a .env init leaves as it is: a line for each surface token it lacks, saying how to add it. Never a secret. */

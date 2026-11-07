@@ -9,7 +9,10 @@
  * DUA-bound source is refused before any compiler call, export-controlled notes compile on the lab's US compiler, and
  * the studio's view lists which entries carry each class. Scripted fakes, so this checks the policy, not answer quality.
  *
- *   node scripts/walk-policy.ts
+ * With --preset (uw-madison, umich or harvard), lab.toml also names that campus preset, and every refusal and the
+ * studio's class list must name the campus tier beside the class.
+ *
+ *   node scripts/walk-policy.ts [--preset uw-madison]
  */
 
 import assert from "node:assert/strict";
@@ -24,6 +27,10 @@ import { freshDatabase } from "../test/db.ts";
 import { ensurePostgres, processes, waitFor } from "./procs.ts";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const presetAt = process.argv.indexOf("--preset");
+const PRESET = presetAt > 0 ? (process.argv[presetAt + 1] ?? "") : null;
+/** What a refusal shows between the class id and the next clause: nothing, or the campus tier in parentheses. */
+const TIER = PRESET ? String.raw` \(.+?\)` : "";
 const work = join(root, ".walk-policy");
 rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
@@ -50,6 +57,7 @@ function config(name: string, agent: Record<string, unknown>): string {
   writeFileSync(
     path,
     [
+      ...(PRESET ? [`preset = "${PRESET}"`] : []),
       `[endpoints.local]\nbase_url = "${compiler.url}"\nplacement = "lab"\nregion = "us"`,
       `[endpoints.agentlab]\nbase_url = "${lab.url}"\nplacement = "lab"\nregion = "us"`,
       `[endpoints.hosted]\nbase_url = "${hosted.url}"\nplacement = "approved"`,
@@ -118,7 +126,7 @@ let failed = false;
 try {
   ps.startWorker(cfgHosted, "W1");
   const web = await ps.startWeb(cfgHosted);
-  print(`Aliquot data classes on lab0. Agent: front desk on a hosted model at placement approved (D2 at most).\n`);
+  print(`Aliquot data classes on lab0${PRESET ? `, under campus preset ${PRESET}` : ""}. Agent: front desk on a hosted model at placement approved (D2 at most).\n`);
   const Q: [string, string, string, string?][] = [
     ["public", 'model_tier = "hosted", level D0', "What are the office hours?"],
     ["internal", 'model_tier = "hosted", level D1', "What are the office hours?", tokens.WALK_ACP_TOKEN],
@@ -173,11 +181,11 @@ try {
   print();
 
   const studio = await fetch(`${labWeb.base}/studio/data-classes`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${tokens.WALK_STUDIO_TOKEN}` }, body: JSON.stringify({ actor: { id: "pi@lab0", role: "pi" } }) });
-  const sv = (await studio.json()) as { classes: { id: string; level: string; modelTier: string; record: string; retentionDays: number | null; residency: string | null }[]; knowledgeBases: { kbId: string; sources: { sourceId: string; class: string; detectors: string[] }[]; entries: { path: string; class: string }[] }[] };
+  const sv = (await studio.json()) as { classes: { id: string; level: string; modelTier: string; record: string; retentionDays: number | null; residency: string | null; campusTier: { campus: string; tier: string } | null }[]; knowledgeBases: { kbId: string; sources: { sourceId: string; class: string; detectors: string[] }[]; entries: { path: string; class: string }[] }[] };
   print("The studio's Data classes panel (the door's data-classes op):\n");
   for (const c of sv.classes) {
     const entries = sv.knowledgeBases.flatMap((k) => k.entries.filter((e) => e.class === c.id).map((e) => `${k.kbId}/${e.path}`));
-    print(`   ${c.id.padEnd(20)} ${c.level}  ${c.modelTier.padEnd(6)} record ${c.record.padEnd(4)} ${c.retentionDays === null ? "" : `${c.retentionDays} days`}${c.residency ? `residency ${c.residency}` : ""}${entries.length ? `\n${" ".repeat(23)}entries: ${entries.join(", ")}` : ""}`);
+    print(`   ${c.id.padEnd(20)} ${c.campusTier ? `${`${c.campusTier.campus} ${c.campusTier.tier}`.padEnd(34)} ` : ""}${c.level}  ${c.modelTier.padEnd(6)} record ${c.record.padEnd(4)} ${c.retentionDays === null ? "" : `${c.retentionDays} days`}${c.residency ? `residency ${c.residency}` : ""}${entries.length ? `\n${" ".repeat(23)}entries: ${entries.join(", ")}` : ""}`);
   }
   print();
 
@@ -188,7 +196,7 @@ try {
   for (const c of ["public", "internal", "confidential"]) assert.ok(asked[c]!.hosted > 0, `${c} answered by the hosted model`);
   for (const c of ["restricted", "export_controlled"]) {
     assert.equal(asked[c]!.hosted, 0, `${c}: no hosted request`);
-    assert.match(asked[c]!.shown, new RegExp(`Data class ${c}, found by detector [a-z-]+; rule (model_tier = "local"|residency = "us")`));
+    assert.match(asked[c]!.shown, new RegExp(`Data class ${c}${TIER}, found by detector [a-z-]+; rule (model_tier = "local"|residency = "us")`));
     assert.equal(asked[`${c}-lab`]!.hosted, 0);
     assert.ok(asked[`${c}-lab`]!.lab > 0, `${c} answered by the lab model`);
   }
@@ -199,11 +207,16 @@ try {
   }
   assert.equal(asked["kb-residency"]!.status, 403);
   assert.equal(asked["kb-residency"]!.lab + asked["kb-residency"]!.hosted, 0, "no model request when a KB may hold a residency class");
-  assert.match(asked["kb-residency"]!.shown, /Knowledge base lab0-export is at D3 and may hold data class export_controlled; rule residency = "us"/);
+  assert.match(asked["kb-residency"]!.shown, new RegExp(`Knowledge base lab0-export is at D3 and may hold data class export_controlled${TIER}; rule residency = "us"`));
   assert.equal(asked["kb-dua"]!.lab, 0, "no compiler request for a DUA-bound source");
-  assert.match(asked["kb-dua"]!.shown, /data class controlled_access \(detector dua-marker\); rule model_tier = "none"/);
+  assert.match(asked["kb-dua"]!.shown, new RegExp(`data class controlled_access${TIER} \\(detector dua-marker\\); rule model_tier = "none"`));
   const rig = sv.knowledgeBases.find((k) => k.kbId === "lab0-export");
   assert.ok(rig && rig.entries.length > 0 && rig.entries.every((e) => e.class === "export_controlled"), "the rig notes' entries carry export_controlled");
+  if (PRESET) {
+    const campus = sv.classes[0]?.campusTier?.campus;
+    assert.ok(campus && sv.classes.every((c) => c.campusTier?.campus === campus), "the studio's class list names a campus tier for every class");
+    for (const c of ["restricted", "export_controlled", "phi", "controlled_access", "review-confidential", "kb-residency", "kb-dua"]) assert.ok(asked[c]!.shown.includes(`(${campus} `), `${c}: the refusal names the ${campus} tier: ${asked[c]!.shown}`);
+  }
   print("\nwalk:policy ok: every class got its outcome; 0 hosted requests for restricted, export_controlled, phi, controlled_access and review-confidential.");
 } catch (err) {
   failed = true;

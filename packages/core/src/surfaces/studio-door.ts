@@ -174,7 +174,8 @@ const OPS: Record<StudioOpName, Op> = {
       const entries = (loaded?.entries ?? []).map((e) => ({ path: e.path, class: strictestClass(policy, [...new Set(e.facts.flatMap((f) => f.sources.flatMap((x) => (bySource.has(x.sourceId) ? [bySource.get(x.sourceId)!] : []))))]).id }));
       knowledgeBases.push({ kbId: snapshot.kbId, title: snapshot.title, snapshot: snapshot.id, level: snapshot.cls, sources, entries });
     }
-    return ok({ classes: policy.classes, knowledgeBases });
+    const preset = config.preset && { id: config.preset.id, campus: config.preset.campus, scheme: config.preset.scheme, source: config.preset.source, note: config.preset.note };
+    return ok({ classes: policy.classes, knowledgeBases, preset });
   }),
 
   "test-run": op(z.object({ runId: z.string() }), async ({ intake: { db } }, actor, b) => {

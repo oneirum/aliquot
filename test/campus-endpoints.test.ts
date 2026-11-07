@@ -97,7 +97,7 @@ test("marks survive derive as a union, and only another mark can be added", () =
 });
 
 test("a lab's phi, export_controlled and cui classes set the marks", () => {
-  const cls = (id: string, detectors: string[]): ClassRule => ({ id, level: "D2", modelTier: "hosted", record: "text", retentionDays: null, detectors, residency: null, message: id, builtin: false });
+  const cls = (id: string, detectors: string[]): ClassRule => ({ id, level: "D2", modelTier: "hosted", record: "text", retentionDays: null, detectors, residency: null, message: id, patterns: [], campusTier: null, builtin: false });
   const policy: Policy = { classes: [...defaultClasses(DEFAULT_POLICY), cls("phi", ["phi-zip"]), cls("export_controlled", ["export-marker"]), cls("cui", ["dua-marker"])], labPatterns: [] };
   assert.deepEqual(marksIn("ZIP 53706 for the visit", policy), ["phi"]);
   assert.deepEqual(marksIn("the EAR99 rig drawing", policy), ["export-controlled"]);

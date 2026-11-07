@@ -2,6 +2,11 @@
 # Every outbound destination has a placement, and the placement alone decides
 # which data classes may go there. There is no field for a ceiling.
 
+# Your campus's data tiers beside each class: "uw-madison", "umich", "harvard", or a path to your own copy of one.
+# presets/<id>.toml is a starting point for your data steward; this file's [classes] keys win over it. This key goes
+# at the top of lab.toml, before any table.
+# preset = "uw-madison"
+
 [database]
 url_env = "DATABASE_URL"           # e.g. postgres://postgres:labh@localhost:5432/labh
 

@@ -29,3 +29,13 @@ Each row says what Aliquot does toward a control, and what this lab.toml makes t
 | [HECVAT 4 question areas (paraphrased)](hecvat-answers.md) | 2 | 5 | 10 | 0 |
 
 Partly and lab's responsibility rows say, on each row, which part is Aliquot's and which is the lab's.
+
+## Data classes
+
+| Class | Level | Who may read it | Record of a refused message |
+|---|---|---|---|
+| `public` | D0 | an approved hosted model | text |
+| `internal` | D1 | an approved hosted model | text |
+| `confidential` | D2 | an approved hosted model | text |
+| `restricted` | D3 | a lab or institution model only | text |
+| `review-confidential` | R | no model: refused at the door | hash |
