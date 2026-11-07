@@ -59,7 +59,7 @@ To run the checks:
 	pnpm test
 	pnpm lab0
 
-`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `13/13 checks passed`.
+`pnpm lab0` runs the first-use check on a synthetic lab. It prints one `PASS` or `FAIL` line per check and ends with `14/14 checks passed`.
 
 If port 5432 is taken, set `LABH_PG_PORT` for every command, for example `export LABH_PG_PORT=55433` before `docker compose up -d postgres`.
 
@@ -315,7 +315,7 @@ The tests that need macOS or the sandbox image skip elsewhere, each with its rea
 | A restricted knowledge base attached to an agent on a hosted model | Refused at intake |
 | Every run | 26 of 26 run records verify, each naming its agent version |
 | The hosted endpoint over the whole check | 1 request, the planned control message |
-| A worker with `[anchor]` set signs every chain into a log outside the database | 1 anchor line over 38 audit rows and 31 closed runs; `aliquot verify --anchors` holds |
+| A worker with `[anchor]` set signs every chain into a log outside the database | 1 anchor line over 38 audit rows and 33 closed runs; `aliquot verify --anchors` holds |
 
 The fake models are scripted, so this checks retrieval, orchestration, provenance and egress control. It does not measure answer quality, and it does not show that a real lab wants this. That needs a pilot.
 
