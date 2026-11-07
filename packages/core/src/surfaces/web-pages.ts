@@ -12,7 +12,7 @@
 import type { RecordView } from "../record-view.ts";
 import { APP_HEAD, THEME } from "./web-app.ts";
 
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 export const whereSpan = (where: string) => (where ? `<span class="where">${escapeHtml(where)}</span>` : "");
 /** JSON inside a script element: `<` is escaped so no string in it can close the element. */
 const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
@@ -68,7 +68,7 @@ header .where { padding-left: 16px; border-left: 1px solid var(--line); }
 .pill.d3, .pill.r { background: var(--ink); color: var(--bg); }
 `;
 
-const PAGE_CSS = `
+export const PAGE_CSS = `
 .shell { max-width: 960px; margin: 0 auto; padding: 0 20px 64px; }
 .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 36px 0 18px; }
 .top .actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -104,7 +104,8 @@ const SHOWS: Record<RunFilter, (r: RunListRow) => boolean> = {
 };
 
 /** The newest runs, server-rendered: a table needs no script, and the times are localized by a few lines if script runs. */
-export function runsPage(newest: readonly RunListRow[], filter: RunFilter, limit: number, where = ""): string {
+/** mine is the signed-in member's id when the list holds only their runs, and null when it holds every member's. */
+export function runsPage(newest: readonly RunListRow[], filter: RunFilter, limit: number, where = "", mine: string | null = null): string {
   const rows = newest.filter(SHOWS[filter]);
   const tab = (f: RunFilter, text: string) => `<a class="btn" href="/runs${f === "all" ? "" : `?show=${f}`}"${f === filter ? ' aria-current="true"' : ""}>${text} <span class="count">${newest.filter(SHOWS[f]).length}</span></a>`;
   const row = (r: RunListRow) => {
@@ -150,7 +151,7 @@ td.agent { font: 12.5px var(--mono); color: var(--muted); }
 <body>
 <div class="shell">
   ${header("runs", where)}
-  <div class="top"><div><h1>Runs</h1><p class="when">The newest ${limit}, newest first. Open one to read its record.</p></div></div>
+  <div class="top"><div><h1>${mine === null ? "Runs" : "Your runs"}</h1><p class="when">${mine === null ? `The newest ${limit}` : `Your newest ${limit}, as ${escapeHtml(mine)}`}, newest first. Open one to read its record.</p></div></div>
   <nav class="tabs" aria-label="Show">${tab("all", "All")}${tab("refusals", "With a refusal")}${tab("failed", "Failed")}</nav>
   ${rows.length ? `<table><thead><tr><th>Started</th><th>Outcome</th><th class="num">Refused</th><th class="num">Events</th><th>Agent</th></tr></thead><tbody>${rows.map(row).join("")}</tbody></table>` : `<p class="state">${empty}</p>`}
 </div>
@@ -334,6 +335,44 @@ for (const b of v.bodies) {
 }
 if (v.bodies.length) { $("bodies-h").hidden = false; $("bodies").hidden = false; }
 </script>
+</body>
+</html>`;
+}
+
+/**
+ * What the door shows a browser without a session while sign-on is on: one way in. note is why the person is here again
+ * (signed out, a sign-in that did not finish, an address with no lab account), shown above the button.
+ */
+export function signInPage(where: string, provider: string, next: string, note: string | null = null): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Aliquot</title>
+${APP_HEAD}
+<style>${BASE_CSS}
+.signin { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
+.card { width: 100%; max-width: 400px; }
+.card .wordmark { display: inline-block; margin-bottom: 40px; }
+.card h1 { font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; font-weight: 650; margin: 0 0 10px; }
+.card p { margin: 0 0 24px; color: var(--ink-2); font-size: 15px; }
+.card .note { color: var(--ink); background: var(--quiet); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14.5px; }
+.card .btn.go { width: 100%; justify-content: center; padding: 13px 16px; font-size: 15px; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.card .where { display: block; margin-top: 28px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="signin">
+  <div class="card">
+    <a class="wordmark" href="/">Aliquot</a>
+    <h1>Sign in to ask the lab</h1>
+    ${note ? `<p class="note" role="status">${escapeHtml(note)}</p>` : ""}
+    <p>You sign in with your university account at ${escapeHtml(provider)}. Your questions and their records are yours to read; the lab's PI and data steward can read them too.</p>
+    <a class="btn go" href="/login?next=${escapeHtml(encodeURIComponent(next))}">Sign in</a>
+    ${whereSpan(where)}
+  </div>
+</main>
 </body>
 </html>`;
 }

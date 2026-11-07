@@ -77,7 +77,7 @@ To try the app on the synthetic lab0 lab, `pnpm demo --slack` adds `[surfaces.sl
 ## Not in this release
 
 - Direct messages from people outside the workspace, and file uploads from Slack.
-- Sign-on: anyone in the workspace who can reach the app is a member. A lab that needs a narrower list invites Aliquot to fewer channels until sign-on (0.7).
+- Sign-on: anyone in the workspace who can reach the app is a member. The web door's sign-on does not reach Slack; a lab that needs a narrower list invites Aliquot to fewer channels.
 
 ## Checks
 

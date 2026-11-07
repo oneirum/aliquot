@@ -19,7 +19,7 @@ test("the record view names the agent, the outcome, an intact chain and what eac
   assert.deepEqual(
     v.rows.map((r) => [r.seq, r.ms, r.t, r.refused, r.detail]),
     [
-      [0, 0, "run.started", false, "web thread, trigger message, 0 earlier turns"],
+      [0, 0, "run.started", false, "web thread, trigger message from alice, 0 earlier turns"],
       [1, 1000, "egress.refused", true, "D3 content to model:hosted: D3 exceeds the destination ceiling D1"],
       [2, 2000, "reply.posted", false, "final-post"],
       [3, 3000, "run.finished", false, "refused"],

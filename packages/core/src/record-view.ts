@@ -148,7 +148,7 @@ export function describeEvent(e: RunEvent): string {
   switch (e.t) {
     case "run.started": {
       const routed = describeRoute(e.route);
-      return `${e.surface} thread, trigger ${e.trigger.t}, ${e.history.length} earlier turns${routed ? `; routed to ${routed}` : ""}`;
+      return `${e.surface} thread, trigger ${e.trigger.t}${"memberId" in e.trigger ? ` from ${e.trigger.memberId}` : ""}, ${e.history.length} earlier turns${routed ? `; routed to ${routed}` : ""}`;
     }
     case "model.requested":
       return `to ${e.target.endpointId}, model ${e.target.modelId}, step ${e.step}${e.attempt > 1 ? `, attempt ${e.attempt}` : ""}${e.final ? ", final" : ""}`;

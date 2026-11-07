@@ -86,7 +86,7 @@ A Linux machine needs only Docker. One `docker compose up` starts Postgres, the 
 
 `init` asks where the lab's model runs, the web door port and the lab's participant id patterns. It tests the patterns against ids you paste, with a PASS or FAIL line for each, and asks again on a FAIL. It writes `config/lab.toml`, and `.env` with new `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY` and `PAYLOAD_SECRET` values and the `ALIQUOT_ACP_TOKEN` and `ALIQUOT_STUDIO_TOKEN` surface tokens. It never rewrites an existing `.env`: a new `LABH_PAYLOAD_KEY` would make every stored payload unreadable. On a machine with Node, `pnpm aliquot:init` does the same.
 
-The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. The web door has no sign-in yet, so keep it on the machine until sign-on lands in 0.7. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
+The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` only. Without sign-on the web door trusts the member id it is given, so it refuses to listen beyond the machine until `lab.toml` has `[auth]`; then put the lab's reverse proxy in front of it and set `LABH_BIND`. Knowledge base definitions and their source files go in `config/`, which the containers see at `/etc/aliquot`, and compile with the kb command inside the worker:
 
 	docker compose exec worker aliquot-kb compile --definition /etc/aliquot/kb.json --wait
 	docker compose exec worker aliquot runs
@@ -127,6 +127,10 @@ A channel can hold more than one agent, say the handbook agent and a methods age
 **Record** under an answer opens the run's record. It starts with a summary: the outcome, the time, model calls, tokens, tool calls by name, knowledge base entries retrieved and refusals. Below it, every event in order, each marked by shape as well as name (run, model call, tool call, refused), with its data class and whether the hash chain holds. **Download JSON** saves the record, so a PI or an IRB reader can keep it without running anything. `pnpm aliquot record <run-id>` prints the same record and summary in a terminal.
 
 **Runs** at the top of every page lists the newest runs with their outcome and refusal count, and narrows to the runs that had a refusal or failed, so a PI can go straight to what was refused. On a record that refused something, **Only refusals** hides the other events. The chat thread stays put when you open a record and come back.
+
+**Source** under an answer opens the entry it names, read-only, from the knowledge base snapshot the run read, and says whether the record holds that entry's hash. An entry at D3 or R opens only for the data steward or the PI, and the chip says so instead. A Source line that names no entry the run read says that too.
+
+**Sign-on.** With an `[auth]` table in `lab.toml`, members sign in with the university's OpenID Connect provider (Entra ID, Okta, Keycloak, CILogon) and the door knows who is asking. Each run's record names the member by the provider's stable id (`sub`, or `eppn` on an InCommon campus). The role comes from the studio account with the member's email, or from a group claim the lab maps (`roles_claim`). A session unused for `idle_timeout_minutes` (30 by default) ends. The page asks as the signed-in member, whatever a request body says. **Runs** then lists a member's own runs; the data steward and the PI see everyone's. Another member's record, its events and its sources answer 404. Only with `[auth]` may the door listen beyond the machine (`[surfaces.web] bind`). `pnpm walk:signon` walks two members and a PI through all of it against a local test provider, step by step, with a PASS or FAIL line for each; `--stills <dir>` also saves the pages. [`docs/install.md`](docs/install.md) has the setup for research IT.
 
 The chat page installs as an app called Aliquot, with the lab's name in its full name, and says how in one line until it is installed. Its service worker caches the page and its icons so the app opens without the network, and nothing else: answers, the runs list and records always come from the door, so none of them is kept on the device. Browsers install only from HTTPS or from the machine itself, so phones get it once the door is reachable under sign-on. `scripts/webapp-audit.ts` asks Chrome whether the page is installable; `scripts/icons.ts` renders the icons from `packages/core/assets/icon.svg`.
 
@@ -362,7 +366,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 **Next, in order** ([docs/ROADMAP.md](docs/ROADMAP.md) has each release, who it serves and how it is checked)
 
 - **0.6, ask where the lab already talks:** the Slack and Teams doors are built ([docs/slack.md](docs/slack.md), [docs/teams.md](docs/teams.md)), and so is the router across several agents on one channel.
-- **0.7, keys, retention and sign-on:** key rotation, per-class keys and the retention sweep are built (`aliquot keys`, `aliquot retention`); left is university sign-on.
+- **0.7, keys, retention and sign-on:** built: key rotation, per-class keys and the retention sweep (`aliquot keys`, `aliquot retention`), and OpenID Connect sign-on on the web door with each member seeing only their own runs (`[auth]`).
 - **0.8, studies an IRB can cite:** freeze an agent version, export an agent card, reviewer replay and PROV export, with the system prompt in the version hash. The types exist; the functions are stubs.
 - Later: agent CLI confinement on Linux, tools a lab adds itself behind an OS-level boundary, consent checks against sources, skills and scheduled runs.
 
@@ -375,7 +379,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 - The seal stops a mistake in Aliquot's code or a dependency from reaching the network. It is not a sandbox for hostile code in the process.
 - A built-in tool's version is the hash of its spec, not its code. A change to a tool's code alone moves no agent version.
 - Under `dev_shared_login`, Claude Code reads its credential from the developer's keychain. That is why the mode is for a developer's machine only.
-- The web door has no sign-in and does not check an agent's audience yet. The compose stack publishes it on `127.0.0.1` only. Do not expose it beyond the machine until sign-on lands.
+- The web door does not check an agent's audience yet. Sign-on covers the web door, not the studio, which keeps its own accounts. A token surface (`aliquot ask`, `acp`, Slack, the phone bridge) still names its member in the request, and a phone pairing or an `ask` token minted from a signed-in session is not built yet.
 
 ## Repository layout
 

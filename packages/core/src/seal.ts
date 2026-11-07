@@ -79,7 +79,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 /** Paths, not new URL("./db.ts", import.meta.url): Next's bundler, which the studio runs core inside, rewrites that form into an asset URL. */
 export const DEFAULT_ALLOWANCE: SealAllowance = {
-  files: [join(here, "surfaces", "web.ts"), join(here, "db.ts"), join(here, "agents", "spawn.ts"), join(here, "agents", "bridge.ts"), join(here, "agents", "proxy.ts"), join(here, "sandbox.ts")],
+  files: [join(here, "surfaces", "web.ts"), join(here, "surfaces", "signon-wire.ts"), join(here, "db.ts"), join(here, "agents", "spawn.ts"), join(here, "agents", "bridge.ts"), join(here, "agents", "proxy.ts"), join(here, "sandbox.ts")],
   packages: ["pg"],
 };
 

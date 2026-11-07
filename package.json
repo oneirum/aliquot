@@ -14,6 +14,7 @@
     "lab0": "node scripts/lab0.ts",
     "walk:router": "node scripts/walk-router.ts",
     "walk:keys": "node scripts/walk-keys.ts",
+    "walk:signon": "node scripts/walk-signon.ts",
     "unit2": "node scripts/unit2.ts",
     "demo": "node scripts/demo.ts",
     "doctor": "node scripts/doctor.ts",
