@@ -145,6 +145,7 @@ const T = {
   dbError: "web.test.ts: a database error is logged and answered with a generic 500 that carries no database text",
   selfContained: "web.test.ts: the chat page and the record page are self-contained HTML that loads nothing from another origin",
   deepmerge: "vendor-deepmerge.test.ts: the vendored deepmerge never takes a prototype from an own __proto__ key (GHSA-gcqx-w48m-w2h4)",
+  anchorCatches: "anchor.test.ts: a run event rewritten with its chain and head recomputed passes verifyChain, and the anchor catches it",
   packFresh: "review-pack.test.ts: the committed pack for deploy/check/lab.toml is what review-pack writes today",
 } as const satisfies Record<string, TestId>;
 
@@ -341,12 +342,16 @@ const NIST: readonly Control[] = [
   nist("03.03.01", "Event logging", "Every model call, tool call, refusal, stop and answer is an event in the run's record; publishes and role changes go to the audit stream.", fixed("met", "Logging is not configurable."), [T.verifyChain, T.auditRefusal]),
   nist("03.03.02", "Audit record content", "Each event carries its class label and payload references, and each answer names the hash of the agent version that gave it.", fixed("met", "Every event has the same fields."), [T.recordView]),
   nist("03.03.05", "Audit record review, analysis and reporting", "The runs page filters refused and failed runs; the record page prints for an IRB file and has Only refusals.", fixed("met", "Pages are on in every build."), [T.runsPage, T.recordView]),
-  nist("03.03.08", "Protection of audit information", "Postgres refuses updates and deletes on run events and agent versions, and any edit breaks the hash chain at that event.", fixed("met", "Protection is in the schema."), [
-    T.eventsAppendOnly,
-    T.versionsAppendOnly,
-    T.verifyChain,
-    T.auditChain,
-  ]),
+  nist(
+    "03.03.08",
+    "Protection of audit information",
+    "Postgres refuses updates and deletes on run events and agent versions, and any edit breaks the hash chain at that event. With [anchor], signed checkpoints of each chain head go to a log outside the database, so a rewrite with every later hash recomputed is caught too.",
+    (c) =>
+      c.anchor
+        ? { status: "met", why: `Chain heads are anchored to ${c.anchor.path} every ${c.anchor.everyMinutes} minutes, under a key outside the database.` }
+        : { status: "partly", why: "lab.toml declares no [anchor], so a database admin who recomputes every later hash can rewrite a record undetected." },
+    [T.eventsAppendOnly, T.versionsAppendOnly, T.verifyChain, T.auditChain, T.anchorCatches],
+  ),
   nist("03.04.01", "Baseline configuration", "lab.toml is the whole deployment description, parsed once at startup and refused whole on any error.", fixed("met", "This pack is computed from the lab.toml it names."), [T.toolsRefused]),
   nist("03.04.06", "Least functionality", "Eleven built-in tools, each with the hosts it may reach; no contributed tools.", fixed("met", "Tools are fixed per release."), [T.builtinTools, T.toolsRefused]),
   nist("03.04.11", "Information location", "Every destination's placement is declared in lab.toml and every data class's reach follows from it.", (c) => ({

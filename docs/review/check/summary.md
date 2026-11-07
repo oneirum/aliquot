@@ -25,7 +25,7 @@ Each row says what Aliquot does toward a control, and what this lab.toml makes t
 | Framework | not met | partly | met | lab's responsibility |
 |---|---|---|---|---|
 | [HIPAA Security Rule (45 CFR 164)](hipaa.md) | 3 | 3 | 5 | 5 |
-| [NIST SP 800-171 Rev. 3](nist-800-171.md) | 8 | 4 | 19 | 9 |
+| [NIST SP 800-171 Rev. 3](nist-800-171.md) | 8 | 5 | 18 | 9 |
 | [HECVAT 4 question areas (paraphrased)](hecvat-answers.md) | 2 | 5 | 10 | 0 |
 
 Partly and lab's responsibility rows say, on each row, which part is Aliquot's and which is the lab's.

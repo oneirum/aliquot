@@ -57,7 +57,7 @@ test("moving the payload store off lab placement moves only the rows about where
   assert.deepEqual(moved(parse(checkText), parse(moving)), ["800-171r3-03.13.08", "hecvat-data-location"]);
 });
 
-test("declaring sign-on, key rotation or retention flips exactly the rows that read it, with no prose edit", () => {
+test("declaring sign-on, key rotation, retention or an anchor flips exactly the rows that read it, with no prose edit", () => {
   const base = parse(checkText);
   assert.deepEqual(moved(base, { ...base, signOn: {} }), [
     "800-171r3-03.01.01",
@@ -71,6 +71,8 @@ test("declaring sign-on, key rotation or retention flips exactly the rows that r
     "hipaa-164.312(a)(2)(iii)",
   ]);
   assert.deepEqual(moved(base, { ...base, keyRotation: {} }), ["800-171r3-03.13.10"]);
+  const anchored = parse(`${checkText}\n[anchor]\npath = "anchors.jsonl"\n`);
+  assert.deepEqual(moved(base, anchored), ["800-171r3-03.03.08"]);
   assert.deepEqual(moved(base, { ...base, retention: {} }), ["800-171r3-03.08.03", "800-171r3-03.14.08", "hecvat-data-retention"]);
 });
 
