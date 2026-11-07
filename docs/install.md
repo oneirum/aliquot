@@ -98,6 +98,8 @@ Rotate the payload key when someone who held it leaves, on the schedule your sec
 
    `keys status` prints each key id, its env var, whether this process holds it, how many payloads it holds, and how many wait to move. When `k1` holds 0, remove `k1` from `[store.keys]`, delete `LABH_PAYLOAD_KEY` from `.env`, restart, and take a new backup.
 
+What a rotation does not do. It does not re-key the address key, the keyed hash that stops anyone from confirming a guessed body (a participant id) against a payload's hash: whoever held the old key can still compute addresses, though not read bodies under the new key. And the old ciphertext is not gone at once: Postgres keeps it in dead rows until `VACUUM` reclaims them and in WAL segments until they are recycled, and every backup taken before the re-encrypt still holds it under the old key. If the old key is the reason for the rotation, run `docker compose exec postgres vacuumdb -U postgres -d labh --full` after the re-encrypt, and destroy or re-take older backups as the lab's policy allows.
+
 To keep D3 under its own key, add `k3 = "LABH_PAYLOAD_KEY_3"` to `[store.keys]` and a `[store.class_keys]` table with `D3 = "k3"`, then run `keys reencrypt` to move D3 payloads already stored. A process that is not given `LABH_PAYLOAD_KEY_3` cannot read D3 bodies: its record pages list them as unavailable, encrypted under `k3`, and every chain still verifies. A process holding a key under an id the lab already knows, but with a different value, refuses to start.
 
 ## Retention
@@ -115,7 +117,7 @@ A class with no purge is kept. Aliquot refuses to start with a purge shorter tha
 	docker compose exec worker aliquot retention --dry-run      # lists each run past the window; changes nothing
 	docker compose exec worker aliquot retention --apply
 
-`--apply` deletes each body whose newest run is past its class's window, and clears the web door's copy of that run's reply. Each body keeps a tombstone: its hash, class, size, when it was redacted and why. Events and their hashes stay, so every record still verifies, and `--apply` checks each chain it touched. The record page shows the body as "Redacted on <date> by the lab's retention window", with its hash. Each `--apply` writes an audit event, even when nothing was past the window, and running it twice redacts nothing the second time. `--as-of YYYY-MM-DD` judges the window at another date, to see what a later sweep would take. Run `--apply` from cron or a systemd timer at whatever cadence the lab's policy names.
+`--apply` deletes each body whose newest run is past its class's window, and clears the web door's copy of that run's reply. Each body keeps a tombstone: its hash, class, size, when it was redacted and why. Events and their hashes stay, so every record still verifies, and `--apply` checks each chain it touched. The record page shows the body as "Redacted on <date> by the lab's retention window", with its hash. Each `--apply` writes an audit event, even when nothing was past the window, and running it twice redacts nothing the second time. `--dry-run --as-of YYYY-MM-DD` shows what a sweep on a later date would take; `--apply` refuses `--as-of` and always judges the window as of today. A question asked again after its body was redacted is stored again under the current key, and the record page then shows that body as stored. Run `--apply` from cron or a systemd timer at whatever cadence the lab's policy names.
 
 ## Upgrade
 

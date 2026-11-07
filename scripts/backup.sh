@@ -17,11 +17,16 @@ compose=(docker compose --env-file "$env_file")
 [[ -e "$dir/labh.dump" ]] && { echo "backup: $dir already holds a backup" >&2; exit 2; }
 listed="$("${compose[@]}" exec -T worker aliquot keys env)" || { echo "backup: could not list the payload keys (aliquot keys env in the worker)" >&2; exit 2; }
 
+# The last NAME=value line for an exact name: awk compares the name as a string, so it is never read as a pattern.
+env_value() { awk -v name="$1" 'index($0, name "=") == 1 { value = substr($0, length(name) + 2) } END { print value }' "$2"; }
+
 carried=()
 while read -r id env bodies; do
   [[ -n "$id" ]] || continue
+  [[ "$id" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo "backup: aliquot keys env named key id $id, which is not a key id" >&2; exit 2; }
+  [[ "$env" == "-" || "$env" =~ ^[A-Z_][A-Z0-9_]*$ ]] || { echo "backup: aliquot keys env named key $id with env var $env, which is not an env var name" >&2; exit 2; }
   value=""
-  [[ "$env" == "-" ]] || value="$(sed -n "s/^${env}=//p" "$env_file" | tail -1)"
+  [[ "$env" == "-" ]] || value="$(env_value "$env" "$env_file")"
   if [[ "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
     carried+=("$id $env $value")
   elif (( bodies > 0 )); then

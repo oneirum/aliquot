@@ -7,22 +7,29 @@
  *
  *   LABH_TEST_DB_SUFFIX=_k node scripts/walk-keys.ts [--stills <dir>]
  *
+ * The window cannot be waited out in a walk, so step 1 also writes three runs dated 40 days ago the way the worker
+ * writes them: bodies through the lab's store under k1, a hash-chained record, and the door's copy of the reply.
+ *
  * --stills saves the record page with a redacted body, light and dark, at 1440 and 390 wide, from headless Chromium
  * (Playwright's, or LABH_CHROMIUM).
  */
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium, devices } from "playwright";
 import { loadAudit } from "../packages/core/src/audit.ts";
+import { loadConfig } from "../packages/core/src/config.ts";
+import { Labelled } from "../packages/core/src/dataclass.ts";
 import { loadEvents, type RunId } from "../packages/core/src/record.ts";
 import type { RecordView } from "../packages/core/src/record-view.ts";
 import { PERMISSION_FLAGS } from "../packages/core/src/seal.ts";
+import { openPayloadStore } from "../packages/core/src/steward.ts";
+import { chain, started } from "../test/events.ts";
 import { startFakeModel } from "../test/fake-model.ts";
 import { freshDatabase } from "../test/db.ts";
 import { checker, ensurePostgres, post, processes, waitFor, type Processes } from "./procs.ts";
@@ -135,11 +142,35 @@ async function view(door: string, runId: RunId): Promise<RecordView> {
   return (await (await fetch(`${door}/runs/${runId}/view`)).json()) as RecordView;
 }
 
+const LAST_MONTH = [
+  ["Where is the dry ice log kept?", "In the binder beside freezer 2."],
+  ["Who orders liquid nitrogen?", "The lab manager, every other Monday."],
+  ["When is the -80 defrosted?", "Each January, per the freezer SOP."],
+] as const;
+
+/** Writes LAST_MONTH as answered web runs dated 40 days ago, under the keys in env. */
+async function seedLastMonth(env: Record<string, string>): Promise<RunId[]> {
+  const { store } = await openPayloadStore(db, await loadConfig(oneKey), env);
+  const ids: RunId[] = [];
+  for (const [i, [question, reply]] of LAST_MONTH.entries()) {
+    const runId = randomUUID() as RunId;
+    const input = await store.put(Labelled.stamp(question, "D1", "walk:last-month"));
+    const answer = await store.put(Labelled.stamp(reply, "D1", "walk:last-month"));
+    const events = chain([started(input), { t: "run.finished", outcome: "answered", answer, reason: null, flags: [] }], Date.now() - (40 * 86_400_000 - i * 60_000), runId);
+    await db.query("insert into jobs (id, kind, key, payload) values ($1, 'run', $2, '{\"surface\":\"web\"}')", [runId, `walk:${runId}`]);
+    for (const e of events) await db.query("insert into run_events (run_id, seq, at, cls, prev_hash, hash, event) values ($1, $2, $3, $4, $5, $6, $7)", [e.runId, e.seq, e.at, e.cls, e.prevHash, e.hash, e.event]);
+    await db.query("insert into web_messages (run_id, thread_id, kind, text) values ($1, $2, 'reply', $3)", [runId, `last-month-${i}`, reply]);
+    ids.push(runId);
+  }
+  return ids;
+}
+
 const keysOf = (v: RecordView) => [...new Set(v.bodies.map((b) => (b.state === "stored" || b.state === "unavailable" ? `${b.state} ${b.keyId}` : b.state)))].join(", ");
 const counts = (out: string) => Object.fromEntries([...out.matchAll(/^\s*(k\d)\s+\S+\s+(yes|no)\s+.*?\s+(\d+)\s+(\d+)$/gm)].map((m) => [m[1], { held: m[2] === "yes", bodies: Number(m[3]), toMove: Number(m[4]) }]));
 
 const { check, results } = checker(stepProcs);
 const runs: RunId[] = [];
+let lastMonth: RunId[] = [];
 const thread = "freezer-3";
 let d3Run = "" as RunId;
 
@@ -150,7 +181,9 @@ try {
     runs.push(await ask(door, "reagents", "Who signs off on new reagents?"));
     const v = await view(door, runs[0]!);
     assert.ok(v.bodies.length > 0 && v.bodies.every((b) => b.state === "stored" && b.keyId === "k1"), keysOf(v));
-    return `${runs.length} runs, every body ${keysOf(v)}`;
+    lastMonth = await seedLastMonth({ LABH_PAYLOAD_KEY: K1 });
+    console.log(`  and last month's runs, dated 40 days ago: ${lastMonth.join(", ")}`);
+    return `${runs.length} runs today and ${lastMonth.length} from last month, every body ${keysOf(v)}`;
   });
 
   await check("2. aliquot keys status shows what k1 holds", async () => {
@@ -228,25 +261,28 @@ try {
   await check("7. set the window: the dry run lists the old runs, apply redacts them, and every chain still verifies", async () => {
     console.log('  steward sets [policy.retention.D1] purge_payload_after_days = 30; D3 has no purge and is kept');
     const env = { LABH_PAYLOAD_KEY_2: K2, LABH_PAYLOAD_KEY_3: K3 };
-    const asOf = new Date(Date.now() + 31 * 86_400_000).toISOString().slice(0, 10);
-    const dry = aliquot(windowed, env, "retention", "--dry-run", "--as-of", asOf);
+    const dry = aliquot(windowed, env, "retention", "--dry-run");
     assert.equal(dry.code, 0);
     const listed = [...dry.out.matchAll(/run ([0-9a-f-]{36})/g)].map((m) => m[1]);
-    assert.deepEqual(listed.sort(), runs.slice().sort(), "every D1 run is listed, and the D3 run is not");
+    assert.deepEqual(listed.sort(), lastMonth.slice().sort(), "last month's runs are listed; today's and the D3 run are not");
+    const ahead = aliquot(windowed, env, "retention", "--apply", "--as-of", new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10));
+    assert.equal(ahead.code, 2, "a sweep judged at a later date is refused");
     const before = (await loadAudit(db)).length;
-    const applied = aliquot(windowed, env, "retention", "--apply", "--as-of", asOf);
+    const applied = aliquot(windowed, env, "retention", "--apply");
     assert.equal(applied.code, 0);
-    assert.match(applied.out, new RegExp(`Every chain still verifies: ${runs.length} runs checked`));
+    assert.match(applied.out, new RegExp(`Every chain still verifies: ${lastMonth.length} runs checked`));
     const audit = (await loadAudit(db)).slice(before);
     assert.deepEqual(audit.map((a) => a.event.t), ["retention.swept"]);
-    const kept = await db.query<{ n: number }>("select count(*)::int as n from web_messages where run_id = any($1::uuid[]) and text <> ''", [runs]);
+    const kept = await db.query<{ n: number }>("select count(*)::int as n from web_messages where run_id = any($1::uuid[]) and text <> ''", [lastMonth]);
     assert.equal(kept.rows[0]!.n, 0, "the door's copy of each redacted run's reply is cleared too");
-    const again = aliquot(windowed, env, "retention", "--dry-run", "--as-of", asOf);
+    const today = await view((await procs(env).startWeb(windowed)).base, runs[0]!);
+    assert.ok(today.bodies.every((b) => b.state === "stored"), "today's runs are inside the window and keep their bodies");
+    const again = aliquot(windowed, env, "retention", "--dry-run");
     assert.match(again.out, /Nothing is past the window/);
     const all = aliquot(windowed, env, "runs");
     assert.equal(all.code, 0, "aliquot runs exits 0 only when every chain is intact");
-    redactedRun = runs[1]!;
-    return `${listed.length} runs listed and redacted, the door's reply copies cleared, audit event written, a second dry run finds nothing, every chain intact`;
+    redactedRun = lastMonth[0]!;
+    return `${listed.length} runs from last month listed and redacted, today's kept, an --as-of sweep refused, the door's reply copies cleared, audit event written, a second dry run finds nothing, every chain intact`;
   });
 
   await check("8. the record page shows the redacted body line, with its hash", async () => {
@@ -289,6 +325,20 @@ try {
     } finally {
       await browser.close();
     }
+  });
+
+  await check("9. the same question asked again after the sweep is stored again and answered", async () => {
+    const env = { LABH_PAYLOAD_KEY_2: K2, LABH_PAYLOAD_KEY_3: K3 };
+    const door = await stack(windowed, env, "w6");
+    const old = (await view(door, redactedRun)).bodies.find((b) => b.role === "input")!;
+    assert.equal(old.state, "redacted");
+    const again = await ask(door, "dry-ice", LAST_MONTH[0][0]);
+    const f = (await loadEvents(db, again)).find((e) => e.event.t === "run.finished")?.event;
+    assert.ok(f?.t === "run.finished" && f.outcome === "answered", "a run on a body the sweep emptied answers");
+    const input = (await view(door, again)).bodies.find((b) => b.role === "input")!;
+    assert.equal(input.hash, old.hash, "the question has the same address as last month's");
+    assert.ok(input.state === "stored" && input.keyId === "k2", `${input.state}`);
+    return `"${LAST_MONTH[0][0]}" answered; its body ${old.hash.slice(0, 12)}... is stored again under k2`;
   });
 } finally {
   await stepProcs.stopAll();

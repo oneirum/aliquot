@@ -451,10 +451,13 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
       // digest would let anyone confirm a guessed body (a participant id) against it.
       const hash = address(content.cls, content.value) as string as PayloadHash;
       const { nonce, ciphertext } = seal(cipherKey, plaintext, hash);
-      // The same bytes at the same class are one row already, under whichever key wrote it first; at another class the address differs.
+      // The same bytes at the same class are one row already, under whichever key wrote it first; at another class the
+      // address differs. A row the retention sweep emptied takes the body again, under this key: the same text asked
+      // after a sweep is a new copy, and a run on it must be able to read it.
       await db.query(
         `insert into payloads (hash, cls, ciphertext, nonce, key_id, bytes) values ($1, $2, $3, $4, $5, $6)
-         on conflict (hash) do nothing`,
+         on conflict (hash) do update set ciphertext = excluded.ciphertext, nonce = excluded.nonce, key_id = excluded.key_id, redacted_at = null, redaction_reason = null
+         where payloads.ciphertext is null`,
         [hash, content.cls, ciphertext, nonce, keyId, plaintext.length],
       );
       return { hash, cls: content.cls, bytes: plaintext.length };
@@ -500,17 +503,21 @@ export function createPayloadStore(db: Db, config: StoreConfig): PayloadStore {
  */
 export async function labAddressKey(db: Db, ring: Keyring): Promise<Uint8Array> {
   const rows = (await db.query<{ key_id: string; nonce: Buffer; wrapped: Buffer }>("select key_id, nonce, wrapped from payload_keys order by key_id")).rows;
-  let addressKey: Buffer;
-  const mine = rows.find((r) => ring.keys.has(r.key_id));
-  if (mine) {
+  let addressKey: Buffer | undefined;
+  const mine = rows.filter((r) => ring.keys.has(r.key_id));
+  // Every held key must unwrap its own row: a wrong value under a known id would otherwise start and write under it.
+  for (const r of mine) {
+    let unwrapped: Buffer;
     try {
-      addressKey = unseal(subkey(ring.keys.get(mine.key_id)!, WRAP_INFO), mine.nonce, mine.wrapped, `payload_keys:${mine.key_id}`);
+      unwrapped = unseal(subkey(ring.keys.get(r.key_id)!, WRAP_INFO), r.nonce, r.wrapped, `payload_keys:${r.key_id}`);
     } catch {
-      throw new Error(`payload key ${mine.key_id} is not the key this lab knows as ${mine.key_id}: its stored payloads would not decrypt`);
+      throw new Error(`payload key ${r.key_id} is not the key this lab knows as ${r.key_id}: its stored payloads would not decrypt`);
     }
-  } else if (rows.length) {
-    throw new Error(`this lab's payloads are addressed under a key kept with ${rows.map((r) => r.key_id).join(", ")}, and this process holds none of them`);
-  } else {
+    if (addressKey && !addressKey.equals(unwrapped)) throw new Error(`payload key ${r.key_id} keeps a different address key from ${mine[0]!.key_id}: payload_keys is inconsistent`);
+    addressKey = unwrapped;
+  }
+  if (!addressKey) {
+    if (rows.length) throw new Error(`this lab's payloads are addressed under a key kept with ${rows.map((r) => r.key_id).join(", ")}, and this process holds none of them`);
     const oldest = (await db.query<{ key_id: string }>("select key_id from payloads where key_id is not null order by created_at, hash limit 1")).rows[0]?.key_id ?? ring.current;
     const master = ring.keys.get(oldest);
     if (!master) throw new Error(`this lab's first payloads are under key ${oldest}, which this process does not hold; start once with it before rotating`);

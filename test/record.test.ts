@@ -281,7 +281,7 @@ test("run_events refuses updates and deletes at the database level", async () =>
   assert.equal((await loadEvents(db, runId)).length, 1);
 });
 
-test("payloads rows allow only a redaction and a key rewrap; the class and the address never change", async () => {
+test("payloads rows allow only a redaction, a key rewrap and a refill of a redacted row; the class and the address never change", async () => {
   const r = await store.put(Labelled.stamp({ text: "guarded" }, "D1", "test"));
   await assert.rejects(db.query("delete from payloads where hash = $1", [r.hash]), /payloads is insert-only/);
   await assert.rejects(db.query("update payloads set cls = 'D0' where hash = $1", [r.hash]), /immutable/);
@@ -293,7 +293,11 @@ test("payloads rows allow only a redaction and a key rewrap; the class and the a
   await assert.rejects(store.get(r), (err: unknown) => err instanceof PayloadUnavailable && err.why === "key-mismatch", "a rewrapped row reads only under its new key");
   await db.query("update payloads set ciphertext = null, nonce = null where hash = $1", [r.hash]);
   assert.deepEqual(await store.get(r), { redacted: true, hash: r.hash, cls: "D1" });
-  await assert.rejects(db.query("update payloads set ciphertext = 'z'::bytea, nonce = 'n'::bytea, key_id = 'k3' where hash = $1", [r.hash]), /redact.*or rewrap/, "a redacted body cannot come back");
+  await assert.rejects(db.query("update payloads set ciphertext = 'z'::bytea where hash = $1", [r.hash]), /redact.*or rewrap/, "a redacted row takes a body only whole: ciphertext, nonce and key together");
+  const again = await store.put(Labelled.stamp({ text: "guarded" }, "D1", "test"));
+  assert.equal(again.hash, r.hash);
+  const got = await store.get(again);
+  assert.ok(!("redacted" in got) && JSON.stringify(got.value) === '{"text":"guarded"}', "the same body put again fills the redacted row under this store's key");
 });
 
 test("the chain head is anchored on the job and a resume refuses a record that does not match it", async () => {
