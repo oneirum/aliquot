@@ -13,7 +13,7 @@ import { parseConfig } from "../packages/core/src/config.ts";
 import { DEFAULT_POLICY, Labelled, type DataClass } from "../packages/core/src/dataclass.ts";
 import { createGateway, type ExactModelId } from "../packages/core/src/gateway.ts";
 import type { Sha256 } from "../packages/core/src/hash.ts";
-import { createKbReader, memorySnapshots } from "../packages/core/src/kb.ts";
+import { createKbReader, memorySnapshots, NO_MEMBER } from "../packages/core/src/kb.ts";
 import { drive, type LoopDeps } from "../packages/core/src/loop.ts";
 import { LOOP_CONTRACT, type AgentId, type ResolvedAgent } from "../packages/core/src/agent.ts";
 import type { LeasedJob } from "../packages/core/src/queue.ts";
@@ -76,7 +76,7 @@ function runnerWith(sandbox: Sandbox | null) {
   return createToolRunner(registryOf(builtinTools()), { http, kb: createKbReader(memorySnapshots([])), tables: [VISITS, DOSING, MISFILED], sandbox, sandboxImage: config?.digest ?? null, secret });
 }
 
-const env: ToolEnv = { knowledgeBases: [], retrieval: { algorithm: "bm25-v1", readCapTokens: 1000 }, sandbox: null, tables: ["visits", "dosing", "misfiled"] };
+const env: ToolEnv = { viewer: NO_MEMBER, knowledgeBases: [], retrieval: { algorithm: "bm25-v1", readCapTokens: 1000 }, sandbox: null, tables: ["visits", "dosing", "misfiled"] };
 
 type Outcome = { readonly ok: true; readonly cls: DataClass; readonly record: QueryRecord } | { readonly ok: false; readonly code: string; readonly detail: string; readonly cls: DataClass | null };
 

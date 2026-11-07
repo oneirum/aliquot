@@ -49,6 +49,7 @@ const catalog: Catalog = {
   endpoint: (id) => (id === "local" ? { placement: "lab" } : undefined),
   sandboxImage: () => undefined,
   dataset: () => undefined,
+  table: () => undefined,
 };
 const parsed = parseAgentDocument(JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")));
 assert.ok(parsed.ok);

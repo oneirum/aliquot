@@ -35,6 +35,7 @@ const catalog: Catalog = {
   endpoint: (id) => (id === "local" ? { placement: "lab" } : undefined),
   sandboxImage: () => undefined,
   dataset: () => undefined,
+  table: () => undefined,
 };
 const deployed: Deployed = { tools: registry.deployed(), snapshots: new Set([SNAP]), sandboxImages: new Set(), loopContract: LOOP_CONTRACT, retrieval: new Set(["bm25-v1"]) };
 const fixture = JSON.parse(await readFile(new URL("../fixtures/agent.json", import.meta.url), "utf8")) as Record<string, unknown>;

@@ -20,7 +20,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
-import { createPayloadStore, loadEvents, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
+import { createPayloadStore, loadEvents, oneKey, type RunId, type StoredEvent } from "../packages/core/src/record.ts";
 import { createSandbox } from "../packages/core/src/sandbox.ts";
 import { executeQuery, sameAnswer, tableReader, type QueryRecord, type Table } from "../packages/core/src/tables.ts";
 import type { Sha256 } from "../packages/core/src/hash.ts";
@@ -58,7 +58,7 @@ model.queries = Object.fromEntries(QUESTIONS.map((q) => [q.text, q.query]));
 
 const payloadKey = randomBytes(32).toString("hex");
 const env: Record<string, string> = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATABASE_URL: dbUrl, LABH_PAYLOAD_KEY: payloadKey, LAB0_REDCAP_TOKEN: token };
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: Buffer.from(payloadKey, "hex"), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(Buffer.from(payloadKey, "hex")) });
 
 const baseAgent = JSON.parse(readFileSync(join(root, "fixtures/agent.json"), "utf8")) as Record<string, unknown>;
 const agentPath = join(work, "agent-data.json");
