@@ -13,7 +13,7 @@ import { DEFAULT_POLICY, Labelled } from "../packages/core/src/dataclass.ts";
 import { duaAccess, duaRefusal, runKb, type Dua } from "../packages/core/src/dua.ts";
 import { citedEntry } from "../packages/core/src/surfaces/web-source.ts";
 import { keyedAddresser } from "../packages/core/src/hash.ts";
-import { createKbReader, memorySnapshots, snapshotFromFixture } from "../packages/core/src/kb.ts";
+import { createKbReader, memorySnapshots, NO_MEMBER, snapshotFromFixture } from "../packages/core/src/kb.ts";
 import type { RunEvent, RunId, Trigger } from "../packages/core/src/record.ts";
 import { builtinTools, createHttpEgress, createToolRunner, registryOf, type ToolEnv } from "../packages/core/src/tools.ts";
 import { memoryJournal } from "./recorder.ts";
@@ -82,6 +82,7 @@ const cohort = snapshotFromFixture(JSON.parse(await fixture("kb-cohort.json")), 
 const config = load(DUAS);
 const runner = createToolRunner(registryOf(builtinTools()), { http: createHttpEgress({ policy: DEFAULT_POLICY, hosts: {} }), kb: createKbReader(memorySnapshots([release, cohort])), datasets: config.datasets, sandbox: { run: async (job: { mounts: readonly { id: string }[] }) => ({ mounted: job.mounts.map((m) => m.id) }) } as never, duas: config.duas, clock: { now: () => Date.parse("2026-11-07T05:00:00Z") } });
 const env: ToolEnv = {
+  viewer: NO_MEMBER,
   knowledgeBases: [
     { kbId: "lab0-release", snapshot: release.snapshot.id, cls: "D1" },
     { kbId: "lab0-cohort", snapshot: cohort.snapshot.id, cls: "D1" },
@@ -128,9 +129,9 @@ test("a member the DUA does not name gets nothing of its entries: not in search,
   assert.deepEqual((read.body.refused as { path: string }[]).map((e) => e.path), ["release/consent-groups.md"]);
   assert.doesNotMatch(JSON.stringify(read.body), /SENTINEL/);
 
-  const outline = await runner.kbFor(j, env.knowledgeBases).outline(release.snapshot.id);
+  const outline = await runner.kbFor(j, env.knowledgeBases).outline(release.snapshot.id, NO_MEMBER);
   assert.deepEqual(outline.value.paths, ["methods/actigraphy.md"]);
-  assert.deepEqual((await runner.kbFor(j, env.knowledgeBases).outline(cohort.snapshot.id)).value.paths, [], "a whole-KB DUA leaves its outline empty");
+  assert.deepEqual((await runner.kbFor(j, env.knowledgeBases).outline(cohort.snapshot.id, NO_MEMBER)).value.paths, [], "a whole-KB DUA leaves its outline empty");
 });
 
 test("a named member reads the DUA's entries at its class level; the expired one stays refused to them too", async () => {
@@ -141,7 +142,7 @@ test("a named member reads the DUA's entries at its class level; the expired one
   assert.doesNotMatch(JSON.stringify(read.body), /SENTINEL-LINKAGE/);
   assert.match(JSON.stringify(read.body.refused), /DUA sleep-linkage-2025 expired on 2026-01-31/);
   assert.equal(read.cls, "D3", "raised to restricted's level, so no hosted endpoint may receive it");
-  const outline = await runner.kbFor(j, env.knowledgeBases).outline(release.snapshot.id);
+  const outline = await runner.kbFor(j, env.knowledgeBases).outline(release.snapshot.id, NO_MEMBER);
   assert.deepEqual(outline.value.paths, ["methods/actigraphy.md", "release/consent-groups.md"]);
   assert.equal(outline.cls, "D3", "an outline listing a DUA entry is at the DUA's level");
 });
@@ -179,9 +180,9 @@ test("the chat's Source chip reopens a cited DUA entry only while the DUA admits
     { event: { t: "tool.completed", retrieved: [{ snapshot: release.snapshot.id, entries: [consent.hash], truncated: false }] } },
   ] as never;
   const kb = createKbReader(memorySnapshots([release]));
-  const open = (today: string, kbs: typeof env.knowledgeBases | null = env.knowledgeBases) => citedEntry(events, "release/consent-groups.md", runKb(kb, kbs, config.duas, events, today));
+  const open = (today: string, kbs: typeof env.knowledgeBases | null = env.knowledgeBases) => citedEntry(events, "release/consent-groups.md", runKb(kb, kbs, config.duas, events, today), NO_MEMBER);
   assert.equal((await open("2027-06-30")).t, "entry", "on the DUA's last day it opens");
   assert.equal((await open("2027-07-01")).t, "missing", "after it expires it does not, though the run read it");
   assert.equal((await open("2027-06-30", null)).t, "missing", "with the run's agent unknown, nothing opens while DUAs are declared");
-  assert.equal((await citedEntry(events, "release/consent-groups.md", runKb(kb, null, [], events, "2030-01-01"))).t, "entry", "a lab with no DUA reads as before");
+  assert.equal((await citedEntry(events, "release/consent-groups.md", runKb(kb, null, [], events, "2030-01-01"), NO_MEMBER)).t, "entry", "a lab with no DUA reads as before");
 });

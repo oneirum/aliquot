@@ -195,7 +195,7 @@ export async function exportBundle(core: CardCore, scope: ExportScope, opts: { r
       continue;
     }
     // The outline, the manifest and every entry are at the snapshot's class, so one decision covers the file.
-    const decision = decideEgress(await createKbReader(memorySnapshots([loaded])).outline(id), to, core.config.policy);
+    const decision = decideEgress(await createKbReader(memorySnapshots([loaded])).outline(id, "all"), to, core.config.policy);
     const wanted = retrieved.get(id) ?? new Set();
     const entries = loaded.entries.filter((e) => wanted.has(e.hash));
     if (decision.allow) await write(`snapshots/${id}.json`, { manifest: loaded.snapshot, entries });

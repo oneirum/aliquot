@@ -53,6 +53,7 @@ import type { KbReader } from "../kb.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
 import { citedVersions, recordView, recordViewOf, sourceStatus as versionStatus } from "../record-view.ts";
 import { currentProvenance } from "../kb.ts";
+import { EMPTY_DIRECTORY, runViewer, type MemberDirectory } from "../members.ts";
 import { seesAllRuns, type Role } from "../roles.ts";
 import type { LabConfig, SurfaceConfig, SurfaceKind, TokenSurfaceConfig } from "../config.ts";
 import { SignOnRefused, type SignOn } from "./signon.ts";
@@ -283,9 +284,9 @@ export function createWebHandler(
   where = "",
   tokens: DoorTokens = new Map(),
   studio: StudioHandler | null = null,
-  access: { readonly signOn?: SignOn; readonly kb?: KbReader } = {},
+  access: { readonly signOn?: SignOn; readonly kb?: KbReader; readonly directory?: MemberDirectory } = {},
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
-  const { signOn, kb } = access;
+  const { signOn, kb, directory } = access;
   return async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -401,7 +402,8 @@ export function createWebHandler(
           // Opened as the run's member may see it today, so an entry whose DUA has since expired no longer opens.
           const started = events.find((e) => e.event.t === "run.started")?.event;
           const agent = deps.duas?.length && started?.t === "run.started" ? await loadVersion(db, started.agent).catch(() => null) : null;
-          const cited = await citedEntry(events, path, runKb(kb, agent?.knowledgeBases ?? null, deps.duas ?? [], events, utcDay(Date.now())));
+          // and as the run's viewer, so a synced document outside their scope does not open either.
+          const cited = await citedEntry(events, path, runKb(kb, agent?.knowledgeBases ?? null, deps.duas ?? [], events, utcDay(Date.now())), runViewer(events, directory ?? EMPTY_DIRECTORY));
           // Sign-on off, the door cannot tell who is asking, so it shows what any member may see.
           const role: Role = viewer.t === "member" ? viewer.role : "member";
           if (runPath[2] === "source.json") return send(req, res, 200, sourceChip(cited, role), NO_STORE);

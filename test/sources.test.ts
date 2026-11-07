@@ -14,7 +14,7 @@ import { buildBm25, createKbReader, memorySnapshots, NO_MEMBER, searchBm25, type
 import { drive, type LoopDeps } from "../packages/core/src/loop.ts";
 import { directoryFromConfig, viewerFor } from "../packages/core/src/members.ts";
 import type { LeasedJob } from "../packages/core/src/queue.ts";
-import { createPayloadStore, type RunEvent, type ThreadKey } from "../packages/core/src/record.ts";
+import { createPayloadStore, oneKey, type RunEvent, type ThreadKey } from "../packages/core/src/record.ts";
 import { buildSynced, driveSource, entryPathOf, folderSource, scopeFromPermissions, syncKb, watchSources, type DocumentSource } from "../packages/core/src/sources.ts";
 import { builtinTools, createHttpEgress, createToolRunner, registryOf } from "../packages/core/src/tools.ts";
 import { FOLDER, GOOGLE_DOC, startFakeDrive } from "../scripts/fake-drive.ts";
@@ -24,7 +24,7 @@ import { RUN } from "./events.ts";
 import { memoryJournal } from "./recorder.ts";
 
 const { db } = await freshDatabase("labh_test_sources");
-const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, key: randomBytes(32), keyId: "k1" });
+const store = createPayloadStore(db, { placement: "lab", policy: DEFAULT_POLICY, keyring: oneKey(randomBytes(32)) });
 const root = mkdtempSync(join(tmpdir(), "aliquot-sources-"));
 after(async () => {
   await db.end();

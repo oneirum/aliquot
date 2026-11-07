@@ -675,6 +675,8 @@ try {
     assert.deepEqual(card.knowledgeBases.map((k) => [k.kbId, k.snapshot, k.cls]), [["lab0-handbook", published!.id, published!.cls]]);
     assert.match(card.prompt.systemTextSha256 ?? "", /^[0-9a-f]{64}$/);
     return `sheet: 6 surfaces, 3 endpoints, 3 agents (two published by check R); card ${card.hash.slice(0, 12)} validates`;
+  });
+
   await check("check K: a synced folder and a fake Drive feed one KB with scoped entries; an edit reaches the next answer, the record cites the version, and an out-of-scope member's run never reads the scoped entry", async () => {
     // The earlier checks' workers would claim this check's runs on configs without its endpoint, so they stop first.
     await ps.stopAll();
