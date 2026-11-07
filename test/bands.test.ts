@@ -24,6 +24,7 @@ const fixture = JSON.parse(await readFile(new URL("../fixtures/agent.json", impo
 const catalog: Catalog = {
   latestSkill: () => undefined,
   dataset: () => undefined,
+  table: () => undefined,
   latestSnapshot: (kbId) => (kbId === "handbook" ? { id: "s".repeat(64) as SnapshotId, cls: "D1" } : undefined),
   tool: (name) => (name === "kb_search" || name === "kb_read" ? { hash: name.padEnd(64, "t") as ToolHash, reads: "D0", effects: "read" } : undefined),
   endpoint: (id) => (id === "local" ? { placement: "lab" } : id === "hosted" ? { placement: "zdr" } : id === "claude-cli" ? { placement: "public", agentCli: { kind: "claude-code", cliVersion: "2.1.303" } } : undefined),

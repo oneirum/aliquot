@@ -91,7 +91,7 @@ const T = {
   noRedirect: "gateway.test.ts: a provider request refuses a redirect, so neither the prompt nor the key reaches the other origin",
   hostList: "tools.test.ts: ctx.fetch refuses undeclared hosts and classes above the host placement, and reaches declared lab hosts",
   redirectHop: "tools.test.ts: each redirect hop is checked against the egress list and decideEgress, and journaled when followed",
-  builtinTools: "tools.test.ts: core holds the eleven built-in tools, each with the hosts it may reach",
+  builtinTools: "tools.test.ts: core holds the twelve built-in tools, each with the hosts it may reach",
   toolsRefused: "lab-config.test.ts: a [tools] table is refused, with or without a dir, because Aliquot loads no contributed tool folder",
   boundaries: "boundaries.test.ts: the checked-out sources reach the network, load code, decide egress, brand and stamp only where allowed",
   seal: "seal.test.ts: a sealed process under the permission model refuses every runtime route and still reaches Postgres",

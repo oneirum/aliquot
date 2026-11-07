@@ -1,0 +1,18 @@
+{
+ "visit3_done_count": 26,
+ "cohort_b_mean_dose": 20.735294,
+ "cohort_b_n": 17,
+ "visit3_done_by_site": {
+  "madison": 18,
+  "milwaukee": 8
+ },
+ "cohort_c_n": 3,
+ "rows": 38,
+ "arm1_mean_weight": 72.266667,
+ "arm1_n": 15,
+ "arm2_mean_weight": 78.86,
+ "arm2_n": 15,
+ "ae_grade_ge2_count": 6,
+ "ae_grade3_count": 4,
+ "redcap_rows": 30
+}

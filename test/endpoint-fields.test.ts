@@ -105,6 +105,7 @@ test("a band agent on an endpoint with no model list is runnable once models nam
     const catalog: Catalog = {
       latestSkill: () => undefined,
       dataset: () => undefined,
+      table: () => undefined,
       latestSnapshot: (kbId) => (kbId === "handbook" ? { id: "s".repeat(64) as SnapshotId, cls: "D1" } : undefined),
       tool: (name) => ({ hash: name.padEnd(64, "t") as ToolHash, reads: "D0", effects: "read" }),
       endpoint: (id) => config.endpoints.find((e) => e.id === id),
@@ -176,6 +177,7 @@ test("an agent that pins a Covered Model to a zdr endpoint is a publish error, a
   const catalog: Catalog = {
     latestSkill: () => undefined,
     dataset: () => undefined,
+    table: () => undefined,
     latestSnapshot: (kbId) => (kbId === "handbook" ? { id: "s".repeat(64) as SnapshotId, cls: "D1" } : undefined),
     tool: (name) => ({ hash: name.padEnd(64, "t") as ToolHash, reads: "D0", effects: "read" }),
     endpoint: (id) => (id === "hosted" ? { placement: "zdr" } : id === "local" ? { placement: "lab" } : undefined),

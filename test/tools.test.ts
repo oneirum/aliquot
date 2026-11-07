@@ -63,7 +63,7 @@ const env = { knowledgeBases: [{ kbId: "handbook", snapshot: loaded.snapshot.id,
 const RUN = "00000000-0000-4000-8000-000000000002" as RunId;
 const signal = new AbortController().signal;
 
-test("core holds the eleven built-in tools, each with the hosts it may reach", () => {
+test("core holds the twelve built-in tools, each with the hosts it may reach", () => {
   assert.deepEqual(
     builtinTools().map((t) => [t.manifest.name, t.owner, t.manifest.egress]),
     [
@@ -71,6 +71,7 @@ test("core holds the eleven built-in tools, each with the hosts it may reach", (
       ["kb_read", "core", []],
       ["dataset_list", "core", []],
       ["run_code", "core", []],
+      ["data_query", "core", []],
       ["openalex_search", "core", ["api.openalex.org"]],
       ["pubmed_search", "core", ["eutils.ncbi.nlm.nih.gov"]],
       ["arxiv_search", "core", ["export.arxiv.org"]],

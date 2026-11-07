@@ -195,6 +195,20 @@ contact_email_env = "LABH_CONTACT_EMAIL"
 # class = "D2"
 # description = "Wave 1 survey export, one row per participant"
 
+# Tables data_query counts and averages over, inside the sandbox. A column the table has and columns does not name is
+# restricted and never leaves the container. A group, or the values behind a measure, smaller than min_cell (5 or
+# more) refuses the query. aggregate_class is the class the answer enters a run at. An agent lists table ids in tables.
+# [tables.visits]
+# description = "Visit log, one row per participant"
+# csv = "/srv/lab/data/visits.csv"        # or redcap_url = "https://redcap.example.edu/api/" with
+#                                         # redcap_token_env = "REDCAP_TOKEN", and the host placed lab or institution in [hosts]
+# aggregate_class = "D1"
+# min_cell = 5
+# [tables.visits.columns]
+# participant_id = "restricted"
+# cohort = "free"
+# dose_mg = "free"
+
 # The run_code container. Build it once (docker build -t aliquot-sandbox sandbox) and pin the digest it reports.
 # [sandbox]
 # image = "aliquot-sandbox@sha256:<64 hex>"

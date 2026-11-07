@@ -85,6 +85,10 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/walk-signon.ts": ["network-globals", "module:child_process", "module:net"],
   // The fake Drive API the sources test and the sources walk serve. It is not deployed.
   "scripts/fake-drive.ts": ["module:http"],
+  // The fake REDCap API the data checks and pnpm walk:data query. It is not deployed.
+  "scripts/fake-redcap.ts": ["module:http"],
+  // pnpm walk:data reruns each recorded query against the fake REDCap API. It is not deployed.
+  "scripts/walk-data.ts": ["network-globals"],
   "scripts/record-demo.ts": ["module:child_process"],
   // The study walk runs the aliquot binary as a PI and a reviewer would, with the write flag export needs. It is not deployed.
   "scripts/walk-study.ts": ["module:child_process"],

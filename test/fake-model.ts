@@ -9,7 +9,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 
-export type Script = "search-then-answer" | "search-read-answer" | "cite" | "always-search" | "answer" | "wrong-model" | "http-500" | "compile";
+export type Script = "data" | "search-then-answer" | "search-read-answer" | "cite" | "always-search" | "answer" | "wrong-model" | "http-500" | "compile";
 
 /** What the http-500 script puts in its error body. A provider error body can echo the prompt, so the record must not hold it in the clear. */
 export const ERROR_BODY_MARKER = "provider-echo P-12345";
@@ -25,6 +25,8 @@ export interface FakeModel {
   /** "METHOD url" of each request, in arrival order. */
   readonly paths: readonly string[];
   readonly bodies: readonly unknown[];
+  /** For the data script: the data_query input it sends for each member question, by exact text. */
+  queries: Record<string, unknown>;
   close(): Promise<void>;
 }
 
@@ -46,7 +48,7 @@ function respond(res: ServerResponse, status: number, body: unknown): void {
 }
 
 export async function startFakeModel(modelId: string, script: Script, at: { readonly port: number; readonly host: string } = { port: 0, host: "127.0.0.1" }): Promise<FakeModel> {
-  const state = { script, delayMs: 0, requests: 0, completions: 0, paths: [] as string[], bodies: [] as unknown[] };
+  const state = { script, delayMs: 0, requests: 0, completions: 0, paths: [] as string[], bodies: [] as unknown[], queries: {} as Record<string, unknown> };
   const server: Server = createServer(async (req, res) => {
     state.requests += 1;
     state.paths.push(`${req.method} ${req.url}`);
@@ -97,6 +99,13 @@ export async function startFakeModel(modelId: string, script: Script, at: { read
         return respond(res, 500, { error: `upstream failed: ${ERROR_BODY_MARKER}` });
       case "compile":
         return respond(res, 200, answer(compileReply(body.messages)));
+      case "data": {
+        // The data walk's fake: the pinned query for the question, then the tool's result quoted back. It does not think.
+        const last = toolResults.at(-1);
+        if (last !== undefined) return respond(res, 200, answer(`From the lab's data: ${last}`));
+        const q = Object.entries(state.queries).find(([question]) => lastUser.includes(question))?.[1];
+        return respond(res, 200, q ? call("data_query", q) : answer("No query is pinned for this question."));
+      }
       case "cite": {
         // The demo's fake: search, read the top entry, quote its opening and name the path. It reads; it does not think.
         const last = toolResults.at(-1);
@@ -152,6 +161,12 @@ export async function startFakeModel(modelId: string, script: Script, at: { read
     },
     get bodies() {
       return state.bodies;
+    },
+    get queries() {
+      return state.queries;
+    },
+    set queries(q) {
+      state.queries = q;
     },
     close: () =>
       new Promise<void>((resolve, reject) => {

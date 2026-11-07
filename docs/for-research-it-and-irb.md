@@ -218,9 +218,9 @@ vectors), so no AWS SDK runs in the worker.
 
 ### Tools
 
-Aliquot runs eleven built-in tools, all part of its own code: knowledge base search and read, seven literature tools
+Aliquot runs twelve built-in tools, all part of its own code: knowledge base search and read, seven literature tools
 (search in OpenAlex, PubMed, arXiv and Europe PMC; open-access full text from Europe PMC; DOI lookup through Crossref
-and Unpaywall; citation walks through OpenAlex), a list of the lab's datasets, and `run_code`. A lab cannot add its
+and Unpaywall; citation walks through OpenAlex), a list of the lab's datasets, `run_code`, and `data_query`. A lab cannot add its
 own tool. Every Aliquot binary refuses to start when `lab.toml` has a `[tools]` table, and the studio fails every request
 that needs core with the same message. A built-in tool's version is the hash of its spec, not its code, so a change
 to a tool's code alone moves no agent version.
@@ -232,7 +232,36 @@ to a tool's code alone moves no agent version.
   capabilities, CPU, memory and process limits, and a time limit, as an unprivileged user. Datasets are mounted
   read-only, and the output carries the class of every dataset mounted. A test checks each of these against the real
   container.
+- `data_query` counts and averages over a table the data steward registered in `lab.toml` (a CSV, or a REDCap project
+  through its API). The rows are computed on in the same kind of container, with no network and nothing writable, and
+  only the aggregate comes back. See "Minimum cell size" below.
 - The model gateway never follows a redirect, so a prompt and an API key go only to the endpoint in `lab.toml`.
+
+### Minimum cell size
+
+`data_query` is how a model gets numbers from participant-level tables without reading them. The rules:
+
+- **Columns.** The steward marks each column `free` or `restricted` in `[tables.<id>.columns]`. A column the table has
+  and the list does not name is restricted. For REDCap, a field the project's data dictionary flags as an identifier
+  is restricted even if `lab.toml` marks it free. A query that filters, groups or measures on a restricted column is
+  refused before the table is read, and the refusal is recorded.
+- **Minimum cell size.** Every group in an answer, and the count of values behind every count, sum, mean and standard
+  deviation, must be at least the table's `min_cell`. The default is 5. A steward may raise it (11 matches the CMS
+  cell suppression policy), and `lab.toml` refuses a value below 5. A count of zero is allowed. When any cell is
+  between 1 and `min_cell - 1`, the whole query is refused; the small cell is not suppressed and the rest returned,
+  because a total and the rest would give it away. The refusal names the rule, never the size of the cell.
+- **Measures.** Count, sum, mean and standard deviation. Minimum, maximum and median are left out, because each can be
+  one participant's own value. Nothing lists rows.
+- **Where it is enforced.** Three places: the column check in the worker before any read; the engine inside the
+  container, which refuses a small cell and prints nothing else; and the worker again, which parses the engine's
+  output against a fixed shape and rechecks every cell. The engine's error output is never read, because a traceback
+  can quote a row.
+- **Class.** An answer enters the run at the table's `aggregate_class`, which the steward sets. That is the class the
+  lab accepts for counts and means over the free columns, not a lower label on the rows: the rows never enter the run.
+  An agent may hold a table only when that class is at or below its ceiling.
+- **Rerun.** The record of each answer holds the query, the sha256 of the table's bytes, the engine's hash, the sandbox
+  image, the rows read and matched, and the numbers, so a reviewer can rerun it and get the same number or see that
+  the source changed.
 
 ## What is stored, and how
 
@@ -327,6 +356,11 @@ last one is why the lines belong somewhere the database administrator cannot wri
 after either.
 
 ## Not covered yet
+
+- **Differencing across queries.** The minimum cell size applies to each answer on its own. Two allowed answers can
+  still be subtracted (all of cohort B, then cohort B at one site) to reach a smaller group. Restrict the free columns
+  a steward exposes, raise `min_cell`, and review the record of each `data_query` call. Query auditing across a
+  thread is planned.
 
 - **Detection is pattern-based.** Restricted text that no pattern matches keeps its declared class. A name without a
   label ("John Smith was admitted") is not found by `phi-name`; a lab with free-text PHI should set its PHI channels'

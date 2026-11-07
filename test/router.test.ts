@@ -68,6 +68,7 @@ const catalog: Catalog = {
   endpoint: (id) => (id === "local" ? { placement: "lab" } : undefined),
   sandboxImage: () => undefined,
   dataset: () => undefined,
+  table: () => undefined,
 };
 const publisher: Actor = { id: "pat" as MemberId, role: "publisher" };
 for (const d of [desk, methods]) await confirmPublish({ db, catalog: async () => catalog }, d, draftHashOf(d), publisher, "on the shared channel");

@@ -32,6 +32,7 @@ const catalog = (over: Partial<Catalog> = {}): Catalog => ({
   endpoint: (id) => (id === "claude" ? { placement: "public", agentCli: { kind: "claude-code", cliVersion: "2.1.303" } } : id === "unseen" ? { placement: "public", agentCli: { kind: "codex", cliVersion: null } } : { placement: "lab" }),
   sandboxImage: () => undefined,
   dataset: () => undefined,
+  table: () => undefined,
   ...over,
 });
 

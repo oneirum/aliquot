@@ -1,0 +1,51 @@
+[
+ {
+  "field_name": "record_id",
+  "form_name": "enrollment",
+  "field_type": "text",
+  "field_label": "Record ID",
+  "identifier": ""
+ },
+ {
+  "field_name": "first_name",
+  "form_name": "enrollment",
+  "field_type": "text",
+  "field_label": "First name",
+  "identifier": "y"
+ },
+ {
+  "field_name": "last_name",
+  "form_name": "enrollment",
+  "field_type": "text",
+  "field_label": "Last name",
+  "identifier": "y"
+ },
+ {
+  "field_name": "mrn",
+  "form_name": "enrollment",
+  "field_type": "text",
+  "field_label": "Medical record number",
+  "identifier": "y"
+ },
+ {
+  "field_name": "arm",
+  "form_name": "enrollment",
+  "field_type": "radio",
+  "field_label": "Arm",
+  "identifier": ""
+ },
+ {
+  "field_name": "weight_kg",
+  "form_name": "dosing",
+  "field_type": "text",
+  "field_label": "Weight (kg)",
+  "identifier": ""
+ },
+ {
+  "field_name": "ae_grade",
+  "form_name": "dosing",
+  "field_type": "radio",
+  "field_label": "Worst adverse event grade",
+  "identifier": ""
+ }
+]
