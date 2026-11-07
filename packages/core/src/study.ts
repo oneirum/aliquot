@@ -47,10 +47,14 @@ export interface Freeze {
   readonly listing: AgentListing;
 }
 
+/** A freeze ended before the study did: when the version was frozen and by whom, and when, by whom and why it ended. */
 export interface Deviation {
   readonly studyId: string;
   readonly agentId: AgentId;
   readonly hash: AgentVersionHash;
+  readonly frozenBy: MemberId;
+  readonly frozenAt: string;
+  readonly note: string;
   readonly by: MemberId;
   readonly reason: string;
   readonly at: string;
@@ -197,11 +201,21 @@ export async function unfreeze(db: Db, studyId: string, agentId: AgentId, actor:
 
 /** Every freeze ended before the study did, oldest first. */
 export async function deviations(db: Db, studyId: string): Promise<Deviation[]> {
-  const rows = await db.query<{ agent_id: string; hash: string; unfrozen_by: string; reason: string; unfrozen_at: Date }>(
-    "select agent_id, hash, unfrozen_by, reason, unfrozen_at from freezes where study_id = $1 and unfrozen_at is not null order by unfrozen_at",
+  const rows = await db.query<{ agent_id: string; hash: string; frozen_by: string; at: Date; note: string; unfrozen_by: string; reason: string; unfrozen_at: Date }>(
+    "select agent_id, hash, frozen_by, at, note, unfrozen_by, reason, unfrozen_at from freezes where study_id = $1 and unfrozen_at is not null order by unfrozen_at",
     [studyId],
   );
-  return rows.rows.map((r) => ({ studyId, agentId: r.agent_id as AgentId, hash: r.hash as AgentVersionHash, by: r.unfrozen_by as MemberId, reason: r.reason, at: r.unfrozen_at.toISOString() }));
+  return rows.rows.map((r) => ({
+    studyId,
+    agentId: r.agent_id as AgentId,
+    hash: r.hash as AgentVersionHash,
+    frozenBy: r.frozen_by as MemberId,
+    frozenAt: r.at.toISOString(),
+    note: r.note,
+    by: r.unfrozen_by as MemberId,
+    reason: r.reason,
+    at: r.unfrozen_at.toISOString(),
+  }));
 }
 
 /**

@@ -106,7 +106,7 @@ test("a study channel runs its frozen hash: a later publish moves the open chann
 
   assert.match(await refusal(unfreeze(db, "sleep-2026", "handbook" as AgentId, pi, "  ")), /needs a reason/);
   const d = await unfreeze(db, "sleep-2026", "handbook" as AgentId, pi, "participant feedback: answers too long");
-  assert.deepEqual({ ...d, at: "" }, { studyId: "sleep-2026", agentId: "handbook", hash: frozenHash, by: pi, reason: "participant feedback: answers too long", at: "" });
+  assert.deepEqual({ ...d, at: "", frozenAt: "" }, { studyId: "sleep-2026", agentId: "handbook", hash: frozenHash, frozenBy: pi, frozenAt: "", note: "pre-registered version", by: pi, reason: "participant feedback: answers too long", at: "" });
   assert.equal((await deviations(db, "sleep-2026")).length, 1);
   assert.deepEqual((await pinFor(db, { surface: WEB_SURFACE, channelId: "sleep-study" }))?.freezes, []);
 

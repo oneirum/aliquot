@@ -24,6 +24,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadAudit } from "../packages/core/src/audit.ts";
+import { agentCardSchema } from "../packages/core/src/card.ts";
 import { DEFAULT_POLICY } from "../packages/core/src/dataclass.ts";
 import type { SnapshotId } from "../packages/core/src/hash.ts";
 import { loadManifest, tokenize, type KbSnapshot } from "../packages/core/src/kb.ts";
@@ -521,6 +522,28 @@ try {
     for (const [cfg, set] of hashes) if (set.size !== 1) bad.push(`${cfg}: ${set.size} version hashes for one agent and one published snapshot`);
     assert.deepEqual(bad, []);
     return `${runs.length} runs, every chain verified, ${hashes.size} agents with one version hash each`;
+  });
+
+  await check("check T: aliquot sheet lists exactly lab0's surfaces, endpoints and agent, and aliquot card of the handbook's version matches the card schema", async () => {
+    const sheet = await runWithInput(root, "aliquot.ts", ["--config", cfgHandbook, "sheet"], childEnv, "");
+    assert.equal(sheet.code, 0, sheet.stdout);
+    const rows = (heading: string) =>
+      sheet.stdout.split(`## ${heading}\n`)[1]!.split("\n## ")[0]!.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| ---")).slice(1).map((l) => l.split(" | ").map((c) => c.replace(/^\| | \|$/g, "")));
+    assert.deepEqual(rows("Surfaces").map((r) => [r[0], r[2], r[3]]), [["web", "lab", "up to D3"], ["acp", "zdr", "up to D1"], ["mcp", "zdr", "up to D1"], ["personal", "public", "up to D0"], ["slack", "approved", "up to D2"]]);
+    assert.deepEqual(rows("Model endpoints").map((r) => [r[0], r[1], r[2]]), [["local", compiler.url, "lab"], ["agentlab", agentModel.url, "lab"], ["hosted", hosted.url, "zdr"]]);
+    assert.deepEqual(rows("Agents").map((r) => [r[0], r[2], r[3]]), [["lab0-handbook", "lab.toml", "scripted-1 on agentlab"]]);
+    assert.match(sheet.stdout, /No study is registered\./);
+    const run = runs.find((r) => r.label.startsWith("Q") && r.cfg === cfgHandbook)!;
+    const started = (await loadEvents(db, run.runId)).find((e) => e.event.t === "run.started")!.event;
+    assert.ok(started.t === "run.started");
+    const printed = await runWithInput(root, "aliquot.ts", ["--config", cfgHandbook, "card", started.agent], childEnv, "");
+    assert.equal(printed.code, 0, printed.stdout);
+    const card = agentCardSchema.parse(JSON.parse(printed.stdout));
+    assert.deepEqual([card.hash, card.model.endpointId, card.model.placement, card.model.receivesUpTo], [started.agent, "agentlab", "lab", "D3"]);
+    assert.deepEqual(card.tools.map((t) => [t.name, t.deployedNow]), [["kb_search", true], ["kb_read", true]]);
+    assert.deepEqual(card.knowledgeBases.map((k) => [k.kbId, k.snapshot, k.cls]), [["lab0-handbook", published!.id, published!.cls]]);
+    assert.match(card.prompt.systemTextSha256 ?? "", /^[0-9a-f]{64}$/);
+    return `sheet: 5 surfaces, 3 endpoints, 1 agent; card ${card.hash.slice(0, 12)} validates`;
   });
 
   await check("total: the hosted endpoint saw exactly the one control request", async () => {

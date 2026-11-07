@@ -91,7 +91,7 @@ async function study(core: SharedCore, words: readonly string[], flags: StudyFla
         `  channels: ${s.channels.map((c) => `${c.surface}:${c.channelId}`).join(", ") || "none"}`,
         ...frozen.map((f) => `  frozen: ${f.agentId} at ${f.hash} by ${f.frozenBy} (${f.at}): ${f.note}`),
         ...(frozen.length ? [] : ["  frozen: nothing"]),
-        ...devs.map((d) => `  deviation: ${d.agentId} at ${d.hash.slice(0, 12)} unfrozen by ${d.by} (${d.at}): ${d.reason}`),
+        ...devs.map((d) => `  deviation: ${d.agentId} at ${d.hash.slice(0, 12)}, frozen by ${d.frozenBy} (${d.frozenAt}), unfrozen by ${d.by} (${d.at}): ${d.reason}`),
       ].join("\n"),
       { study: s, freezes: frozen, deviations: devs },
     );

@@ -297,7 +297,7 @@ const indexSchema = z.object({
     .object({
       study: z.looseObject({ id: z.string(), title: z.string() }),
       freezes: z.array(z.looseObject({ agentId: z.string(), hash: z.string(), frozenBy: z.string(), at: z.string(), note: z.string() })),
-      deviations: z.array(z.looseObject({ agentId: z.string(), hash: z.string(), by: z.string(), reason: z.string(), at: z.string() })),
+      deviations: z.array(z.looseObject({ agentId: z.string(), hash: z.string(), frozenBy: z.string(), frozenAt: z.string(), note: z.string(), by: z.string(), reason: z.string(), at: z.string() })),
     })
     .nullable(),
   payloads: z.array(z.object({ hash: hex64, cls, bytes: z.number().int(), disclosure: disclosureSchema })),
@@ -488,7 +488,7 @@ export function formatAudit(v: AuditView): string {
     const s = v.study;
     out.push(`study    ${s.study.id}: ${s.study.title}`);
     for (const f of s.freezes) out.push(`  frozen: ${f.agentId} at ${f.hash} by ${f.frozenBy} (${f.at}): ${f.note}`);
-    for (const d of s.deviations) out.push(`  deviation: ${d.agentId} at ${d.hash.slice(0, 12)} unfrozen by ${d.by} (${d.at}): ${d.reason}`);
+    for (const d of s.deviations) out.push(`  deviation: ${d.agentId} at ${d.hash.slice(0, 12)}, frozen by ${d.frozenBy} (${d.frozenAt}): ${d.note}; unfrozen by ${d.by} (${d.at}): ${d.reason}`);
     if (!s.deviations.length) out.push("  deviations: none");
   }
   for (const r of v.runs) {

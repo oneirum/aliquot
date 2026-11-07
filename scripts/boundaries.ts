@@ -72,6 +72,8 @@ const ALLOWED: Readonly<Record<string, readonly Capability[]>> = {
   "scripts/compose-ask.ts": ["network-globals"],
   "scripts/unit3.ts": ["module:http"],
   "scripts/record-demo.ts": ["module:child_process"],
+  // The study walk runs the aliquot binary as a PI and a reviewer would, with the write flag export needs. It is not deployed.
+  "scripts/walk-study.ts": ["module:child_process"],
   "scripts/agent-demo.ts": ["module:child_process"],
   "scripts/unit2.ts": ["network-globals", "module:child_process", "module:net"],
   // The preflight runs docker and the package managers for their versions and probes local ports. It is not deployed.

@@ -86,7 +86,7 @@ export function renderSheet(s: SheetInput): string {
     out.push(`- Channels: ${study.channels.map((ch) => `${ch.surface}:${ch.channelId}`).join(", ") || "none"}. A study channel runs its frozen version and is never routed.`);
     for (const f of freezes) out.push(`- Frozen: ${f.agentId} at version ${f.hash}, by ${f.frozenBy} on ${f.at.slice(0, 10)}. ${f.note}`);
     if (!freezes.length) out.push("- Nothing is frozen: its channels refuse every message.");
-    for (const d of deviations) out.push(`- Protocol deviation: ${d.agentId} at ${short(d.hash)} unfrozen by ${d.by} on ${d.at.slice(0, 10)}. ${d.reason}`);
+    for (const d of deviations) out.push(`- Protocol deviation: ${d.agentId} at ${short(d.hash)}, frozen by ${d.frozenBy} on ${d.frozenAt.slice(0, 10)}, unfrozen by ${d.by} on ${d.at.slice(0, 10)}. ${d.reason}`);
     out.push("");
   }
   return `${out.join("\n").trimEnd()}\n`;

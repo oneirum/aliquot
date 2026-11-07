@@ -147,6 +147,13 @@ to a tool's code alone moves no agent version.
 - **Audit stream** (`audit_events`). One hash-chained log for publishes, role changes and calls made outside a run.
 - **Studio tables.** Agent and knowledge base definitions, in plaintext. No detector runs when a definition is saved.
 
+## Studies, agent cards and reviewer replay
+
+- **A study pins its agent.** `aliquot study` registers a study (owner, data floor, IRB protocol), binds channels to it and freezes an agent version for it (`packages/core/src/study.ts`). A study channel runs the frozen version hash and is never routed or re-resolved, so a publish cannot change it (`intake` in `frontdoor.ts`). Only the study's owner may change a study. A freeze is refused when the version cannot run on this deployment, when the agent's ceiling is below the study's floor, or, at a D3 floor, when the agent does not name the study's IRB protocol. Ending a freeze needs a reason and is recorded as a protocol deviation. Every study write is in the audit stream, and a database trigger refuses to rewrite or delete a freeze (`migrations/0005_freezes_guard.sql`).
+- **The agent card** (`aliquot card <hash>`, `packages/core/src/card.ts`) states the version's model and the placement of its endpoint, each tool's spec hash, the knowledge base snapshots and their classes, the data ceilings and the sha256 of the exact system prompt. Its schema is `schemas/agent-card.schema.json`.
+- **The deployment sheet** (`aliquot sheet`, `packages/core/src/sheet.ts`) is generated from `lab.toml` and the study tables, so it lists what this deployment runs, not what a template says.
+- **Reviewer bundles.** `aliquot export` reads the payload key, like the worker, and writes a study's runs for a reviewer at a stated clearance. Each payload body is included only when the egress decision allows it at that clearance (`packages/core/src/replay.ts`); the rest are listed by hash and class. `aliquot replay` needs no database or key: it verifies every hash chain in the bundle, and can run each run again with its tools answered from the recording. A body's address is keyed, so a reviewer checks that the events are intact, and trusts the export for which body belongs to which address.
+
 ## Who can do what
 
 The five roles are member, author, publisher, data steward and PI (`packages/core/src/roles.ts`). Members ask
@@ -178,5 +185,6 @@ questions. Authors write drafts. Publishers publish. Anything at D3 needs the da
   separate user, a container or a VM).
 - **Hosted agent CLIs are confined on macOS only.** On other platforms an agent backend refuses to run.
 - **IRB and consent checks against knowledge base sources are not built.**
+- **Studies have no studio page and no consent disclosure draft.** A study owner manages a study with `aliquot study` on the lab server, which names the member acting with `--as` until sign-on. The draft of where participant data goes, for the IRB to edit, is not built.
 
 Aliquot has been tested on a synthetic lab with synthetic data. It has not yet been used by a real lab.
