@@ -780,6 +780,31 @@ try {
     }
   });
 
+  await check("check O: research IT exports every event as JSON lines with no question text, and /healthz follows the worker", async () => {
+    await ps.stopAll();
+    const { code, stdout } = await runWithInput(root, "aliquot.ts", ["--config", cfgHandbook, "audit", "export"], { PATH: childEnv.PATH!, HOME: childEnv.HOME!, DATABASE_URL: dbUrl }, "");
+    assert.equal(code, 0, stdout);
+    const lines = stdout.trim().split("\n").map((l) => JSON.parse(l) as { seq: number; type: string; run: string | null; refusal: { code: string } | null });
+    assert.deepEqual(lines.map((l) => l.seq), [...lines.map((l) => l.seq)].sort((a, b) => a - b), "lines come out in seq order");
+    const started = new Set(lines.filter((l) => l.type === "run.started").map((l) => l.run));
+    assert.deepEqual(runs.filter((r) => !started.has(r.runId)).map((r) => r.label), [], "every run's start is exported");
+    const refusals = lines.filter((l) => l.refusal?.code === "class-above-ceiling").length;
+    assert.ok(refusals >= 1, "the roster refusals are exported");
+    const texts = [prereg.restricted.message, ...prereg.inDocument.map((q) => q.question), ...prereg.outsideDocuments.map((q) => q.question)];
+    assert.deepEqual(texts.filter((t) => stdout.includes(t)), [], "no question or message text is in the export");
+    assert.equal(new RegExp(prereg.restricted.pattern).test(stdout), false, "no roster id is in the export");
+
+    const web = await ps.startWeb(cfgHandbook);
+    const status = async () => (await fetch(`${web.base}/healthz`)).status;
+    const before = await status();
+    const worker = ps.startWorker(cfgHandbook, "WO");
+    await waitFor("/healthz 200 once the worker beats", async () => ((await status()) === 200 ? true : null), 15_000);
+    await ps.stop(worker);
+    const after = await status();
+    assert.deepEqual([before, after], [503, 503]);
+    return `${lines.length} lines, ${started.size} runs, ${refusals} class-above-ceiling refusals, no question text; /healthz 503 -> 200 with a worker -> 503 when it stops`;
+  });
+
   await check("total: the hosted endpoint saw exactly the one control request", async () => {
     assert.equal(hosted.requests, 1);
     return "hosted requests over the whole script: 1";
