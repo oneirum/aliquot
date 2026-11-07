@@ -150,6 +150,8 @@ export type RunEvent =
       readonly history: readonly PayloadRef[];
       readonly route: RouteDecision | { readonly t: "pinned"; readonly studyId: string } | { readonly t: "direct" };
       readonly studyId: string | null;
+      /** The grant or cost center the agent's listing named when the run started. Absent when it named none. */
+      readonly project?: string;
     }
   | { readonly t: "model.requested"; readonly step: number; readonly attempt: number; readonly target: ModelTarget; readonly prompt: PayloadRef; readonly final: boolean }
   | {
@@ -603,6 +605,24 @@ export async function loadEvents(db: Db, runId: RunId): Promise<StoredEvent[]> {
 export async function studyRunIds(db: Db, studyId: string): Promise<RunId[]> {
   const res = await db.query<{ run_id: string }>("select run_id from run_events where seq = 0 and event->>'studyId' = $1 order by at, run_id", [studyId]);
   return res.rows.map((r) => r.run_id as RunId);
+}
+
+/** Every event of every run with a model call in [from, to), runs in start order. Usage reads these and nothing else. */
+export async function loadRunsWithCalls(db: Db, from: Date, to: Date): Promise<StoredEvent[][]> {
+  const res = await db.query<EventRow>(
+    `select run_id, seq, at, cls, prev_hash, hash, event from run_events where run_id in
+       (select run_id from run_events where event->>'t' = 'model.completed' and at >= $1 and at < $2)
+     order by run_id, seq`,
+    [from, to],
+  );
+  const runs = new Map<string, StoredEvent[]>();
+  for (const row of res.rows) {
+    const e = fromRow(row);
+    const run = runs.get(e.runId);
+    if (run) run.push(e);
+    else runs.set(e.runId, [e]);
+  }
+  return [...runs.values()].sort((a, b) => a[0]!.at.localeCompare(b[0]!.at));
 }
 
 /** The newest runs first, by the time of each run's first event. */

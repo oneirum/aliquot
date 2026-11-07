@@ -52,7 +52,7 @@ try {
   await core.close();
   process.exit(2);
 }
-const handler = createWebHandler(core.db, core.intake, log, core.config.web.channel, core.config.labName ?? hostname(), tokens, (surface, op, json) => studioRoute(core, surface, op, json), { ...(signOn ? { signOn } : {}), kb: core.kb, directory: core.directory });
+const handler = createWebHandler(core.db, core.intake, log, core.config.web.channel, core.config.labName ?? hostname(), tokens, (surface, op, json) => studioRoute(core, surface, op, json), { ...(signOn ? { signOn } : {}), kb: core.kb, directory: core.directory }, core.config.prices);
 const { server, port } = await listenWeb(handler, values.port ? Number(values.port) : core.config.web.port, host);
 console.log(`[web] listening on http://${host}:${port}${signOn ? `, members sign in at ${new URL(core.config.signOn!.issuer).host}` : ""}`);
 

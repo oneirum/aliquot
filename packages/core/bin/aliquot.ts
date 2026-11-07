@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n] | keys ... | retention ...>
+// aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n] | usage [...] | keys ... | retention ...>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
 // aliquot export also needs --allow-fs-write for the bundle directory (pnpm aliquot:export allows bundles/* only).
 // aliquot replay needs no lab.toml, database or key: it reads one bundle directory.
@@ -12,7 +12,8 @@ import { parseArgs } from "node:util";
 import { configProblem, databaseUrlFromEnv, loadConfig, type LabConfig } from "../src/config.ts";
 import { connect, type Db } from "../src/db.ts";
 import { askAnswers, defaultAnswers, InitAborted, OFFERED_CAMPUSES, parseCampus, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
-import { loadEvents, recentRunIds, verifyChain, type RunId } from "../src/record.ts";
+import { loadEvents, loadRunsWithCalls, recentRunIds, verifyChain, type RunId } from "../src/record.ts";
+import { callsOf, formatUsageCsv, formatUsageTable, GROUP_BY, usageJson, usageRows, type GroupBy } from "../src/usage.ts";
 import { ANCHOR_KEY_ENV, AnchorRefused, newAnchorKeyPem, describeAnchorProblem, loadAnchorKey, loadAnchorVerifyKey, verifyAnchors, writeAnchor } from "../src/anchor.ts";
 import { loadAudit, verifyAudit } from "../src/audit.ts";
 import { formatRecordView, formatRunList, recordView, recordViewOf } from "../src/record-view.ts";
@@ -61,6 +62,12 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
   retention --dry-run [--as-of YYYY-MM-DD] | --apply
                       list, or redact, the run bodies past [policy.retention] purge_payload_after_days. A redacted body keeps its
                       hash, class and size, so every chain still verifies; --apply checks them after. --as-of previews a later date
+  usage [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--by agent|project|member|endpoint] [--csv | --json]
+                      model calls, tokens and cost from the run records alone, each call priced at the
+                      [prices] rate in force when it was made. --from and --to are UTC days, both included
+                      (default: this month so far). --by defaults to project. A call with no rate prints
+                      its tokens and "no price", never zero. --by member groups by the member id on each
+                      run's trigger.
   ask [--door url] [--user id] [--thread id] [--ceiling D0..D3] [--timeout s] <question... | ->
                       ask a question through the web door, as the chat page does; - reads it from stdin.
                       --json prints one JSON line per event: started, tool, finished, refused
@@ -154,6 +161,10 @@ try {
       reexecute: { type: "boolean", default: false },
       endpoint: { type: "string" },
       "endpoint-placement": { type: "string" },
+      from: { type: "string" },
+      to: { type: "string" },
+      by: { type: "string", default: "project" },
+      csv: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -183,6 +194,20 @@ if (command === "study" || command === "card" || command === "sheet") {
   const { as, title, floor, irb, prereg, note, reason } = values;
   process.exit(await studyCommands(command, positionals.slice(1), { config: values.config ?? "lab.toml", json: values.json, as, title, floor, irb, prereg, note, reason }));
 }
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const today = new Date().toISOString().slice(0, 10);
+const range = { from: values.from ?? `${today.slice(0, 8)}01`, to: values.to ?? today };
+const usageArgs =
+  command === "usage" &&
+  !runId &&
+  DAY.test(range.from) &&
+  DAY.test(range.to) &&
+  !Number.isNaN(Date.parse(`${range.from}T00:00:00Z`)) &&
+  !Number.isNaN(Date.parse(`${range.to}T00:00:00Z`)) &&
+  range.from <= range.to &&
+  GROUP_BY.includes(values.by as GroupBy) &&
+  !(values.csv && values.json);
+if (command !== "usage" && (values.from || values.to || values.csv || values.by !== "project")) usage();
 const limit = Number(values.limit);
 const initOnly = values.force || values.yes || values.pattern.length > 0 || values.sample.length > 0 || values.campus !== undefined || values["anchor-key"] !== undefined || values["anchor-log"] !== undefined;
 const verifyOnly = values.anchors || values["public-key"] !== undefined;
@@ -195,7 +220,8 @@ const valid =
     (!stewardOnly && command === "runs" && !runId && Number.isInteger(limit) && limit > 0 && limit <= 1000) ||
     (!stewardOnly && (command === "verify" || command === "anchor") && !runId && !values.json) ||
     (command === "keys" && ["status", "rotate", "reencrypt", "env"].includes(runId ?? "") && !values["dry-run"] && !values.apply && (values["as-of"] === undefined || runId === "status")) ||
-    (command === "retention" && !runId && values["dry-run"] !== values.apply));
+    (command === "retention" && !runId && values["dry-run"] !== values.apply) ||
+    (!stewardOnly && usageArgs));
 if (!valid) usage();
 if (command === "retention" && values.apply && values["as-of"] !== undefined) {
   // A sweep judged at a later date would redact bodies before their floor; only a preview may look ahead.
@@ -621,6 +647,45 @@ async function steward(db: Db): Promise<number> {
 }
 
 const db = connect(url);
+if (command === "usage") {
+  try {
+    process.exitCode = await usageReport();
+  } catch (err) {
+    process.stderr.write(`${databaseProblem(err, url)}\n`);
+    process.exitCode = 2;
+  } finally {
+    await db.end().catch(() => {});
+  }
+  process.exit();
+}
+
+async function usageReport(): Promise<number> {
+  const by = values.by as GroupBy;
+  const start = new Date(`${range.from}T00:00:00Z`);
+  const end = new Date(Date.parse(`${range.to}T00:00:00Z`) + 86_400_000);
+  const runs = await loadRunsWithCalls(db, start, end);
+  const broken = runs.filter((events) => verifyChain(events) !== null).map((events) => events[0]!.runId);
+  // A run that spans a range edge is loaded whole; only its calls inside the range count.
+  const inRange = (at: string) => Date.parse(at) >= start.getTime() && Date.parse(at) < end.getTime();
+  const calls = runs.flatMap((events) => callsOf(events)).filter((c) => inRange(c.at));
+  const hashes = [...new Set(calls.map((c) => c.agent))];
+  const names = new Map(
+    hashes.length ? (await db.query<{ hash: string; agent_id: string }>("select hash, agent_id from agent_versions where hash = any($1)", [hashes])).rows.map((r) => [r.hash, r.agent_id] as const) : [],
+  );
+  const rows = usageRows(calls, config.prices, by, names);
+  if (values.json) process.stdout.write(`${JSON.stringify({ ...(usageJson(rows, by, range) as object), brokenChains: broken }, null, 2)}\n`);
+  else if (values.csv) process.stdout.write(`${formatUsageCsv(rows, by)}\n`);
+  else {
+    process.stdout.write(`usage ${range.from} to ${range.to} (UTC), by ${by}, from ${runs.length} run records\n\n${formatUsageTable(rows, by)}\n`);
+    if (!config.prices.size) process.stdout.write(`\nlab.toml has no [prices], so nothing is priced.\n`);
+  }
+  if (broken.length) {
+    process.stderr.write(`CHAIN BROKEN in ${broken.length} run ${broken.length === 1 ? "record" : "records"}, counted above: ${broken.join(", ")}\n`);
+    return 3;
+  }
+  return 0;
+}
+
 try {
   if (command === "keys" || command === "retention") process.exitCode = await steward(db);
   else await records();
@@ -637,7 +702,7 @@ async function records(): Promise<void> {
   const views = [];
   for (const id of ids) {
     const events = await loadEvents(db, id);
-    if (events.length) views.push(command === "record" ? await recordViewOf(db, id, events, held) : recordView(id, events));
+    if (events.length) views.push(command === "record" ? await recordViewOf(db, id, events, held, config.prices) : recordView(id, events, [], config.prices));
   }
   if (command === "record" && !views.length) {
     process.stderr.write(`no run ${runId} in this database\n`);

@@ -179,3 +179,15 @@ test("a resumed run that already recorded its fault posts once and finishes once
   );
   assert.equal(h.posts.length, 1);
 });
+
+test("the project the job carries is stamped on run.started, and a job from before projects stamps none", async () => {
+  const tagged = await harness({});
+  await drive({ ...tagged.job, payload: { ...(tagged.job.payload as object), project: "R01-MH123456" } }, tagged.journal, tagged.deps);
+  const started = tagged.journal.log.find((e) => e.t === "run.started");
+  assert.equal(started?.t === "run.started" && started.project, "R01-MH123456");
+
+  const old = await harness({});
+  await drive(old.job, old.journal, old.deps);
+  const plain = old.journal.log.find((e) => e.t === "run.started");
+  assert.ok(plain && !("project" in plain), "absent, so the event hashes as it did before projects");
+});

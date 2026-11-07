@@ -80,6 +80,8 @@ export const runJobPayloadSchema = z.object({
   route: routeSchema.default({ t: "direct" }),
   studyId: z.string().nullable(),
   dataClass: z.object({ id: z.string(), rule: z.string(), retentionDays: z.number().nullable() }).optional(),
+  // A payload written before projects existed names none.
+  project: z.string().nullable().default(null),
 });
 
 export interface RunJobPayload {
@@ -97,6 +99,8 @@ export interface RunJobPayload {
   readonly studyId: string | null;
   /** The message's data class at the gate, so a refusal later in the run can name it, and the retention job can read it. */
   readonly dataClass?: { readonly id: string; readonly rule: string; readonly retentionDays: number | null };
+  /** The agent document's project when the run was admitted, copied onto run.started. */
+  readonly project: string | null;
 }
 
 /** A jobs row whose payload is not a run job. Nothing can be journaled for it, so the worker fails the job without a run record. */
@@ -220,7 +224,7 @@ async function admit(msg: InboundMessage, key: string, trigger: (member: string)
     const agent = await loadVersion(deps.db, freeze.hash);
     const refused = (await residencyRefused(msg, agent, raised.text, classification, policy, deps)) ?? (await duaRefused(msg, agent, raised, policy, deps));
     if (refused) return refused;
-    const run = { hash: freeze.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: freeze.studyId, route: { t: "pinned", studyId: freeze.studyId }, answeredBy: choiceOf(freeze.listing), dataClass } as const;
+    const run = { hash: freeze.hash, engine: agent.agentCli ? "agent-cli" : "chat", kind: "interactive", studyId: freeze.studyId, route: { t: "pinned", studyId: freeze.studyId }, answeredBy: choiceOf(freeze.listing), dataClass, project: freeze.listing.project ?? null } as const;
     return enqueueRun(msg, raised, run, key, trigger, deps);
   }
   if (chosen.t !== "agent") return chosen;
@@ -231,7 +235,7 @@ async function admit(msg: InboundMessage, key: string, trigger: (member: string)
   if (refused) return refused;
   const hash = versionHash(resolved.agent);
   await deps.db.query("insert into agent_versions (hash, agent_id, body) values ($1, $2, $3) on conflict (hash) do nothing", [hash, resolved.agent.agentId, JSON.stringify(resolved.agent)]);
-  return enqueueRun(msg, admitted, { hash, engine: resolved.agent.agentCli ? "agent-cli" : "chat", kind: doc.kind, studyId: null, route: chosen.route, answeredBy: choiceOf(listingOf(doc)), dataClass }, key, trigger, deps);
+  return enqueueRun(msg, admitted, { hash, engine: resolved.agent.agentCli ? "agent-cli" : "chat", kind: doc.kind, studyId: null, route: chosen.route, answeredBy: choiceOf(listingOf(doc)), dataClass, project: doc.project ?? null }, key, trigger, deps);
 }
 
 /**
@@ -283,7 +287,7 @@ async function duaRefused(msg: InboundMessage, agent: ResolvedAgent, admitted: A
 async function enqueueRun(
   msg: InboundMessage,
   admitted: Extract<GateResult, { t: "admit" }>,
-  run: Pick<RunJobPayload, "engine" | "kind" | "route" | "studyId" | "dataClass"> & { readonly hash: AgentVersionHash; readonly answeredBy: AgentChoice },
+  run: Pick<RunJobPayload, "engine" | "kind" | "route" | "studyId" | "dataClass" | "project"> & { readonly hash: AgentVersionHash; readonly answeredBy: AgentChoice },
   key: string,
   trigger: (member: string) => Trigger,
   deps: IntakeDeps,
@@ -304,6 +308,7 @@ async function enqueueRun(
     route: run.route,
     studyId: run.studyId,
     ...(run.dataClass ? { dataClass: run.dataClass } : {}),
+    project: run.project,
   };
   const job = await deps.queue.enqueue({ kind: "run", key }, thread, payload);
   if (!job.created) {

@@ -123,6 +123,20 @@ placement = "lab"                        # lab hardware: up to D3
 [lab]
 name = "Mettu Lab"                     # shown at the top of the chat and record pages; leave it out to show the hostname
 
+# What model calls cost, per million tokens, keyed by a model id or an endpoint id (a model id's rate wins).
+# Each call is priced at the rate in force on its own date (00:00 UTC). A rate change is a second [[prices.<id>]]
+# with a later effective date; never edit an old rate, or past usage changes. aliquot usage totals from these.
+# [[prices.openrouter]]
+# input_per_mtok = 3.00
+# output_per_mtok = 15.00
+# currency = "USD"
+# effective = 2026-10-01
+# [prices."qwen3:8b"]                   # a lab-hosted model's cost recovery rate, if the lab charges one
+# input_per_mtok = 0.10
+# output_per_mtok = 0.10
+# currency = "USD"
+# effective = 2026-09-01
+
 [surfaces.web]
 placement = "lab"
 port = 3000                              # no token: members sign in through [auth] below, or the door stays on this machine

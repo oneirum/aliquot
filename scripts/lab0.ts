@@ -122,6 +122,12 @@ function config(name: string, agentPath: string): string {
     `participant_id_patterns = ['${prereg.restricted.pattern}']`,
     "[agents]",
     `fixtures = ["${agentPath}"]`,
+    // Synthetic rates, large enough that the scripted model's 15-token calls cost cents. hosted has none, so its calls print "no price".
+    "[prices.agentlab]",
+    "input_per_mtok = 2000",
+    "output_per_mtok = 6000",
+    'currency = "USD"',
+    "effective = 2026-01-01",
     "",
   ];
   const path = join(work, `lab-${name}.toml`);
@@ -136,6 +142,7 @@ const cfgHandbook = config(
     instructions: "You answer lab members' practical questions from the lab0 handbook. Call kb_search with the member's question and answer from those entries only.",
     knowledgeBases: ["lab0-handbook"],
     model: { endpointId: "agentlab", modelId: "scripted-1", params: { temperature: 0, maxOutputTokens: 256 } },
+    project: "lab0-grant",
   }),
 );
 // An agent whose model is the hosted endpoint, so a restricted message has somewhere to leak to.
@@ -625,6 +632,29 @@ try {
     }
     assert.equal(hosted.requests, start, "nothing reached the hosted endpoint");
     return `roster snapshot ${snapshot.id.slice(0, 12)} (D3) published${out.result.gaps.length ? ` over ${out.result.gaps.length} gaps with a note` : ""}; hosted agent with it attached: ${outcome}; hosted requests ${start} -> ${hosted.requests}`;
+  });
+
+  await check("check U: aliquot usage totals the handbook agent's calls under its project, priced from the records alone", async () => {
+    let input = 0, output = 0, calls = 0;
+    // Every door's runs count (web, ask, mcp, slack), so the expected sum reads the records, not this script's list.
+    const tagged = await db.query<{ run_id: RunId }>("select run_id from run_events where event->>'t' = 'run.started' and event->>'project' = 'lab0-grant'");
+    assert.ok(tagged.rowCount, "the handbook agent's runs carry its project");
+    for (const { run_id } of tagged.rows)
+      for (const e of await loadEvents(db, run_id))
+        if (e.event.t === "model.completed") {
+          calls++;
+          input += e.event.usage.input;
+          output += e.event.usage.output;
+        }
+    // 2000 and 6000 per million tokens: cents = (input x 2000 + output x 6000) / 10^4, rounded half up.
+    const cents = Math.floor((input * 2000 + output * 6000 + 5000) / 10_000);
+    const today = new Date().toISOString().slice(0, 10);
+    const { code, stdout } = await runWithInput(root, "aliquot.ts", ["--config", cfgHandbook, "usage", "--from", "2026-01-01", "--to", today, "--by", "project"], childEnv, "");
+    assert.equal(code, 0, stdout);
+    const line = stdout.split("\n").find((l) => l.startsWith("lab0-grant"));
+    assert.ok(line, stdout);
+    assert.match(line, new RegExp(`^lab0-grant +\\d+ +${calls} +${input} +${output}  USD ${Math.floor(cents / 100)}\\.${String(cents % 100).padStart(2, "0")}$`));
+    return line.replace(/ +/g, " ");
   });
 
   await check("check D: every run has a verified run record and an agent version hash", async () => {
