@@ -8,6 +8,7 @@ import { DEFAULT_POLICY, decideEgress, describeRefusal, Labelled, type Mark } fr
 import { createGateway, Prompt, regionOf, type ExactModelId, type ModelEndpoint, type ModelTarget } from "../packages/core/src/gateway.ts";
 import { classifyText, marksIn } from "../packages/core/src/gate.ts";
 import { parseConfig } from "../packages/core/src/config.ts";
+import { defaultClasses, type ClassRule, type Policy } from "../packages/core/src/policy.ts";
 import { startFakeAzureOpenAI, startFakeBedrock, TEST_AWS } from "./fake-cloud.ts";
 import { startFakeProvider } from "./fake-provider.ts";
 import { memoryRecorder } from "./recorder.ts";
@@ -93,6 +94,15 @@ test("marks survive derive as a union, and only another mark can be added", () =
   assert.deepEqual(Labelled.derive("ab", [a, b], "t").marks, ["phi", "cui"]);
   assert.deepEqual(Labelled.derive("a", [a], "t").marks, ["cui"]);
   assert.ok(Object.isFrozen(a.marks));
+});
+
+test("a lab's phi, export_controlled and cui classes set the marks", () => {
+  const cls = (id: string, detectors: string[]): ClassRule => ({ id, level: "D2", modelTier: "hosted", record: "text", retentionDays: null, detectors, residency: null, message: id, builtin: false });
+  const policy: Policy = { classes: [...defaultClasses(DEFAULT_POLICY), cls("phi", ["phi-zip"]), cls("export_controlled", ["export-marker"]), cls("cui", ["dua-marker"])], labPatterns: [] };
+  assert.deepEqual(marksIn("ZIP 53706 for the visit", policy), ["phi"]);
+  assert.deepEqual(marksIn("the EAR99 rig drawing", policy), ["export-controlled"]);
+  assert.deepEqual(marksIn("ZIP 53706 for the visit"), [], "a detector no class lists finds nothing");
+  assert.deepEqual(marksIn("study phs000001 notes", policy), ["cui"], "a cui class's own detector marks cui");
 });
 
 test("the gate marks PHI, export-controlled and CUI", () => {
@@ -233,7 +243,7 @@ test("lab.toml: baa defaults false, region unknown; both parse when given", () =
   assert.equal(plain.region, undefined);
   const azureCfg = parseConfig(toml('base_url = "https://r.openai.azure.com/openai/deployments/gpt-4o"\nplacement = "approved"\nbaa = true\nregion = "us"\napi_version = "2024-10-21"\nauth_header = "api-key"\napi_key_env = "AZURE_OPENAI_API_KEY"\nmodels = ["gpt-4o-2024-11-20"]'), "/lab/lab.toml").endpoints[0]!;
   assert.deepEqual([azureCfg.baa, azureCfg.region, azureCfg.apiVersion, azureCfg.authHeader], [true, "us", "2024-10-21", "api-key"]);
-  assert.throws(() => parseConfig(toml('base_url = "http://h/v1"\nplacement = "approved"\nregion = "US"'), "/l"), /lowercase/);
+  assert.throws(() => parseConfig(toml('base_url = "http://h/v1"\nplacement = "approved"\nregion = "US"'), "/l"), /two-letter country code/);
 });
 
 test("lab.toml: a bedrock-converse endpoint needs aws_region and models, and takes no api key", () => {
