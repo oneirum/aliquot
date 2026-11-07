@@ -34,7 +34,7 @@ export async function boot(configPath: string, env: NodeJS.ProcessEnv = process.
     ...shared,
     gateway: createGateway(shared.config.endpoints, shared.config.policy, undefined, shared.config.agentBackends),
     kb,
-    tools: createToolRunner(shared.registry, { http: shared.http, kb, contact: contactFromEnv(shared.config, env), datasets: shared.config.datasets, sandbox }),
+    tools: createToolRunner(shared.registry, { http: shared.http, kb, contact: contactFromEnv(shared.config, env), datasets: shared.config.datasets, duas: shared.config.duas, sandbox }),
     sandbox,
     surfaces: (id) => {
       const surface = served.get(id);

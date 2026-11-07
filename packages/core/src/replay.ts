@@ -689,6 +689,8 @@ async function reexecuteRun(b: Bundle, run: BundleRun, endpoint: string, placeme
   const tools: ToolRunner = {
     registry,
     specs: createToolRunner(registry, { http: NO_HTTP, kb }).specs,
+    // The bundle holds no lab.toml, so no DUA: the outline is the pinned snapshot's, as the bundle's export allowed.
+    kbFor: () => kb,
     isRepeatable: () => true,
     needsConfirm: () => false,
     async invoke(j, call) {

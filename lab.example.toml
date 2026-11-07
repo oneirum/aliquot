@@ -227,6 +227,17 @@ participant_id_patterns = ["\\bP-\\d{5}\\b"]   # anything matching is D3
 # detectors = ["hipaa-safe-harbor"]
 # message = "This message carries a HIPAA identifier. Remove it, or ask the lab's honest broker."
 
+# Data use agreements: data bound to the members an agreement names, until the day it ends. A member it does not
+# name, a run with no member, and everyone after expires get nothing of what it covers, and are told which DUA and
+# which rule. The class may not be one a hosted model reads. See README "Data bound to named people: DUAs".
+# [duas.sleep-release]
+# members = ["ana@lab.example"]         # member ids as runs record them ([auth] id_claim under sign-on)
+# expires = 2027-06-30                  # the last day it holds
+# class = "restricted"
+# entries = ["sleep-kb/release/consent-groups.md"]
+# knowledge_bases = []
+# datasets = []
+
 # An agent published in the studio answers in the channels it names (surface:channel, for example web:lab).
 # Until the router arrives, the fixture agent answers in every other channel. Knowledge bases come from fixtures.
 [agents]

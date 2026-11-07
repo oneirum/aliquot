@@ -113,7 +113,7 @@ export async function startFakeModel(modelId: string, script: Script, at: { read
         const last = toolResults.at(-1);
         if (last === undefined) return respond(res, 200, call("kb_search", { query: lastUser, k: 3 }));
         const parsed = JSON.parse(last) as { results?: { path: string }[]; entries?: { title: string }[] };
-        if (parsed.results) return respond(res, 200, call("kb_read", { paths: parsed.results.map((r) => r.path) }));
+        if (parsed.results) return respond(res, 200, parsed.results.length ? call("kb_read", { paths: parsed.results.map((r) => r.path) }) : answer("The lab's documents do not cover this question."));
         return respond(res, 200, answer(`Scripted answer from ${parsed.entries?.length ?? 0} entries: ${(parsed.entries ?? []).map((e) => e.title).join("; ")}`));
       }
       case "search-then-answer":

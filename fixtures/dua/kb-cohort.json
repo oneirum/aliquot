@@ -1,0 +1,14 @@
+{
+  "kbId": "lab0-cohort",
+  "title": "Sleep cohort visit schedule",
+  "purpose": "The visit schedule of the sleep cohort release, for the analysts its DUA names.",
+  "cls": "D1",
+  "irbProtocol": "SYNTH-LAB0",
+  "entries": [
+    {
+      "path": "cohort/visit-schedule.md",
+      "title": "Visit schedule",
+      "body": "SENTINEL-COHORT-5150. Cohort visits run at baseline, month 6 and month 12; each visit collects the sleep diary, actigraphy and a blood draw."
+    }
+  ]
+}

@@ -100,7 +100,7 @@ export async function bootShared(configPath: string, env: NodeJS.ProcessEnv = pr
     http: createHttpEgress({ policy: config.policy, hosts: config.hosts }),
     catalog,
     agents,
-    intake: { db, store, queue: createQueue(db), gate, catalog, agentsFor: async (channel) => { const heads = await publishedAgentsFor(db, channel); return heads.length ? heads : agents; }, endpointRegion: (id) => endpoints.get(id)?.region ?? null },
+    intake: { db, store, queue: createQueue(db), gate, catalog, agentsFor: async (channel) => { const heads = await publishedAgentsFor(db, channel); return heads.length ? heads : agents; }, endpointRegion: (id) => endpoints.get(id)?.region ?? null, duas: config.duas, endpointPlacement: (id) => endpoints.get(id)?.placement ?? config.agentBackends.find((b) => b.id === id)?.placement ?? null },
     fixtureSnapshots,
     registry,
     close: () => db.end(),

@@ -24,6 +24,7 @@ import type { CallFailure, PayloadRef, RunEvent, RunJournal } from "./record.ts"
 import { parseAtom } from "./atom.ts";
 import { platformFetch } from "./seal.ts";
 import { citationWalk, doiLookup, europepmcFulltext, europepmcSearch } from "./literature.ts";
+import { duaAccess, memberOf, scopeKb, utcDay, type Dua, type DuaAccess, type Withheld } from "./dua.ts";
 
 export type Effect = "read" | "lab-write" | "external-send";
 
@@ -169,6 +170,8 @@ export interface ToolRunner {
   needsConfirm(tool: string): boolean;
   /** Specs for the model, in the order asked. Unknown names are left out. */
   specs(names: readonly string[]): ToolSpec[];
+  /** The run's knowledge bases as its member may see them under lab.toml's DUAs: what the prompt's outline is built from. */
+  kbFor(journal: RunJournal, knowledgeBases: readonly AttachedKb[]): KbReader;
   readonly registry: ToolRegistry;
 }
 
@@ -248,12 +251,18 @@ export interface ToolRunnerDeps {
   readonly contact?: string | null;
   readonly datasets?: readonly Dataset[];
   readonly sandbox?: Sandbox | null;
+  /** lab.toml's [duas]: every knowledge base read and dataset is filtered by the run's member and today's date. */
+  readonly duas?: readonly Dua[];
+  readonly clock?: { now(): number };
 }
 
 /** What only core's own tools reach: the agent's mountable datasets and the container runner. */
 interface CoreScope {
   readonly datasets: readonly Dataset[];
   readonly sandbox: Sandbox | null;
+  /** The run's member's access to DUA-bound data, and what the knowledge base reads of this call withheld under it. */
+  readonly access: DuaAccess;
+  readonly withheld: readonly Withheld[];
 }
 
 /** Keyed by the context the runner built for a core tool, so any other tool, whose context is never a key, cannot reach the sandbox. */
@@ -266,8 +275,14 @@ function coreScope(ctx: ToolContext): CoreScope {
 }
 
 export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): ToolRunner {
+  const accessOf = (journal: RunJournal) => duaAccess(deps.duas ?? [], memberOf(journal.events()), utcDay((deps.clock ?? Date).now()));
+  const scoped = (journal: RunJournal, knowledgeBases: readonly AttachedKb[], withheld: Withheld[]) => {
+    const access = accessOf(journal);
+    return { access, kb: scopeKb(deps.kb, (snapshot) => knowledgeBases.find((b) => b.snapshot === snapshot)?.kbId, access, withheld) };
+  };
   return {
     registry,
+    kbFor: (journal, knowledgeBases) => scoped(journal, knowledgeBases, []).kb,
     isRepeatable: (name) => {
       const t = registry.get(name);
       return !!t && (t.manifest.idempotent || t.manifest.effects === "read");
@@ -305,11 +320,14 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
         touched.push(r.cls);
         return r;
       };
+      // Every read goes through the member's DUA scope first, so no tool, core or not, can read past it.
+      const withheld: Withheld[] = [];
+      const { access, kb: member } = scoped(journal, env.knowledgeBases, withheld);
       const kb: KbReader = {
         has: async (snapshot) => attached.has(snapshot) && deps.kb.has(snapshot),
-        outline: (snapshot) => (own(snapshot), seen(deps.kb.outline(snapshot))),
-        read: (snapshot, paths, cap) => (own(snapshot), seen(deps.kb.read(snapshot, paths, cap))),
-        search: (snapshot, query, k) => (own(snapshot), seen(deps.kb.search(snapshot, query, k))),
+        outline: (snapshot) => (own(snapshot), seen(member.outline(snapshot))),
+        read: (snapshot, paths, cap) => (own(snapshot), seen(member.read(snapshot, paths, cap))),
+        search: (snapshot, query, k) => (own(snapshot), seen(member.search(snapshot, query, k))),
       };
       const ctx: ToolContext = {
         runId: journal.runId,
@@ -328,7 +346,7 @@ export function createToolRunner(registry: ToolRegistry, deps: ToolRunnerDeps): 
           return deps.http.request(url, payload, (event) => journal.record(event), { ...init, signal: init?.signal ?? signal }, tool.manifest.egress);
         },
       };
-      if (tool.owner === "core") coreScopes.set(ctx, { datasets: mountable(env.sandbox, deps.datasets ?? []), sandbox: deps.sandbox ?? null });
+      if (tool.owner === "core") coreScopes.set(ctx, { datasets: mountable(env.sandbox, deps.datasets ?? []), sandbox: deps.sandbox ?? null, access, withheld });
       const startedAt = Date.now();
       let result: unknown;
       try {
@@ -354,6 +372,19 @@ function attachedFor(ctx: ToolContext, kb: string | undefined): AttachedKb[] {
   return attached;
 }
 
+/**
+ * What the member's DUAs kept out of a knowledge base call, for the model to tell the member. A search names only the
+ * DUA and the rule, with a count, since its paths were never asked for; a read names each path the model asked for.
+ */
+function withheldNote(ctx: ToolContext, paths: boolean): Record<string, unknown> {
+  const scope = coreScopes.get(ctx);
+  if (!scope?.withheld.length) return {};
+  if (paths) return { refused: scope.withheld.map((w) => ({ path: w.path, reason: w.refusal.reason })) };
+  const byDua = new Map<string, { reason: string; count: number }>();
+  for (const w of scope.withheld) byDua.set(w.refusal.dua, { reason: w.refusal.reason, count: (byDua.get(w.refusal.dua)?.count ?? 0) + 1 });
+  return { withheld: [...byDua].map(([dua, v]) => ({ dua, matches: v.count, reason: v.reason })) };
+}
+
 export const kbSearch = defineTool({
   name: "kb_search",
   description: "Search the agent's knowledge bases and return the best matching entries by path and title. Use for any question the knowledge base might answer, then read the entries with kb_read. Not for web search.",
@@ -375,7 +406,7 @@ export const kbSearch = defineTool({
       for (const h of hits.value) results.push({ kb: b.kbId, path: h.path, title: h.title, score: h.score });
     }
     results.sort((a, b) => b.score - a.score || (a.kb < b.kb ? -1 : a.kb > b.kb ? 1 : 0));
-    return { results: results.slice(0, k) };
+    return { results: results.slice(0, k), ...withheldNote(ctx, false) };
   },
 });
 
@@ -402,6 +433,7 @@ export const kbRead = defineTool({
       entries: read.value.entries.map((e) => ({ path: e.path, title: e.title, body: e.body, facts: e.facts })),
       ...(read.value.truncated ? { omitted: read.value.omitted, note: `The read cap is ${ctx.retrieval.readCapTokens} tokens. The omitted paths were not read; read them in a separate call.` } : {}),
       ...(read.value.missing.length ? { missing: read.value.missing } : {}),
+      ...withheldNote(ctx, true),
     };
   },
 });
@@ -417,15 +449,20 @@ export const datasetList = defineTool({
   egress: [],
   idempotent: true,
   async run(_input, ctx) {
+    const scope = coreScope(ctx);
+    const withheld = scope.datasets.flatMap((d) => {
+      const a = scope.access.dataset(d.id);
+      return a.t === "refused" ? [{ id: d.id, reason: a.refusal.reason }] : [];
+    });
     const datasets = await Promise.all(
-      coreScope(ctx).datasets.map(async (d) => {
+      scope.datasets.filter((d) => scope.access.dataset(d.id).t !== "refused").map(async (d) => {
         // File names and descriptions are the dataset's content: lab exports often carry participant ids in them.
         ctx.touched(d.cls);
         const { files, more } = await listFiles(d, DATASET_FILES_LISTED);
         return { id: d.id, class: d.cls, description: d.description, files, ...(more ? { note: `Only the first ${DATASET_FILES_LISTED} files are listed.` } : {}) };
       }),
     );
-    return { datasets };
+    return { datasets, ...(withheld.length ? { withheld } : {}) };
   },
 });
 
@@ -449,6 +486,8 @@ export const runCode = defineTool({
     for (const id of new Set(datasets)) {
       const d = scope.datasets.find((x) => x.id === id);
       if (!d) throw new ToolInputError(`dataset ${id} is not one this agent may mount; dataset_list names those it may`);
+      const a = scope.access.dataset(id);
+      if (a.t === "refused") throw new ToolInputError(`dataset ${id} is not mounted: ${a.refusal.reason}`);
       ctx.touched(d.cls);
       const check = await checkMount(d);
       if (!check.ok) throw new ToolInputError(check.reason);
