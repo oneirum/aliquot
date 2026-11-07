@@ -609,6 +609,11 @@ export type ToolResult = { readonly t: "output"; readonly content: PayloadRef } 
 /** Attempts per call before the error goes to the agent. loop.ts RETRY.maxAttempts is the same number; both read it from here. */
 export const MAX_ATTEMPTS = 3;
 
+/** Whether an egress.refused event ends its run: every destination but a tool's HTTP request (`http:<host>`). */
+export function refusalEndsRun(destination: string): boolean {
+  return !destination.startsWith("http:");
+}
+
 /** Pure. Total over any valid event list, including one cut off by a crash at any point. cls = join of every event's cls. */
 export function fold(events: readonly StoredEvent[]): RunState {
   const first = events[0];
@@ -701,7 +706,9 @@ export function fold(events: readonly StoredEvent[]): RunState {
         break;
       }
       case "egress.refused":
-        s.refused = e.refusal;
+        // A refused model prompt or reply ends the run. A tool's refused HTTP request does not: tools.ts records it as
+        // tool.failed (egress-refused), the model reads that error and answers without the tool, and nothing was sent.
+        if (refusalEndsRun(e.destination)) s.refused = e.refusal;
         break;
       // A session folds as one model call: its bridged tool events name callIds no model.completed lists, and a
       // withheld result is the run going on, not a refused run.
