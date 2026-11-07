@@ -99,6 +99,11 @@ export interface SignOnConfig {
   readonly idClaim: string;
   /** A session nobody has used for this long ends, and the next request signs in again (HIPAA automatic logoff). */
   readonly idleMinutes: number;
+  /**
+   * A session whose role came from roles_claim ends this long after sign-in, so a group the provider no longer lists
+   * stops counting within it. A studio account's role is read on every request and needs no such limit.
+   */
+  readonly claimRoleMaxMinutes: number;
   /** A group or entitlement claim whose values name the role, or null to take every role from the studio account. */
   readonly rolesClaim: string | null;
   /** Claim value to role. When several values match, the highest role wins; when none does, the studio account decides. */
@@ -267,6 +272,7 @@ const schema = z.object({
       trust_unverified_email: z.boolean().default(false),
       id_claim: z.string().min(1).default("sub"),
       idle_timeout_minutes: z.number().int().min(1).max(12 * 60).default(30),
+      claim_role_max_minutes: z.number().int().min(1).max(12 * 60).default(60),
       roles_claim: z.string().min(1).optional(),
       roles: z.record(z.string().min(1), z.enum(ROLES)).optional(),
       scopes: z.array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/, "a scope is one word")).refine((s) => s.includes("openid"), "scopes must include openid").default(["openid", "email", "profile"]),
@@ -488,6 +494,7 @@ export function parseConfig(text: string, path: string): LabConfig {
           trustUnverifiedEmail: c.auth.trust_unverified_email,
           idClaim: c.auth.id_claim,
           idleMinutes: c.auth.idle_timeout_minutes,
+          claimRoleMaxMinutes: c.auth.claim_role_max_minutes,
           rolesClaim: c.auth.roles_claim ?? null,
           roleValues: c.auth.roles ?? {},
           scopes: c.auth.scopes,

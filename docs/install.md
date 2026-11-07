@@ -54,6 +54,7 @@ What a signed-in member gets: the runs they asked signed in, on `/runs`, and nob
 	# email_claim = "email"            # must be an email the provider says it verified (email_verified)
 	# trust_unverified_email = false   # see the Entra ID row below before setting it
 	# idle_timeout_minutes = 30        # a session unused this long ends (HIPAA automatic logoff)
+	# claim_role_max_minutes = 60      # with roles_claim: a role from a group lasts this long, then sign in again
 	# scopes = ["openid", "email", "profile"]
 
 3. Add to `.env`: `LABH_SESSION_SECRET=$(openssl rand -hex 32)` (it signs the session cookie; the door refuses one shorter than 32 characters) and `LABH_OIDC_CLIENT_SECRET=<the provider's client secret>`. Set `LABH_BIND=0.0.0.0` only once the proxy is in front.
@@ -68,7 +69,7 @@ Who may sign in: a person the provider vouches for whose verified email (`email_
 	"lab0:members" = "member"
 	"lab0:pi" = "pi"
 
-A role from a claim holds for the session. A session lasts 12 hours from sign-in and ends sooner after `idle_timeout_minutes` unused; the next page goes back through the provider and returns to where it was. **Sign out** clears the session on the door, not at the provider.
+A role from a claim holds for `claim_role_max_minutes` (60 by default); then the next page goes back through the provider, which names the member's groups again, so a group taken away stops counting within that time. A session lasts 12 hours from sign-in and ends sooner after `idle_timeout_minutes` unused; the next page goes back through the provider and returns to where it was. Sessions live in the database (`door_sessions`, which stores only a hash of each session id), so **Sign out** ends the session on the door for every browser holding a copy of its cookie, and a removed studio account ends every session of that member. It does not sign the member out at the provider.
 
 | Provider | `issuer` | Notes |
 |---|---|---|

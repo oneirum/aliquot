@@ -24,7 +24,7 @@ function moved(before: ReviewConfig, after: ReviewConfig): readonly string[] {
 }
 
 // What sign-on, a second payload key and a purge window look like once lab.toml declares them.
-const signOn = (c: ReviewConfig): ReviewConfig => ({ ...c, signOn: { issuer: "https://idp.example.edu", clientId: "aliquot", clientSecretEnv: "S", sessionSecretEnv: "T", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid"] } });
+const signOn = (c: ReviewConfig): ReviewConfig => ({ ...c, signOn: { issuer: "https://idp.example.edu", clientId: "aliquot", clientSecretEnv: "S", sessionSecretEnv: "T", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, claimRoleMaxMinutes: 60, rolesClaim: null, roleValues: {}, scopes: ["openid"] } });
 const twoKeys = (c: ReviewConfig): ReviewConfig => ({ ...c, store: { ...c.store, keyEnvs: { k1: "LABH_PAYLOAD_KEY", k2: "LABH_PAYLOAD_KEY_2" }, current: "k2" } });
 const purge = (c: ReviewConfig): ReviewConfig => ({ ...c, retention: { purgeDays: { D3: 365 }, keepMinDays: {} } });
 const TRUST_LAYER: ReviewConfig = purge(twoKeys(signOn(parse(checkText))));

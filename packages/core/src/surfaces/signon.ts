@@ -6,16 +6,20 @@
  *   /callback  the code and verifier are exchanged at the token endpoint; the ID token is verified here with
  *              node:crypto against the provider's published keys (RS256, RS384, RS512, ES256, ES384); its email is
  *              matched to a studio account
- *   /logout    the session cookie is cleared
+ *   /logout    the session ends on the server, in every browser holding its cookie
  *
  * The member id is the provider's stable id for the person ([auth] id_claim: sub, or eppn on an InCommon campus), so
  * every run's record names who asked by an id that outlives a changed email. The role comes from a group or
- * entitlement claim when [auth] roles_claim maps one, fixed for the session; otherwise it is read from the studio
- * account with the member's email on every request, so a role change or a removed account takes effect at once.
- * Someone with neither is refused: a university provider vouches for the whole campus, and the lab is a few people.
+ * entitlement claim when [auth] roles_claim maps one, fixed for at most [auth] claim_role_max_minutes, after which the
+ * member signs in again and the provider names the groups afresh; otherwise it is read from the studio account with
+ * the member's email on every request, so a role change takes effect at once, and a removed account ends every one of
+ * the member's sessions. Someone with neither is refused: a university provider vouches for the whole campus, and the
+ * lab is a few people.
  *
- * A session lasts 12 hours from sign-in, and ends sooner when nobody uses it for [auth] idle_timeout_minutes (HIPAA
- * automatic logoff, NIST SP 800-171 03.01.10 and 03.01.11): the cookie carries when it was last used, and every request renews it.
+ * A session is a door_sessions row; the signed cookie carries only its random id, and the row keeps only the id's
+ * sha256. It lasts 12 hours from sign-in, and ends sooner when nobody uses it for [auth] idle_timeout_minutes (HIPAA
+ * automatic logoff, NIST SP 800-171 03.01.10 and 03.01.11). last_seen_at is written at most once a minute, so a session
+ * may end up to a minute before its idle timeout, never after.
  *
  * The provider is reached only through signon-wire.ts.
  */
@@ -45,20 +49,29 @@ export interface Member {
   readonly role: Role;
 }
 
-/** What a request's session cookie says: a member (and the renewed cookie), a session that sat idle too long, or none. */
+/**
+ * What a request's session cookie says: a member; a session that just ended on a timer (why, for the person: "ended
+ * after 30 minutes unused"), with the cookie that clears it; or none.
+ */
 export type Session =
-  | { readonly t: "member"; readonly member: Member; readonly setCookie: string }
-  | { readonly t: "idle"; readonly minutes: number; readonly setCookie: string }
+  | { readonly t: "member"; readonly member: Member }
+  | { readonly t: "ended"; readonly why: string; readonly setCookie: string }
   | { readonly t: "none" };
 
-interface SessionValue {
-  readonly id: string;
+type EndedReason = "signed_out" | "idle" | "time_limit" | "claim_role_limit" | "no_account";
+
+interface SessionRow {
+  readonly member_id: string;
   readonly email: string;
-  /** Only when a mapped claim named the role at sign-in. */
-  readonly role?: Role;
-  /** Seconds: when the session was last used. */
+  readonly claim_role: string | null;
+  /** Seconds since the epoch, on the door's clock. */
+  readonly created: number;
   readonly seen: number;
+  readonly ended: boolean;
 }
+
+/** last_seen_at is written at most this often. */
+const SEEN_WRITE_SECONDS = 60;
 
 /** A sign-in that did not finish. The message is written for the person signing in. */
 export class SignOnRefused extends Error {
@@ -70,6 +83,8 @@ export class SignOnRefused extends Error {
 
 const b64url = (b: Buffer | string) => Buffer.from(b).toString("base64url");
 const random = () => b64url(randomBytes(32));
+const idHash = (sessionId: string) => createHash("sha256").update(sessionId).digest("hex");
+const at = (seconds: number) => new Date(seconds * 1000);
 
 export function pkceChallenge(verifier: string): string {
   return b64url(createHash("sha256").update(verifier).digest());
@@ -232,14 +247,14 @@ export interface SignOn {
   readonly origin: string;
   /** The provider's host, for the sign-in page. */
   readonly provider: string;
-  /** The signed-in member with the renewed cookie; an idle session; or none: no cookie, an expired or altered one, or an account the lab has removed. */
+  /** The signed-in member; a session that just ended on a timer; or none: no cookie, an altered one, a session ended earlier, or an account the lab has removed. */
   session(cookieHeader: string | undefined): Promise<Session>;
   /** Where /login sends the browser, and the cookie that remembers this sign-in until /callback. */
   begin(next: string | null): Promise<{ readonly location: string; readonly setCookie: string }>;
   /** /callback. Throws SignOnRefused with a message for the person. */
   finish(query: URLSearchParams, cookieHeader: string | undefined): Promise<{ readonly member: Member; readonly next: string; readonly setCookie: readonly string[] }>;
-  /** /logout's cookies. */
-  signOut(): readonly string[];
+  /** /logout: ends the cookie's session on the server, and returns the cookie that clears it here. */
+  signOut(cookieHeader: string | undefined): Promise<readonly string[]>;
 }
 
 interface Provider {
@@ -315,19 +330,45 @@ export function createSignOn(deps: SignOnDeps): SignOn {
     }
   };
 
+  /** The hash of the session id a cookie carries, when this door signed it. */
+  const sessionOf = (cookieHeader: string | undefined): string | null => {
+    const sid = (openValue(sessionSecret, "session", cookieValue(cookieHeader, SESSION_COOKIE), seconds())?.v as { sid?: unknown } | undefined)?.sid;
+    return typeof sid === "string" ? idHash(sid) : null;
+  };
+  const end = (where: string, param: string, reason: EndedReason) =>
+    db.query(`update door_sessions set ended_at = $2, ended_reason = $3 where ${where} and ended_at is null`, [param, at(seconds()), reason]);
+  const cleared = cookie(SESSION_COOKIE, "", "/", 0);
+
   return {
     origin: base.origin,
     provider: new URL(config.issuer).host,
     async session(cookieHeader) {
+      const hash = sessionOf(cookieHeader);
+      if (!hash) return { t: "none" };
+      const row = (
+        await db.query<SessionRow>(
+          "select member_id, email, claim_role, extract(epoch from created_at)::float8 as created, extract(epoch from last_seen_at)::float8 as seen, ended_at is not null as ended from door_sessions where id_hash = $1",
+          [hash],
+        )
+      ).rows[0];
+      if (!row || row.ended) return { t: "none" };
       const now = seconds();
-      const opened = openValue(sessionSecret, "session", cookieValue(cookieHeader, SESSION_COOKIE), now);
-      const s = opened?.v as Partial<SessionValue> | undefined;
-      if (!opened || !s || typeof s.id !== "string" || typeof s.email !== "string" || typeof s.seen !== "number") return { t: "none" };
-      if (now - s.seen >= config.idleMinutes * 60) return { t: "idle", minutes: config.idleMinutes, setCookie: cookie(SESSION_COOKIE, "", "/", 0) };
-      const role = s.role ?? (await studioRole(db, s.email));
-      if (!role) return { t: "none" };
-      const renewed = signValue(sessionSecret, "session", { ...s, seen: now }, opened.exp);
-      return { t: "member", member: { id: s.id as MemberId, email: s.email, role }, setCookie: cookie(SESSION_COOKIE, renewed, "/", opened.exp - now) };
+      const timer: readonly [EndedReason, string] | null =
+        now - row.seen >= config.idleMinutes * 60 ? ["idle", `ended after ${config.idleMinutes} minutes unused`]
+        : now - row.created >= SESSION_SECONDS ? ["time_limit", `reached its ${SESSION_SECONDS / 3600} hour limit`]
+        : row.claim_role !== null && now - row.created >= config.claimRoleMaxMinutes * 60 ? ["claim_role_limit", `reached its ${config.claimRoleMaxMinutes} minute limit for a role from the provider's groups`]
+        : null;
+      if (timer) {
+        await end("id_hash = $1", hash, timer[0]);
+        return { t: "ended", why: timer[1], setCookie: cleared };
+      }
+      const role = (row.claim_role as Role | null) ?? (await studioRole(db, row.email));
+      if (!role) {
+        await end("member_id = $1 and role_source = 'studio'", row.member_id, "no_account");
+        return { t: "none" };
+      }
+      if (now - row.seen >= SEEN_WRITE_SECONDS) await db.query("update door_sessions set last_seen_at = $2 where id_hash = $1", [hash, at(now)]);
+      return { t: "member", member: { id: row.member_id as MemberId, email: row.email, role } };
     },
     begin: (next) => reach(async () => {
       const p = await discover();
@@ -377,10 +418,19 @@ export function createSignOn(deps: SignOnDeps): SignOn {
         throw new SignOnRefused(`The provider has not verified ${email}, so Aliquot cannot match it to a lab account.`);
       const role = fromClaim ?? (await studioRole(db, email));
       if (!role) throw new SignOnRefused(`You signed in as ${email}, but this lab has no account for that address. Ask the PI to add it in the studio.`);
-      const value: SessionValue = { id, email, ...(fromClaim ? { role: fromClaim } : {}), seen: seconds() };
-      const session = signValue(sessionSecret, "session", value, seconds() + SESSION_SECONDS);
+      const sid = random();
+      const now = seconds();
+      await db.query(
+        "insert into door_sessions (id_hash, member_id, email, role_source, claim_role, created_at, last_seen_at) values ($1, $2, $3, $4, $5, $6, $6)",
+        [idHash(sid), id, email, fromClaim ? "claim" : "studio", fromClaim, at(now)],
+      );
+      const session = signValue(sessionSecret, "session", { sid }, now + SESSION_SECONDS);
       return { member: { id: id as MemberId, email, role }, next: login.next, setCookie: [cookie(SESSION_COOKIE, session, "/", SESSION_SECONDS), cookie(LOGIN_COOKIE, "", "/callback", 0)] };
     }),
-    signOut: () => [cookie(SESSION_COOKIE, "", "/", 0)],
+    async signOut(cookieHeader) {
+      const hash = sessionOf(cookieHeader);
+      if (hash) await end("id_hash = $1", hash, "signed_out");
+      return [cleared];
+    },
   };
 }

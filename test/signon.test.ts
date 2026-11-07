@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,7 +51,7 @@ const probe = {
 
 const acpToken = "a".repeat(40);
 const tokens = doorTokens([{ id: "acp" as never, kind: "acp", placement: "lab", tokenEnv: "ACP" }], { ACP: acpToken }, () => {});
-const auth: SignOnConfig = { issuer: idp.issuer, clientId: "aliquot-door", clientSecretEnv: "SECRET", sessionSecretEnv: "SESSION", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] };
+const auth: SignOnConfig = { issuer: idp.issuer, clientId: "aliquot-door", clientSecretEnv: "SECRET", sessionSecretEnv: "SESSION", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, claimRoleMaxMinutes: 60, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] };
 let handler: ReturnType<typeof createWebHandler> = async () => {};
 const { server, port } = await listenWeb((req, res) => handler(req, res), 0);
 const door = `http://127.0.0.1:${port}`;
@@ -303,6 +303,30 @@ test("an altered session cookie is no session, and signing out ends it", async (
   assert.equal((await b.fetch(`${door}/runs/${aliceRun}/events`)).status, 401);
 });
 
+test("signing out in one browser ends the session everywhere: a copied cookie stops working", async () => {
+  const a = await signedIn(ALICE);
+  const copy = new Browser();
+  copy.cookies.set("aliquot_session", a.cookies.get("aliquot_session")!);
+  assert.equal((await copy.fetch(`${door}/runs/${aliceRun}/events`)).status, 200, "a copied cookie works while the session is open");
+  const other = await signedIn(ALICE);
+  assert.equal((await a.fetch(`${door}/logout`, { method: "POST" })).status, 302);
+  assert.equal((await copy.fetch(`${door}/runs/${aliceRun}/events`)).status, 401, "and stops once the member signs out in the first browser");
+  const page = await copy.fetch(`${door}/runs`);
+  assert.ok(page.status === 401 && (await page.text()).includes("Sign in to ask the lab"), "a page is the sign-in page");
+  assert.equal((await other.fetch(`${door}/runs/${aliceRun}/events`)).status, 200, "a separate sign-in of the same member is its own session");
+});
+
+test("a cookie signed with the door's secret but naming a session it never issued is no session, nor is the old stateless shape", async () => {
+  const secret = randomBytes(32).toString("hex");
+  const so = createSignOn({ config: auth, wire: providerWire, db, sessionSecret: secret, clientSecret: "provider-secret", baseUrl: door });
+  const signed = (v: unknown) => {
+    const body = Buffer.from(JSON.stringify({ p: "session", exp: Math.floor(Date.now() / 1000) + 3600, v })).toString("base64url");
+    return `aliquot_session=${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+  };
+  assert.deepEqual(await so.session(signed({ sid: randomBytes(32).toString("base64url") })), { t: "none" });
+  assert.deepEqual(await so.session(signed({ id: subOf(PI), email: PI, role: "pi", seen: Math.floor(Date.now() / 1000) })), { t: "none" });
+});
+
 test("a removed studio account loses access on its next request", async () => {
   await seedStudioAccounts(db, [{ email: "leaving@lab.edu", role: "member" }]);
   const idp2 = await startFakeOidc({ clientId: "aliquot-door", clientSecret: null, people: [{ email: "leaving@lab.edu" }] });
@@ -315,8 +339,13 @@ test("a removed studio account loses access on its next request", async () => {
     const b = new Browser();
     assert.equal((await b.signIn(door2, "leaving@lab.edu")).res.status, 200, "a public client signs in with PKCE alone");
     assert.equal((await b.fetch(`${door2}/runs`)).status, 200);
+    const laptop = new Browser();
+    assert.equal((await laptop.signIn(door2, "leaving@lab.edu")).res.status, 200);
     await db.query("delete from studio.users where email = 'leaving@lab.edu'");
     assert.equal((await b.fetch(`${door2}/runs`)).status, 401);
+    await seedStudioAccounts(db, [{ email: "leaving@lab.edu", role: "member" }]);
+    assert.equal((await laptop.fetch(`${door2}/runs`)).status, 401, "every session of the member ended with the account, so restoring it opens none");
+    assert.equal((await new Browser().signIn(door2, "leaving@lab.edu")).res.status, 200, "signing in again does");
     s2.server.close();
   } finally {
     await idp2.stop();
@@ -343,11 +372,15 @@ test("a session nobody uses for idle_timeout_minutes ends: a page goes back thro
     assert.equal((await b.fetch(`${d.url}/runs`)).status, 200, "29 minutes after sign-in");
     d.clock.now += 29 * 60_000;
     assert.equal((await b.fetch(`${d.url}/runs/${aliceRun}/events`)).status, 200, "29 minutes after the last request: each request renews the session");
+    const idleCookie = b.cookies.get("aliquot_session")!;
     d.clock.now += 30 * 60_000;
     const page = await b.fetch(`${d.url}/runs?show=failed`);
     assert.equal(page.status, 302, "30 minutes unused");
     assert.equal(page.headers.get("location"), `/login?next=${encodeURIComponent("/runs?show=failed")}`);
     assert.ok(!b.cookies.has("aliquot_session"), "and the session cookie is cleared");
+    const replay = new Browser();
+    replay.cookies.set("aliquot_session", idleCookie);
+    assert.equal((await replay.fetch(`${d.url}/runs/${aliceRun}/events`)).status, 401, "the server ended it: a copy of the old cookie opens nothing");
     d.clock.now += 1000;
     assert.equal((await b.signIn(d.url, ALICE, "/runs")).res.status, 200, "signing in again works");
     d.clock.now += 31 * 60_000;
@@ -402,6 +435,35 @@ test("roles_claim maps a group claim to a role without a studio account, eppn is
   }
 });
 
+test("a role from the provider's groups lasts claim_role_max_minutes, then the member signs in again; a studio role has no such limit", async () => {
+  const d = await otherDoor(
+    { idClaim: "eppn", rolesClaim: "isMemberOf", roleValues: { "lab0:pi": "pi" }, scopes: ["openid", "email", "profile", "org.cilogon.userinfo"], claimRoleMaxMinutes: 60 },
+    [{ email: "carol@campus.edu", eppn: "carol@wisc.edu", groups: ["lab0:pi"] }, { email: BOB, eppn: "bob@wisc.edu", groups: [] }],
+  );
+  try {
+    const carol = new Browser();
+    assert.equal((await carol.signIn(d.url, "carol@campus.edu")).res.status, 200);
+    const bob = new Browser();
+    assert.equal((await bob.signIn(d.url, BOB)).res.status, 200);
+    for (const minutes of [29, 29]) {
+      d.clock.now += minutes * 60_000;
+      assert.equal((await carol.fetch(`${d.url}/runs`)).status, 200);
+      assert.equal((await bob.fetch(`${d.url}/runs`)).status, 200);
+    }
+    d.clock.now += 2 * 60_000;
+    const page = await carol.fetch(`${d.url}/runs`);
+    assert.deepEqual({ status: page.status, to: page.headers.get("location") }, { status: 302, to: `/login?next=${encodeURIComponent("/runs")}` }, "60 minutes after sign-in the group's role is read again at the provider");
+    assert.equal((await bob.fetch(`${d.url}/runs`)).status, 200, "the studio account is read on every request, so it needs no limit");
+    assert.equal((await carol.signIn(d.url, "carol@campus.edu", "/runs")).res.status, 200, "signing in again works");
+    d.clock.now += 61 * 60_000 - 1;
+    const json = await carol.fetch(`${d.url}/runs/${aliceRun}/events`);
+    assert.equal(json.status, 401);
+    assert.deepEqual(await json.json(), { error: "your session ended after 30 minutes unused: sign in again at /login" }, "idle comes first when both apply");
+  } finally {
+    await d.stop();
+  }
+});
+
 test("trust_unverified_email lets a provider that never says it verified the email sign members in by it", async () => {
   const d = await otherDoor({ trustUnverifiedEmail: true }, [{ email: ALICE, emailVerified: false }]);
   try {
@@ -418,10 +480,10 @@ test("lab.toml refuses a web bind beyond loopback without [auth], and takes it w
   });
   assert.equal(parseConfig(`${base}[surfaces.web]\nbind = "127.0.0.1"\n`, "/lab/lab.toml").web.bind, "127.0.0.1");
   const c = parseConfig(`${base}[surfaces.web]\nbind = "0.0.0.0"\nbase_url = "https://ask.lab.edu"\n[auth]\nissuer = "https://login.lab.edu"\nclient_id = "aliquot"\nclient_secret_env = "OIDC_SECRET"\n`, "/lab/lab.toml");
-  assert.deepEqual({ bind: c.web.bind, signOn: c.signOn }, { bind: "0.0.0.0", signOn: { issuer: "https://login.lab.edu", clientId: "aliquot", clientSecretEnv: "OIDC_SECRET", sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] } });
+  assert.deepEqual({ bind: c.web.bind, signOn: c.signOn }, { bind: "0.0.0.0", signOn: { issuer: "https://login.lab.edu", clientId: "aliquot", clientSecretEnv: "OIDC_SECRET", sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "sub", idleMinutes: 30, claimRoleMaxMinutes: 60, rolesClaim: null, roleValues: {}, scopes: ["openid", "email", "profile"] } });
   const auth2 = `${base}[auth]\nissuer = "https://cilogon.org"\nclient_id = "aliquot"\nid_claim = "eppn"\nidle_timeout_minutes = 15\nroles_claim = "isMemberOf"\nscopes = ["openid", "email", "org.cilogon.userinfo"]\n`;
   assert.deepEqual(parseConfig(`${auth2}[auth.roles]\n"lab0:pi" = "pi"\n`, "/lab/lab.toml").signOn, {
-    issuer: "https://cilogon.org", clientId: "aliquot", clientSecretEnv: null, sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "eppn", idleMinutes: 15, rolesClaim: "isMemberOf", roleValues: { "lab0:pi": "pi" }, scopes: ["openid", "email", "org.cilogon.userinfo"],
+    issuer: "https://cilogon.org", clientId: "aliquot", clientSecretEnv: null, sessionSecretEnv: "LABH_SESSION_SECRET", emailClaim: "email", trustUnverifiedEmail: false, idClaim: "eppn", idleMinutes: 15, claimRoleMaxMinutes: 60, rolesClaim: "isMemberOf", roleValues: { "lab0:pi": "pi" }, scopes: ["openid", "email", "org.cilogon.userinfo"],
   });
   assert.throws(() => parseConfig(auth2, "/lab/lab.toml"), /roles_claim and \[auth.roles\] go together/);
   const entra = `${base}[auth]\nissuer = "https://login.microsoftonline.com/t/v2.0"\nclient_id = "a"\nemail_claim = "preferred_username"\n`;
