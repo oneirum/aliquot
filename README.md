@@ -104,6 +104,7 @@ The web door is on port 3000 and the studio on 3001, published on `127.0.0.1` on
 A lab answers the same questions every week. Where the freezer log is, how a variable is coded, what the SOP says about a sample that came in late, what the literature says about a measure. The answers live in documents, datasets and papers nobody has time to search. Aliquot turns them into agents the lab owns.
 
 - **Answers from your own documents.** A steward compiles SOPs, codebooks and onboarding notes into a knowledge base, from Markdown, text, the Word files the lab already keeps, or PDFs with real text. Agents search it and cite the entry they used.
+- **Answers from the lab's data.** A member asks how many participants finished visit 3, or the mean dose in cohort B, and gets the number from the lab's CSV or REDCap project. The rows stay in a container with no network; only counts and means over large enough groups come back, and the record says how to rerun each one.
 - **Research tools.** Agents can search OpenAlex, PubMed, arXiv and Europe PMC, read open-access papers in full, look up a DOI and where a legal open copy is, and walk citations. They can also list the lab's datasets and run R or Python over them in a container with no network.
 - **Claude Code or Codex as the agent.** An agent can run on one of these CLIs instead of a model endpoint. The CLI is confined: it has no tools of its own, and it reaches only Aliquot and its vendor's API.
 - **Restricted data does not leave.** Every piece of content carries a data class. Participant identifiers are restricted, and restricted content never reaches a hosted model or a hosted agent CLI: the harness refuses the call and records the refusal. One agent can send public questions to a hosted model (Anthropic, OpenAI) and restricted ones to a lab model (Ollama or any OpenAI-compatible server).
@@ -386,7 +387,63 @@ A terminal, tmux, T3 Code or a lab's own orchestrator can reach Aliquot's agents
   None needs a key or an account. Each declares the hosts it may reach, and a redirect is followed only to a declared host, with each hop checked at the class of everything the call has read. With `[research] contact_email_env` set, they send that address as the polite-pool contact. Unpaywall requires one, so without it `doi_lookup` returns the Crossref record and says the open-access check was skipped. All of these hosts are public, so a literature call is refused, and nothing is sent, when the conversation holds anything above D0.
 - **Datasets by class.** A data steward lists folders in `lab.toml`, each with a class. An agent mounts only datasets at or below its sandbox ceiling. A mount ceiling of D3 needs an IRB protocol on the agent, as a D3 knowledge base does.
 - **`run_code`.** R or Python, one container per call, through the Docker Engine API. There is no network, no `/dev/shm`, and the root filesystem is read-only, with every capability dropped and no new privileges. It runs as user 65534, with CPU, memory, process and time limits, and with datasets mounted read-only. Its output carries the class of every dataset it mounted. `test/run-code.test.ts` checks each of these against the real container.
-- **Built-in tools only.** All eleven tools are defined in core (`packages/core/src/tools.ts` and `literature.ts`), each with the class it reads, its effects and its egress hosts. A tool's requests are checked at the class of everything it has read. A lab cannot add its own tool: a `lab.toml` with a `[tools]` table stops every binary at startup. Lab tools are planned, each behind an OS-level boundary.
+- **Built-in tools only.** All twelve tools are defined in core (`packages/core/src/tools.ts` and `literature.ts`), each with the class it reads, its effects and its egress hosts. A tool's requests are checked at the class of everything it has read. A lab cannot add its own tool: a `lab.toml` with a `[tools]` table stops every binary at startup. Lab tools are planned, each behind an OS-level boundary.
+
+## Answers from data
+
+Labs keep study data in REDCap, CSVs and spreadsheets, with rows that carry names, birth dates and record numbers. `data_query` answers counts and means from those tables without a model ever reading a row.
+
+A data steward registers each table in `lab.toml` and says which columns are free to count and average over. Every column the table has and `columns` does not name is restricted:
+
+	[tables.visits]
+	description = "Visit log, one row per participant"
+	csv = "/srv/lab/data/visits.csv"
+	aggregate_class = "D1"
+	[tables.visits.columns]
+	participant_id = "restricted"
+	dob = "restricted"
+	cohort = "free"
+	visit3_done = "free"
+	dose_mg = "free"
+
+	[tables.dosing]
+	description = "Dosing study"
+	redcap_url = "https://redcap.example.edu/api/"
+	redcap_token_env = "REDCAP_DOSING_TOKEN"
+	aggregate_class = "D1"
+	min_cell = 11
+	[tables.dosing.columns]
+	arm = "free"
+	weight_kg = "free"
+
+An agent lists the table ids in `tables` and holds `data_query` in its tools. The model writes a query: filters, up to three group-by columns, and `count`, `sum`, `mean` or `sd`. There is no `min`, `max` or `median`, because each can be one participant's own value, and nothing lists rows. Then:
+
+1. The harness refuses a query that names a restricted column before it reads the table. For REDCap it reads the data dictionary first, and a field REDCap flags as an identifier is restricted whatever `lab.toml` says.
+2. The table goes into the sandbox container (no network, read-only root, uid 65534) with the query. A Python engine using only the standard library computes the aggregate there.
+3. The engine refuses the whole query when any group, or the values behind any count, mean or sum, has fewer rows than the table's `min_cell`. That is 5 unless the steward sets it higher, and `lab.toml` refuses anything lower. The refusal names the rule, never the size of the small cell.
+4. The harness parses the engine's output against a fixed shape and checks the cells again. Only that aggregate enters the run, at the table's `aggregate_class`.
+
+The record of each call holds the query, the sha256 of the bytes the table held, the engine's hash and the sandbox image, the rows read and matched, and the numbers. A reviewer reruns the query and gets the same number, or learns the source changed. The REDCap token comes from the environment variable `lab.toml` names, and the export request goes only to a REDCap host `[hosts]` places as `lab` or `institution`; `lab.toml` refuses any other.
+
+`pnpm walk:data` runs it on lab0: a member asks three questions of a visits CSV and a REDCap dosing project (`scripts/fake-redcap.ts`, the same two API calls a live REDCap answers), and one question that names a birth date. Part of its output:
+
+	member: What was the mean dose in cohort B?
+	aliquot: mean(dose_mg) 20.735294  (answered)
+	  record: run 8f57a0e2-293, data_query on visits (csv, source ae8785e76c5b, 1599 bytes), engine 993395b7aa34
+	          query {"groupBy":[],"measures":[{"column":"dose_mg","fn":"mean"}],"table":"visits","where":[{"column":"cohort","op":"eq","value":"B"}]}
+	          38 rows read, 17 matched, min cell 5, answer class D1
+
+	member: List the birth dates of cohort C.
+	aliquot: refused. column dob of table visits is restricted; it never leaves the sandbox  (answered)
+	  record: run 27a95211-589, data_query refused before the table was read, 0 rows left the sandbox
+
+	rerun visits: same numbers from source ae8785e76c5b and engine 993395b7aa34
+	rerun dosing: same numbers from source c2b5f69b8c0e and engine 993395b7aa34
+
+	ground truth (fixtures/lab0/data/answers.json): all three numbers match
+	on the wire: 8 requests reached the hosted model; none holds any of 204 identifying values from the two sources
+
+`test/data-query.test.ts` checks the count, the mean and the group-by against those answers, the refusals and the rerun, and searches every request the hosted model received for the identifying values of both sources.
 
 ## Model providers
 
@@ -453,6 +510,7 @@ Each check script starts real worker and web processes (and, for `unit2`, the st
 | `pnpm slice1` | The run loop: crash and resume exactly once, a zombie worker fenced off, idempotent intake, restricted data refused with zero hosted requests, limits, stop, and the network seal against planted routes. |
 | `pnpm unit3` | Knowledge bases: compile, coverage gaps blocking publish, a restart mid-compile, `kb_search` and `kb_read` in a run, snapshot diff, refused URL hosts, publish with an override note. |
 | `pnpm lab0` | The first-use check on a synthetic lab, described below. |
+| `pnpm walk:data` | A member asks lab0's visits CSV and REDCap project three questions and one refused one; each record reruns to the same number, and no row value reaches the hosted model. Needs the sandbox image. |
 | `aliquot verify --anchors` | That nobody rewrote history in the database. The worker signs the head of the audit stream and of each closed run into an anchor log outside the database every few minutes, with a key the database never holds. This checks every line's signature and that the database still holds each signed hash, and names the first seq that changed. `test/anchor.test.ts` rewrites an audit row and a run event, recomputes every later hash so plain `aliquot verify` passes, and shows this check fail at that seq; it also catches a forged line, a line under another key, and a removed line. |
 | `pnpm trust` | The trust numbers in [`docs/trust.md`](docs/trust.md): unsupported claims, wrong citations, refusals both ways and planted instructions obeyed, on a larger synthetic lab. No Postgres and no key; CI runs it on every push. |
 | `pnpm unit2` | The studio in a headless browser: author, test and publish an agent, diff and restore, roles, a knowledge base built in the form and published over a gap, and a restricted knowledge base refused on a hosted agent. |
@@ -540,7 +598,7 @@ Aliquot is early. It has been tested on a synthetic lab, not used by a real one.
 
 - Detection of restricted text is pattern-based. A lab must give its own patterns in `lab.toml`, and text no pattern matches keeps its declared class.
 - The studio runs unsealed, as described above.
-- A lab cannot add its own tools. Aliquot runs only its eleven built-in tools. Contributed tools are planned, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
+- A lab cannot add its own tools. Aliquot runs only its twelve built-in tools. Contributed tools are planned, behind an OS-level boundary (a separate user, a container or a VM), because code in the worker's process shares its memory and its JavaScript realm with core.
 - The seal stops a mistake in Aliquot's code or a dependency from reaching the network. It is not a sandbox for hostile code in the process.
 - A built-in tool's version is the hash of its spec, not its code. A change to a tool's code alone moves no agent version.
 - Under `dev_shared_login`, Claude Code reads its credential from the developer's keychain. That is why the mode is for a developer's machine only.
