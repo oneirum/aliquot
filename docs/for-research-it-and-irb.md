@@ -10,6 +10,11 @@ This sheet is for the people who decide whether a lab may run Aliquot. It covers
 Aliquot is self-hosted open source, so no vendor questionnaire exists. This sheet stands in for one. Every rule below
 is enforced in code. The file that enforces each rule is named, so a reviewer can check it.
 
+For a control-by-control answer (HIPAA Security Rule, NIST SP 800-171 Rev. 3, HECVAT 4 areas), run
+`pnpm review-pack --config config/lab.toml`. It writes the review pack for your lab under `docs/review/<lab>/`, with
+each row's status computed from your `lab.toml` and the tests that prove each met row. The pack for the compose check's
+lab is in [`review/check/summary.md`](review/check/summary.md).
+
 ## Data classes
 
 Every piece of content carries one of five classes. A class only goes up: the class of anything derived from content
