@@ -3,7 +3,8 @@
  * pnpm walk:signon: two members and a PI sign in to the web door through a local OpenID Connect provider and use it
  * the way a lab would. Member A signs in, asks, gets a cited answer, opens the cited entry, opens the record and sees
  * its chain verified. Member B signs in and sees only B's runs, and A's record is a 404 to B. A user named in the
- * message body is ignored. The PI sees every run. A D3 entry's Source chip tells member A who can open it.
+ * message body is ignored. The PI sees every run. A D3 entry's Source chip tells member A who can open it. Member B
+ * signs out in one browser, and a copy of that session's cookie in another is sent to sign in.
  *
  * The provider is shaped like CILogon: each run records the member's eppn (id_claim), and the PI's role comes from
  * the provider's lab0:pi group (roles_claim), with no studio account; the two members have studio accounts.
@@ -267,6 +268,32 @@ await step("The PI signs in with the provider's lab0:pi group, sees every member
   const accounts = await db.query("select 1 from studio.users where lower(email) = lower($1)", [PI]);
   expect(accounts.rowCount === 0, "the PI has no studio account: the role came from the group claim");
   return [`PI has no studio account; isMemberOf lab0:pi makes them the PI`, `PI's /runs: "Runs", lists A's ${adaRun.slice(0, 8)} and B's ${benRun.slice(0, 8)}`, "PI opens roster.md#lab0-0004: 200"];
+});
+
+await step("Member B signs out on a shared computer; a copy of that cookie in another browser is sent to sign in", async () => {
+  const shared = new Browser();
+  await shared.signIn(door, B);
+  const copied = new Browser();
+  copied.cookies.set("aliquot_session", shared.cookies.get("aliquot_session")!);
+  const before = await copied.fetch(`${door}/runs`);
+  expect(before.status === 200, `the copied cookie before sign out: ${before.status}`);
+  const out = await shared.fetch(`${door}/logout`, { method: "POST" });
+  expect(out.status === 302, `POST /logout answered ${out.status}`);
+  const page = await copied.fetch(`${door}/runs`);
+  const html = await page.text();
+  expect(page.status === 401 && html.includes(`/login?next=${encodeURIComponent("/runs")}`), `the copied cookie after sign out: ${page.status}`);
+  const api = await copied.fetch(`${door}/runs/${benRun}/events`);
+  expect(api.status === 401, `the copied cookie on a JSON route: ${api.status}`);
+  const ended = await db.query<{ n: number }>("select count(*)::int as n from door_sessions where member_id = $1 and ended_reason = 'signed_out'", [EPPN[B]]);
+  expect(ended.rows[0]!.n === 1, `door_sessions rows ended by sign out: ${ended.rows[0]!.n}`);
+  const still = await ben.fetch(`${door}/runs`);
+  expect(still.status === 200, `B's own browser: ${still.status}`);
+  return [
+    "the copied cookie opens B's /runs: 200",
+    "B presses Sign out in the first browser: the session ends on the server (door_sessions ended_reason signed_out)",
+    `the copied cookie now gets the sign-in page (401), which sends the browser to /login?next=${encodeURIComponent("/runs")}`,
+    "and a JSON route answers 401; B's separate sign-in in their own browser still works",
+  ];
 });
 
 await step("Without [auth], the door refuses to listen beyond this machine", async () => {

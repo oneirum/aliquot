@@ -139,6 +139,7 @@ port = 3000                              # no token: members sign in through [au
 # id_claim = "sub"                       # the member id every run records; "eppn" on an InCommon campus
 # email_claim = "email"                  # an email the provider verified; see trust_unverified_email in docs/install.md
 # idle_timeout_minutes = 30              # an unused session ends (HIPAA automatic logoff)
+# claim_role_max_minutes = 60            # with roles_claim: a role from a group lasts this long, then sign in again
 # scopes = ["openid", "email", "profile"]  # CILogon: add "org.cilogon.userinfo" for eppn and isMemberOf
 # roles_claim = "isMemberOf"             # with [auth.roles]: roles from the provider's groups
 # [auth.roles]
