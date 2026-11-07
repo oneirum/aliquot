@@ -31,7 +31,7 @@ function init(l: ReturnType<typeof lab>, input: string, args: readonly string[] 
 const answers = (...lines: string[]) => `${lines.join("\n")}\n`;
 const PATTERN_PROMPT = "Participant id patterns, one regular expression per line, then an empty line [\\bP-\\d{5}\\b]:";
 
-test("init on defaults writes a lab.toml that loads and a .env with four fresh secrets, mode 600", async () => {
+test("init on defaults writes a lab.toml that loads and a .env with its fresh secrets, mode 600", async () => {
   const l = lab();
   const r = init(l, answers("Mettu Lab", "", "", "8080", "", "P-00123", "P-54321", "", "y", DIGEST));
   assert.equal(r.status, 0, r.stderr);
@@ -56,13 +56,14 @@ test("init on defaults writes a lab.toml that loads and a .env with four fresh s
 
   const secrets = readFileSync(l.env, "utf8").split("\n").filter((s) => s && !s.startsWith("#"));
   // The sandbox is on in this lab.toml, so the env also gives the worker the Docker socket.
-  assert.deepEqual(secrets.map((s) => s.split("=")[0]), ["POSTGRES_PASSWORD", "LABH_PAYLOAD_KEY", "PAYLOAD_SECRET", "ALIQUOT_ACP_TOKEN", "ALIQUOT_STUDIO_TOKEN", "COMPOSE_FILE", "DOCKER_GID"]);
-  assert.equal(secrets[5], "COMPOSE_FILE=compose.yaml:compose.sandbox.yaml");
+  assert.deepEqual(secrets.map((s) => s.split("=")[0]), ["POSTGRES_PASSWORD", "LABH_PAYLOAD_KEY", "PAYLOAD_SECRET", "ALIQUOT_ACP_TOKEN", "ALIQUOT_STUDIO_TOKEN", "ALIQUOT_STUDIO_DB_PASSWORD", "COMPOSE_FILE", "DOCKER_GID"]);
+  assert.equal(secrets[6], "COMPOSE_FILE=compose.yaml:compose.sandbox.yaml");
   assert.match(secrets[4]!, /^ALIQUOT_STUDIO_TOKEN=[0-9a-f]{64}$/);
   assert.match(secrets[0]!, /^POSTGRES_PASSWORD=[0-9a-f]{48}$/);
   assert.match(secrets[1]!, /^LABH_PAYLOAD_KEY=[0-9a-f]{64}$/);
   assert.match(secrets[2]!, /^PAYLOAD_SECRET=[0-9a-f]{64}$/);
   assert.match(secrets[3]!, /^ALIQUOT_ACP_TOKEN=[0-9a-f]{64}$/);
+  assert.match(secrets[5]!, /^ALIQUOT_STUDIO_DB_PASSWORD=[0-9a-f]{48}$/);
   assert.equal(statSync(l.env).mode & 0o777, 0o600);
 });
 
@@ -122,14 +123,15 @@ test("an existing .env is never touched, even with --force, and init says why", 
   assert.equal((await loadConfig(l.cfg)).participantIdPatterns.length, 1);
   assert.ok(r.stdout.split("\n").includes(`${l.env} has no ALIQUOT_ACP_TOKEN, so the door takes no token for [surfaces.acp]. Add one: echo "ALIQUOT_ACP_TOKEN=$(openssl rand -hex 32)" >> ${l.env}`), r.stdout);
   assert.ok(r.stdout.split("\n").includes(`${l.env} has no ALIQUOT_STUDIO_TOKEN, so the studio cannot reach the door. Add one: echo "ALIQUOT_STUDIO_TOKEN=$(openssl rand -hex 32)" >> ${l.env}`), r.stdout);
+  assert.ok(r.stdout.split("\n").includes(`${l.env} has no ALIQUOT_STUDIO_DB_PASSWORD, so the studio cannot sign in to Postgres as its own role. Add one: echo "ALIQUOT_STUDIO_DB_PASSWORD=$(openssl rand -hex 32)" >> ${l.env}`), r.stdout);
 });
 
-test("an existing .env that already holds both surface tokens gets no line about them", () => {
+test("an existing .env that already holds every surface token and the studio's password gets no line about them", () => {
   const l = lab();
-  writeFileSync(l.env, `LABH_PAYLOAD_KEY=keep\nALIQUOT_ACP_TOKEN=${"a".repeat(64)}\nALIQUOT_STUDIO_TOKEN=${"b".repeat(64)}\n`);
+  writeFileSync(l.env, `LABH_PAYLOAD_KEY=keep\nALIQUOT_ACP_TOKEN=${"a".repeat(64)}\nALIQUOT_STUDIO_TOKEN=${"b".repeat(64)}\nALIQUOT_STUDIO_DB_PASSWORD=${"c".repeat(48)}\n`);
   const r = init(l, "", ["--yes", "--sample", "P-00123"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(/ALIQUOT_(ACP|STUDIO)_TOKEN/.test(r.stdout), false, r.stdout);
+  assert.equal(/ALIQUOT_(ACP_TOKEN|STUDIO_TOKEN|STUDIO_DB_PASSWORD)/.test(r.stdout), false, r.stdout);
 });
 
 test("--yes takes the defaults with --pattern and --sample, and a failing sample exits 1 writing nothing", () => {

@@ -96,6 +96,8 @@ const T = {
   boundaries: "boundaries.test.ts: the checked-out sources reach the network, load code, decide egress, brand and stamp only where allowed",
   seal: "seal.test.ts: a sealed process under the permission model refuses every runtime route and still reaches Postgres",
   studioNoKey: "boundaries.test.ts: the studio reads no payload key: nothing its entry loads calls or declares a key reader, and no studio file names the key",
+  studioRole: "studio-role.test.ts: the studio's role cannot read or write core's tables",
+  auditExport: "audit-export.test.ts: a run and the audit stream export as one ordered stream with no payload text",
   contentAddress: "record.test.ts: a content address is the HMAC of the class and the plaintext under an HKDF address subkey, so a hash alone confirms nothing",
   storeRoundTrip: "record.test.ts: payload store round-trips a body, dedupes by content within a class and refuses what the DB placement may not hold",
   storeForged: "record.test.ts: the store refuses a forged label, whether parsed from JSON or built on the prototype",
@@ -124,7 +126,7 @@ const T = {
   gateRefuses: "gate.test.ts: gate admits members with the message class and refuses strangers and review-confidential content",
   gateRaises: "gate.test.ts: classifyText raises to the highest detection and never below the floor",
   initPatterns: "aliquot-init.test.ts: a pattern that matches ordinary text, the empty string or does not compile is refused, and three refusals write nothing",
-  initSecrets: "aliquot-init.test.ts: init on defaults writes a lab.toml that loads and a .env with four fresh secrets, mode 600",
+  initSecrets: "aliquot-init.test.ts: init on defaults writes a lab.toml that loads and a .env with its fresh secrets, mode 600",
   oauthPublicOnly: "agent-backends.test.ts: a subscription's OAuth token (auth_env) fails to parse at any placement but public",
   cliPlacement: "agent-backends.test.ts: the parser refuses lab and institution placements for an agent backend, a login of the wrong kind, and an id an endpoint already has",
   cliOwnToolsOff: "agent-backends.test.ts: the Claude Code argv switches off its own tools and settings and names only the bridge, with the token left to the environment",
@@ -313,9 +315,10 @@ const NIST: readonly Control[] = [
     fixed("met", "The ceiling table is code, so no lab.toml can raise it."),
     [T.egressTable, T.unlistedHost, T.forgedLabel, T.rDefault, T.hostList],
   ),
-  nist("03.01.05", "Least privilege", "The worker runs under Node's permission model; the studio holds no payload key; a hosted agent CLI runs with its own tools off in an OS sandbox that reaches only the bridge and its vendor.", fixed("met", "These are not configurable."), [
+  nist("03.01.05", "Least privilege", "The worker runs under Node's permission model; the studio holds no payload key and signs in to Postgres as its own role, refused every core table; a hosted agent CLI runs with its own tools off in an OS sandbox that reaches only the bridge and its vendor.", fixed("met", "These are not configurable."), [
     T.seal,
     T.studioNoKey,
+    T.studioRole,
     T.cliOwnToolsOff,
     T.cliHome,
   ]),
@@ -334,7 +337,7 @@ const NIST: readonly Control[] = [
     [T.egressTable, T.slackCeiling, T.surfaceCeiling],
   ),
   nist("03.02", `Awareness and training (family)`, "Refusals are shown where they happen, in the chat and the record.", lab("Training is the lab's.")),
-  nist("03.03.01", "Event logging", "Every model call, tool call, refusal, stop and answer is an event in the run's record; publishes and role changes go to the audit stream.", fixed("met", "Logging is not configurable."), [T.verifyChain, T.auditRefusal]),
+  nist("03.03.01", "Event logging", "Every model call, tool call, refusal, stop and answer is an event in the run's record; publishes and role changes go to the audit stream. aliquot audit export streams both, in commit order, as JSON lines for syslog or a SIEM, with no payload text.", fixed("met", "Logging is not configurable."), [T.verifyChain, T.auditRefusal, T.auditExport]),
   nist("03.03.02", "Audit record content", "Each event carries its class label and payload references, and each answer names the hash of the agent version that gave it.", fixed("met", "Every event has the same fields."), [T.recordView]),
   nist("03.03.05", "Audit record review, analysis and reporting", "The runs page filters refused and failed runs; the record page prints for an IRB file and has Only refusals.", fixed("met", "Pages are on in every build."), [T.runsPage, T.recordView]),
   nist(
@@ -348,7 +351,7 @@ const NIST: readonly Control[] = [
     [T.eventsAppendOnly, T.versionsAppendOnly, T.verifyChain, T.auditChain, T.anchorCatches],
   ),
   nist("03.04.01", "Baseline configuration", "lab.toml is the whole deployment description, parsed once at startup and refused whole on any error.", fixed("met", "This pack is computed from the lab.toml it names."), [T.toolsRefused]),
-  nist("03.04.06", "Least functionality", "Eleven built-in tools, each with the hosts it may reach; no contributed tools.", fixed("met", "Tools are fixed per release."), [T.builtinTools, T.toolsRefused]),
+  nist("03.04.06", "Least functionality", "Twelve built-in tools, each with the hosts it may reach; no contributed tools.", fixed("met", "Tools are fixed per release."), [T.builtinTools, T.toolsRefused]),
   nist("03.04.11", "Information location", "Every destination's placement is declared in lab.toml and every data class's reach follows from it.", (c) => ({
     status: "met",
     why: `Payloads are stored at ${c.store.placement} placement; ${hostedDestinations(c).length} destination(s) sit outside the lab and institution.`,

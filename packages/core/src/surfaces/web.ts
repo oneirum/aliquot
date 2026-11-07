@@ -17,6 +17,7 @@
  *   GET  /runs/:id/source?path=, /runs/:id/source.json?path= -> the entry the answer cites, read-only (web-source.ts)
  *   GET  /login?next=, /callback, /logout                    -> sign-on, when lab.toml has [auth] (signon.ts)
  *   POST /studio/<op>  {actor, ...}                          -> the studio's reads and writes of core (studio-door.ts), studio token only
+ *   GET  /healthz?max_age=<seconds>                          -> 200 when Postgres answers and a chat worker beat within max_age (default 30), else 503 (health.ts); no token
  *
  * Pages and JSON go out gzipped when the browser accepts it. Answers, the runs list and records go out no-store, so no
  * browser cache keeps them on the device.
@@ -50,6 +51,7 @@ import type { SurfaceId } from "../dataclass.ts";
 import type { Db } from "../db.ts";
 import { intake, type IntakeDeps, type Surface } from "../frontdoor.ts";
 import type { KbReader } from "../kb.ts";
+import { checkHealth, WORKER_STALE_MS } from "../health.ts";
 import { loadEvents, sendToInbox, type RunId } from "../record.ts";
 import { citedVersions, recordView, recordViewOf, sourceStatus as versionStatus } from "../record-view.ts";
 import { currentProvenance } from "../kb.ts";
@@ -293,6 +295,13 @@ export function createWebHandler(
   return async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      // Before any token check: a load balancer or monitor sends none, and the answer names no run, member or text.
+      if (req.method === "GET" && url.pathname === "/healthz") {
+        const maxAge = Number(url.searchParams.get("max_age") ?? WORKER_STALE_MS / 1000);
+        if (!Number.isFinite(maxAge) || maxAge < 1 || maxAge > 86_400) throw new HttpError(400, "max_age is seconds, from 1 to 86400");
+        const health = await checkHealth(db, maxAge * 1000);
+        return send(req, res, health.ok ? 200 : 503, health, NO_STORE);
+      }
       const caller = surfaceOf(req, tokens);
       const surface = caller.id;
       const studioPath = /^\/studio\/([a-z-]+)$/.exec(url.pathname);

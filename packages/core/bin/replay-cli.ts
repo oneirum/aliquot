@@ -13,7 +13,8 @@ export const REPLAY_USAGE = `  export (--runs <id,...> | --study <id>) --clearan
                       snapshots they pin, and every body at or below --clearance. A body above it is listed by hash
                       and class only. --out must be empty, under a path this process may write: run it as
                       pnpm aliquot:export, which allows writes under bundles/ only. The audit stream records the
-                      export with --as (self-declared) and the OS user who ran it.
+                      export with --as (self-declared) and the OS user who ran it. For a SIEM, audit export
+                      streams event metadata without bodies instead.
   replay <dir> [--reexecute --endpoint <url> [--endpoint-placement lab|institution|approved|zdr|public]]
                       verify every chain in a bundle and print the audit view, from the directory alone: no lab.toml,
                       database or key. --reexecute runs each run again against the OpenAI-compatible model at

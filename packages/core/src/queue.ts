@@ -29,6 +29,7 @@
  */
 
 import type { Db } from "./db.ts";
+import { startHeartbeat } from "./health.ts";
 import type { ThreadKey } from "./record.ts";
 
 export type JobKind = "run" | "publish-check" | "kb-compile" | "eval-batch" | "schedule-tick";
@@ -175,6 +176,8 @@ export interface WorkerOptions {
   readonly pollMs: number;
   readonly signal: AbortSignal;
   readonly log: (line: string) => void;
+  /** How often the worker_heartbeats row is beaten (health.ts); tests shorten it. */
+  readonly heartbeatMs?: number;
 }
 
 export type JobHandler = (job: LeasedJob, lease: { readonly lost: AbortSignal }) => Promise<JobResult>;
@@ -191,6 +194,7 @@ export async function runWorker(workerId: string, db: Db, queue: Queue, handlers
   let wake: (() => void) | null = null;
   listener.on("notification", () => wake?.());
   await listener.query("listen jobs_new");
+  const stopBeating = await startHeartbeat(db, workerId, opts.engine ?? "chat", opts.log, opts.heartbeatMs);
   const idle = () =>
     new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, opts.pollMs);
@@ -256,6 +260,7 @@ export async function runWorker(workerId: string, db: Db, queue: Queue, handlers
       opts.log(`job ${job.id} ${job.kind} ${result}${result.startsWith("retry") ? ` attempt ${attempts} in ${delay}ms` : ""}${applied ? "" : " (lease not held)"}`);
     }
   } finally {
+    await stopBeating();
     listener.release();
   }
 }

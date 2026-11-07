@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { parseConfig } from "./config.ts";
 import { PRESETS } from "./preset.ts";
+import { STUDIO_DB_PASSWORD_ENV } from "./db.ts";
 
 export const OFFERED_PLACEMENTS = {
   lab: "lab hardware: up to D3",
@@ -106,6 +107,7 @@ export const STUDIO_TOKEN_ENV = "ALIQUOT_STUDIO_TOKEN";
 const SURFACE_TOKENS = [
   { env: ACP_TOKEN_ENV, without: "the door takes no token for [surfaces.acp]" },
   { env: STUDIO_TOKEN_ENV, without: "the studio cannot reach the door" },
+  { env: STUDIO_DB_PASSWORD_ENV, without: "the studio cannot sign in to Postgres as its own role" },
 ] as const;
 
 /** lab.toml's [anchor] table, for an init that wrote an anchor key. The log path is relative to lab.toml unless absolute. */
@@ -225,6 +227,8 @@ PAYLOAD_SECRET=${random(32).toString("hex")}
 ${ACP_TOKEN_ENV}=${random(32).toString("hex")}
 # ${STUDIO_TOKEN_ENV} is the studio's token for the door's /studio routes, in place of the payload key.
 ${STUDIO_TOKEN_ENV}=${random(32).toString("hex")}
+# ${STUDIO_DB_PASSWORD_ENV} is the password of aliquot_studio, the studio's own Postgres role; the web door sets it.
+${STUDIO_DB_PASSWORD_ENV}=${random(24).toString("hex")}
 `;
   if (!sandbox) return secrets;
   return `${secrets}

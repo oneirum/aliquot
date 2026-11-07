@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n] | usage [...] | keys ... | retention ...>
+// aliquot: node --permission --allow-fs-read=* --allow-net packages/core/bin/aliquot.ts [--config lab.toml] [--json] <record <run-id> | runs [--limit n] | usage [...] | keys ... | retention ... | audit export [--since s] [--follow]>
 // aliquot init also needs --allow-fs-write for the two files it writes, and for nothing else (pnpm aliquot:init).
 // aliquot export also needs --allow-fs-write for the bundle directory (pnpm aliquot:export allows bundles/* only).
 // aliquot replay needs no lab.toml, database or key: it reads one bundle directory.
@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { configProblem, databaseUrlFromEnv, loadConfig, type LabConfig } from "../src/config.ts";
+import { exportEvents, parseSince } from "../src/audit-export.ts";
 import { connect, type Db } from "../src/db.ts";
 import { askAnswers, defaultAnswers, InitAborted, OFFERED_CAMPUSES, parseCampus, renderEnv, renderLabToml, surfaceTokenHints, type Prompt } from "../src/init.ts";
 import { loadEvents, loadRunsWithCalls, recentRunIds, verifyChain, type RunId } from "../src/record.ts";
@@ -68,6 +69,11 @@ const USAGE = `usage: aliquot [--config lab.toml] [--json] <command>
                       (default: this month so far). --by defaults to project. A call with no rate prints
                       its tokens and "no price", never zero. --by member groups by the member id on each
                       run's trigger.
+  audit export [--since <seq|time>] [--follow] [--poll-ms n]
+                      stream event metadata to syslog or a SIEM as JSON lines: the audit stream and every run
+                      record's ids, classes, hashes, actors and refusals, never payload text. Unlike export, it
+                      writes no bundle and holds no bodies. --since takes the seq of the last line a previous
+                      export printed, or an ISO time; --follow keeps printing new events until stopped.
   ask [--door url] [--user id] [--thread id] [--ceiling D0..D3] [--timeout s] <question... | ->
                       ask a question through the web door, as the chat page does; - reads it from stdin.
                       --json prints one JSON line per event: started, tool, finished, refused
@@ -165,6 +171,9 @@ try {
       to: { type: "string" },
       by: { type: "string", default: "project" },
       csv: { type: "boolean", default: false },
+      since: { type: "string", default: "0" },
+      follow: { type: "boolean", default: false },
+      "poll-ms": { type: "string", default: "1000" },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -221,7 +230,13 @@ const valid =
     (!stewardOnly && (command === "verify" || command === "anchor") && !runId && !values.json) ||
     (command === "keys" && ["status", "rotate", "reencrypt", "env"].includes(runId ?? "") && !values["dry-run"] && !values.apply && (values["as-of"] === undefined || runId === "status")) ||
     (command === "retention" && !runId && values["dry-run"] !== values.apply) ||
-    (!stewardOnly && usageArgs));
+    (!stewardOnly && usageArgs) ||
+    (!stewardOnly && command === "audit" && runId === "export" && !values.json));
+const exportFrom = parseSince(values.since);
+const pollMs = Number(values["poll-ms"]);
+const exportOnly = values.follow || values.since !== "0" || values["poll-ms"] !== "1000";
+if (exportOnly && command !== "audit") usage();
+if (command === "audit" && (!exportFrom || !Number.isInteger(pollMs) || pollMs < 50)) usage();
 if (!valid) usage();
 if (command === "retention" && values.apply && values["as-of"] !== undefined) {
   // A sweep judged at a later date would redact bodies before their floor; only a preview may look ahead.
@@ -447,7 +462,7 @@ async function init(): Promise<number> {
   say(`Wrote ${labPath}`);
   if (writeEnv) {
     writeFileSync(envPath, renderEnv(answers.sandboxImage !== null), { flag: "wx", mode: 0o600 });
-    say(`Wrote ${envPath} with new POSTGRES_PASSWORD, LABH_PAYLOAD_KEY, PAYLOAD_SECRET, ALIQUOT_ACP_TOKEN and ALIQUOT_STUDIO_TOKEN (mode 600). Keep a copy of LABH_PAYLOAD_KEY offline.`);
+    say(`Wrote ${envPath} with new POSTGRES_PASSWORD, LABH_PAYLOAD_KEY, PAYLOAD_SECRET, ALIQUOT_ACP_TOKEN, ALIQUOT_STUDIO_TOKEN and ALIQUOT_STUDIO_DB_PASSWORD (mode 600). Keep a copy of LABH_PAYLOAD_KEY offline.`);
   } else {
     say(`Left ${envPath} as it is. It holds LABH_PAYLOAD_KEY, and a new key would make every stored payload unreadable.`);
     for (const hint of surfaceTokenHints(readFileSync(envPath, "utf8"), envPath)) say(hint);
@@ -647,6 +662,22 @@ async function steward(db: Db): Promise<number> {
 }
 
 const db = connect(url);
+if (command === "audit") {
+  const stop = new AbortController();
+  for (const sig of ["SIGINT", "SIGTERM"] as const) process.once(sig, () => stop.abort());
+  // A closed pipe (| head) ends the export quietly, and a write waiting on drain would wait forever.
+  process.stdout.on("error", () => process.exit(0));
+  const write = (line: string) => (process.stdout.write(`${line}\n`) ? undefined : new Promise<void>((resolve) => process.stdout.once("drain", resolve)));
+  try {
+    await exportEvents(db, exportFrom!, write, { follow: values.follow, pollMs, signal: stop.signal });
+  } catch (err) {
+    process.stderr.write(`${databaseProblem(err, url)}\n`);
+    process.exitCode = 2;
+  } finally {
+    await db.end().catch(() => {});
+  }
+  process.exit();
+}
 if (command === "usage") {
   try {
     process.exitCode = await usageReport();

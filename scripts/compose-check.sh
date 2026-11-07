@@ -5,6 +5,8 @@
 #  2. compiles and publishes the lab0 handbook with the kb command, asks the web door a pre-registered question
 #     and requires an answer citing the expected entry, an intact hash chain and a stored answer that decrypts;
 #     requires the studio container to hold no payload key and to reach the door's /studio routes with its token
+#     requires /healthz to answer 200, the studio's Postgres role to be refused core's tables, and aliquot audit export
+#     to list the run with none of its question text
 #  3. reads a LaTeX PDF and a Word PDF with the kb command through the sandbox container, and requires a scanned
 #     page to fail with the no-OCR message
 #  4. backs up, wipes the database volume, brings the stack up empty, restores, and requires the same run again
@@ -13,7 +15,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 keep="${1:-}"
 work="$(mktemp -d)"
-export COMPOSE_PROJECT_NAME=aliquot-check COMPOSE_FILE="compose.yaml:compose.check.yaml:compose.sandbox.yaml" ALIQUOT_ENV="$work/check.env"
+# ALIQUOT_CHECK_PROJECT names the compose project, so two checks on one machine do not share containers.
+export COMPOSE_PROJECT_NAME="${ALIQUOT_CHECK_PROJECT:-aliquot-check}" COMPOSE_FILE="compose.yaml:compose.check.yaml:compose.sandbox.yaml" ALIQUOT_ENV="$work/check.env"
 export ALIQUOT_CHECK_CONFIG="$work/config"
 compose=(docker compose --env-file "$ALIQUOT_ENV")
 web=http://127.0.0.1:3000
@@ -39,6 +42,7 @@ hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
   echo "LABH_PAYLOAD_KEY=$(hex 32)"
   echo "PAYLOAD_SECRET=$(hex 24)"
   echo "ALIQUOT_STUDIO_TOKEN=$(hex 32)"
+  echo "ALIQUOT_STUDIO_DB_PASSWORD=$(hex 24)"
   echo "LABH_WEB_PORT=${LABH_WEB_PORT:-3000}"
   echo "LABH_STUDIO_PORT=${LABH_STUDIO_PORT:-3001}"
 } > "$ALIQUOT_ENV"
@@ -87,6 +91,25 @@ pass "studio answers /admin/login on its production build"
 studio_op="fetch(process.env.LABH_DOOR_URL + '/studio/test-run', { method: 'POST', headers: { authorization: 'Bearer ' + process.env.ALIQUOT_STUDIO_TOKEN, 'content-type': 'application/json' }, body: JSON.stringify({ actor: { id: 'compose-check', role: 'pi' }, runId: '00000000-0000-4000-8000-000000000000' }) }).then(r => process.exit(r.status === 404 ? 0 : 1), () => process.exit(1))"
 "${compose[@]}" exec -T studio node -e "$studio_op" || fail "the studio cannot reach the door's /studio routes with ALIQUOT_STUDIO_TOKEN"
 pass "the studio container holds no payload key and reaches the door's /studio routes with its token"
+
+health="$("${compose[@]}" exec -T web node -e "fetch('http://127.0.0.1:3000/healthz').then(async r => { console.log(r.status, await r.text()); process.exit(r.status === 200 ? 0 : 1) }, () => process.exit(1))")" || fail "/healthz: $health"
+pass "/healthz: $health"
+
+studio_pw="$(sed -n 's/^ALIQUOT_STUDIO_DB_PASSWORD=//p' "$ALIQUOT_ENV")"
+as_studio=("${compose[@]}" exec -T -e "PGPASSWORD=$studio_pw" postgres psql -h 127.0.0.1 -U aliquot_studio -d labh -tAq -v ON_ERROR_STOP=1)
+users="$("${as_studio[@]}" -c "select count(*) from studio.users" 2>&1)" || fail "the studio role cannot read its own studio.users: $users"
+for table in payloads web_messages run_events; do
+  denied="$("${as_studio[@]}" -c "select 1 from $table limit 1" 2>&1 || true)"
+  [[ "$denied" == *"permission denied for table $table"* ]] || fail "the studio role read $table: $denied"
+done
+pass "the studio signs in as aliquot_studio, reads studio.users ($users rows) and is refused payloads, web_messages and run_events"
+
+exported="$("${compose[@]}" exec -T worker aliquot audit export 2>&1)" || fail "aliquot audit export: $(tail -3 <<<"$exported")"
+[[ "$exported" == *"\"run\":\"$run\""* ]] || fail "aliquot audit export has no line for run $run"
+question="$("${compose[@]}" exec -T web node -e "console.log(JSON.parse(require('fs').readFileSync('/app/fixtures/lab0/questions.json', 'utf8')).inDocument[0].question)")"
+[[ -n "$question" ]] || fail "could not read the lab0 question"
+[[ "$exported" != *"$question"* ]] || fail "aliquot audit export printed the question text"
+pass "aliquot audit export: $(wc -l <<<"$exported" | tr -d ' ') JSON lines, run ${run:0:8} among them, none with the question text"
 
 scripts/backup.sh "$work/backup" >/dev/null || fail "backup"
 pass "backup: $(wc -c < "$work/backup/labh.dump" | tr -d ' ') byte dump and the payload key"

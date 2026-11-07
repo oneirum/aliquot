@@ -23,11 +23,11 @@ This page is for research IT. It covers one Linux machine running the whole stac
 | File | Holds | Rules |
 |---|---|---|
 | `config/lab.toml` | Where the database, the models and the web door are, each with its placement, and the lab's participant id patterns | Mounted read-only into the containers at `/etc/aliquot`. Edit it and run `docker compose up -d` to apply. |
-| `.env` | `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY`, `PAYLOAD_SECRET` and the surface tokens `ALIQUOT_ACP_TOKEN` and `ALIQUOT_STUDIO_TOKEN`, mode 600 | Written once. init never rewrites it, because a new `LABH_PAYLOAD_KEY` makes every stored payload unreadable. |
+| `.env` | `POSTGRES_PASSWORD`, `LABH_PAYLOAD_KEY`, `PAYLOAD_SECRET`, the surface tokens `ALIQUOT_ACP_TOKEN` and `ALIQUOT_STUDIO_TOKEN`, and `ALIQUOT_STUDIO_DB_PASSWORD` for the studio's database role, mode 600 | Written once. init never rewrites it, because a new `LABH_PAYLOAD_KEY` makes every stored payload unreadable. |
 
 The participant id question is the one that matters most. Every message, source and result that matches one of these patterns is restricted (D3) and never reaches a hosted model. init tests the patterns against ids you paste and prints PASS or FAIL for each. It also refuses a pattern that matches ordinary words.
 
-`docker compose up` starts four services. Postgres holds core's tables and the studio's tables (in a `studio` schema). The worker runs agents and compiles knowledge bases. The web door is the members' chat page and record pages, on port 3000. The studio is the authoring app, a production build on port 3001. Only the worker and the web door get `LABH_PAYLOAD_KEY`. The studio holds no payload key: it sends every read and write of core's tables to the web door with `ALIQUOT_STUDIO_TOKEN`, and connects to Postgres itself only for its own tables, as the same database user. Core applies its migrations when the worker or the web door starts. The studio applies its own committed migrations when it starts.
+`docker compose up` starts four services. Postgres holds core's tables and the studio's tables (in a `studio` schema). The worker runs agents and compiles knowledge bases. The web door is the members' chat page and record pages, on port 3000. The studio is the authoring app, a production build on port 3001. Only the worker and the web door get `LABH_PAYLOAD_KEY`. The studio holds no payload key: it sends every read and write of core's tables to the web door with `ALIQUOT_STUDIO_TOKEN`, and connects to Postgres itself only for its own tables, as its own role, `aliquot_studio`, which cannot read core's tables (see **Least privilege**). Core applies its migrations when the worker or the web door starts. The studio applies its own committed migrations when it starts.
 
 Every port is published on `127.0.0.1`. `LABH_BIND` in `.env` changes the address, and the web door refuses any address beyond the machine until `lab.toml` has sign-on (next section). `LABH_WEB_PORT`, `LABH_STUDIO_PORT` and `LABH_PG_PORT` change the ports.
 
@@ -111,6 +111,42 @@ The sandbox needs the worker to reach the Docker socket. `compose.sandbox.yaml` 
 
 Each PDF is read in its own container. The container has no network, a read-only root and uid 65534, with all capabilities dropped. The file goes in through the Docker archive API and is removed with the container. A page that is only an image fails the whole file with a message naming the page, because Aliquot does not do OCR. The studio has no Docker socket, so a PDF source compiles with the kb command, not from the studio.
 
+## Logging and monitoring
+
+**Event log.** `aliquot audit export` prints every audited event as one JSON line: publishes, KB compiles, calls made outside a run, and every event of every run record (model and tool calls, refusals, stops, outcomes). A line holds ids, data classes, hashes, actors, refusal codes and the hash, class and size of each stored payload an event references. It never holds a question, an answer, a source, a changelog or a URL's path, so the log a forwarder ships holds nothing above D0. It is not `aliquot export`, which writes a reviewer bundle of chosen runs with their bodies at a stated clearance; `audit export` streams every event's metadata and no body.
+
+	docker compose exec -T worker aliquot audit export --follow | logger -t aliquot          # to syslog
+	docker compose exec -T worker aliquot audit export --since 1840 >> /var/log/aliquot.jsonl  # resume after line 1840
+
+Each line has a `seq`. Lines come out in commit order, so `--since <seq>` with the last `seq` a forwarder wrote resumes with nothing skipped and nothing repeated, even when two workers write at once. `--since` also takes an ISO time (`--since 2026-11-01T00:00:00Z`). `--follow` keeps printing new events (every second; `--poll-ms` changes it) until it is stopped. Point Vector, Fluent Bit, Filebeat or the campus SIEM's agent at its output as a JSON-lines source.
+
+One line, with every key always present in this order (format version `v` 1):
+
+	{"v":1,"seq":1841,"at":"2026-11-06T22:14:03.118Z","stream":"run","type":"egress.refused","actor":null,
+	 "run":"3f0c...","runSeq":4,"cls":"D0","hash":"9b1e...","prevHash":"07aa...","refs":[],
+	 "refusal":{"code":"class-above-ceiling","payload":"D3","ceiling":"D1"},"detail":{"destination":"model:hosted","payload":"D3"}}
+
+`stream` is `run` for a run record's events and `audit` for the audit stream. `actor` is the member, publisher or worker that acted, when the event names one; a run's later events link to its `run.started` line by `run`. `hash` and `prevHash` are the stored chain, so a SIEM holding the lines can tell when a row was changed after it shipped.
+
+**Health check.** `GET /healthz` on the web door needs no token and answers 200 when Postgres answers and a worker beat within the last 30 seconds, and 503 otherwise:
+
+	{"ok":true,"database":"ok","workerBeatAgeMs":2140,"workerStaleAfterMs":30000}
+
+Every worker writes a heartbeat row every 5 seconds and removes it when it stops, so a stopped worker turns the check to 503 at once and a killed one within 30 seconds. `?max_age=<seconds>` sets the window. Point the campus uptime monitor or the reverse proxy's health check at it. The compose stack's own container health check stays on the chat page, so a stopped worker does not stop the web door.
+
+## Least privilege
+
+The studio is the one service that runs outside the network seal (it is a Next app), so it gets the least. It has no payload key and no Docker socket, it reaches core's state only through the web door's `/studio` routes with its token, and it signs in to Postgres as `aliquot_studio`. That role owns the `studio` schema, where Payload keeps users, agent drafts and KB definitions, and may create schemas in the `labh` database, because Payload's migration runs `CREATE SCHEMA IF NOT EXISTS`. It holds no privilege on any of core's tables: a `select` on `payloads`, `web_messages`, `run_events` or any other is refused (`test/studio-role.test.ts`, and `scripts/compose-check.sh` on the running stack).
+
+Core's migration 0011 creates the role when core's database user is a superuser, as the compose stack's `postgres` user is, and moves the studio's existing tables to it. The web door sets the role's password from `ALIQUOT_STUDIO_DB_PASSWORD` each time it starts, sent to Postgres as a SCRAM-SHA-256 verifier so the password never reaches a server log. When core's user is not a superuser, the migration skips this with a notice, and the database administrator runs, once:
+
+	create role aliquot_studio login password '<ALIQUOT_STUDIO_DB_PASSWORD>';
+	grant connect, create on database labh to aliquot_studio;
+	create schema if not exists studio;
+	alter schema studio owner to aliquot_studio;
+
+and moves each existing table in `studio` with `alter table studio.<name> owner to aliquot_studio`.
+
 ## Backup and restore
 
 	scripts/backup.sh                 # writes backups/<UTC time>/
@@ -185,6 +221,10 @@ A class with no purge is kept. Aliquot refuses to start with a purge shorter tha
 
 Each release is a tag; this builds `aliquot-app:0.5.1`. New core and studio migrations apply on start, each once, under a lock.
 
+An install from before the studio had its own database role adds its password to `.env` before `docker compose up`; until then the studio cannot sign in to Postgres and the web door says so:
+
+	echo "ALIQUOT_STUDIO_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
+
 ## Check an install
 
-`scripts/compose-check.sh` runs the whole path in a separate Compose project, `aliquot-check`, with scripted fake models in place of a real one. It brings the stack up and compiles the synthetic lab0 handbook. It asks a pre-registered question and requires an answer that cites the expected entry, an intact hash chain and a stored answer that decrypts. It reads a LaTeX PDF and a Word PDF in the sandbox and requires a scanned page to fail. Then it backs up, wipes the database volume, restores and requires the same run to verify again. It prints PASS or FAIL for each step and removes its project at the end (`--keep` leaves it running). CI runs it on a clean Ubuntu runner.
+`scripts/compose-check.sh` runs the whole path in a separate Compose project, `aliquot-check` (`ALIQUOT_CHECK_PROJECT` renames it), with scripted fake models in place of a real one. It brings the stack up and compiles the synthetic lab0 handbook. It asks a pre-registered question and requires an answer that cites the expected entry, an intact hash chain and a stored answer that decrypts. It reads a LaTeX PDF and a Word PDF in the sandbox and requires a scanned page to fail. It requires `/healthz` to answer 200, the studio's role to be refused `payloads`, `web_messages` and `run_events`, and `aliquot audit export` to list the run with none of its question text. Then it backs up, wipes the database volume, restores and requires the same run to verify again. It prints PASS or FAIL for each step and removes its project at the end (`--keep` leaves it running). CI runs it on a clean Ubuntu runner.

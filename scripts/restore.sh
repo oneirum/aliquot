@@ -38,6 +38,8 @@ done <<< "$manifest"
 "${compose[@]}" up -d --wait postgres
 "${compose[@]}" stop worker web studio
 "${compose[@]}" exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q -c "drop database if exists labh with (force)" -c "create database labh"
+# The dump names the studio's role as the owner of the studio schema; on a new server nothing has made it yet.
+"${compose[@]}" exec -T postgres psql -U postgres -d labh -v ON_ERROR_STOP=1 -q -c "do \$\$ begin if not exists (select 1 from pg_roles where rolname = 'aliquot_studio') then create role aliquot_studio login; end if; end \$\$"
 "${compose[@]}" exec -T postgres pg_restore -U postgres -d labh --exit-on-error < "$dir/labh.dump"
 "${compose[@]}" up -d --wait worker web studio
 "${compose[@]}" exec -T worker aliquot runs --limit 1000
